@@ -1,0 +1,62 @@
+[package]
+name = "defrag-launcher"
+version = "0.1.0"
+description = "Demo backup + defrag:// launcher for defrag.racing"
+authors = ["defrag.racing"]
+edition = "2021"
+
+[lib]
+name = "defrag_launcher_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-os = "2"
+tauri-plugin-store = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+anyhow = "1"
+
+# Async runtime + HTTP client for talking to defrag.racing.
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "multipart", "json", "stream"] }
+
+# OS keyring — stores the launcher token securely (Windows Credential
+# Manager / macOS Keychain / libsecret on Linux) so we never write it to
+# disk in plaintext.
+keyring = "3"
+
+# Filesystem watcher for auto-upload of new demos. debouncer collapses the
+# bursts of events while Defrag is still writing the file.
+notify = "6"
+notify-debouncer-full = "0.3"
+
+# MD5 of demo files for dedup lookup against the server before uploading.
+md-5 = "0.10"
+hex = "0.4"
+
+# Cross-platform standard-directory lookup (Documents / AppData / etc.) —
+# used for default install paths during engine detection.
+directories = "5"
+walkdir = "2"
+
+# Simple logging for dev + bug reports from users. tauri-plugin-log would
+# be fancier but adds bundle size we don't need yet.
+log = "0.4"
+env_logger = "0.11"
+
+# Windows-only: read Steam install path from the registry so engine
+# auto-detect picks up Steam-installed Quake 3 without the user having to
+# hunt for the path. Wrapped in cfg so Linux/Mac builds skip the dep.
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"

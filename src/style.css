@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #app {
+    height: 100%;
+}
+
+body {
+    @apply bg-neutral-950 text-neutral-100 antialiased;
+    font-family: system-ui, -apple-system, 'Segoe UI', 'Ubuntu', sans-serif;
+}
+
+/* Thin scrollbar so the upload queue doesn't look like a desktop app from
+   2003 on Windows. */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
