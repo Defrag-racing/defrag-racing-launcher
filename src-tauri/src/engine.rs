@@ -72,21 +72,27 @@ pub fn detect() -> Vec<EngineCandidate> {
     }
 
     // $PATH scan — catches Flatpak shims and manual ~/.local/bin installs.
+    // Walk each PATH entry and let `classify` decide, so build-variant
+    // suffixes (oDFe.vk.x64.exe etc) work the same as directory scans.
     if let Ok(path_var) = std::env::var("PATH") {
         let sep = if cfg!(windows) { ';' } else { ':' };
         for dir in path_var.split(sep).map(Path::new) {
-            for exe in ["oDFe", "oDFe.x86_64", "oDFe.exe", "iDFe", "iDFe.exe"] {
-                let p = dir.join(exe);
-                if p.exists() {
-                    if let Some(kind) = classify(exe) {
-                        let canonical = p.canonicalize().unwrap_or(p.clone());
-                        if seen.insert(canonical.clone()) {
-                            out.push(EngineCandidate {
-                                kind,
-                                display_name: humanize(&canonical, kind),
-                                path: canonical,
-                            });
-                        }
+            let Ok(entries) = std::fs::read_dir(dir) else { continue };
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = match name.to_str() {
+                    Some(n) => n,
+                    None => continue,
+                };
+                if let Some(kind) = classify(name_str) {
+                    let p = entry.path();
+                    let canonical = p.canonicalize().unwrap_or(p.clone());
+                    if seen.insert(canonical.clone()) {
+                        out.push(EngineCandidate {
+                            kind,
+                            display_name: humanize(&canonical, kind),
+                            path: canonical,
+                        });
                     }
                 }
             }
@@ -97,17 +103,27 @@ pub fn detect() -> Vec<EngineCandidate> {
 }
 
 fn classify(filename: &str) -> Option<EngineKind> {
+    // Only executables count — skip readmes, configs, screenshot folders, etc.
     let lower = filename.to_ascii_lowercase();
-    // Strip common extensions so Windows/Linux binaries classify the same.
-    let stem = lower
-        .strip_suffix(".exe")
-        .or_else(|| lower.strip_suffix(".x86_64"))
-        .or_else(|| lower.strip_suffix(".app"))
-        .unwrap_or(&lower);
-    match stem {
-        "odfe" => Some(EngineKind::ODfe),
-        "idfe" => Some(EngineKind::IDfe),
-        _ => None,
+    let looks_executable = lower.ends_with(".exe")
+        || lower.ends_with(".x86_64")
+        || lower.ends_with(".x64")
+        || lower.ends_with(".app")
+        || !lower.contains('.'); // bare Unix binary
+
+    if !looks_executable {
+        return None;
+    }
+
+    // Prefix match: oDFe ships as oDFe.x64.exe, oDFe.vk.x64.exe,
+    // oDFe.x86_64 on Linux, etc. Same idea for iDFe. Matching the prefix
+    // catches current + future build variants without a whitelist.
+    if lower.starts_with("odfe") {
+        Some(EngineKind::ODfe)
+    } else if lower.starts_with("idfe") {
+        Some(EngineKind::IDfe)
+    } else {
+        None
     }
 }
 

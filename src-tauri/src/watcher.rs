@@ -94,14 +94,18 @@ pub fn start(
     // frequency and we'd rather miss a 0.5s window than upload a truncated
     // file.
     let tx_fs = tx.clone();
+    // 5s debounce is generous enough to absorb Windows Defender post-
+    // scan + any weird FS buffering after Quake's temp→demos rename,
+    // while still feeling near-instant to the user. The rename itself is
+    // atomic, so this is more about defensive coding than correctness.
     let mut debouncer = new_debouncer(
-        Duration::from_secs(2),
+        Duration::from_secs(5),
         None,
         move |res: DebounceEventResult| {
             if let Ok(events) = res {
                 for ev in events {
                     for path in ev.event.paths {
-                        if is_demo_file(&path) {
+                        if is_demo_file(&path) && !is_in_temp_subfolder(&path) {
                             let _ = tx_fs.send(Message::FileAdded(path));
                         }
                     }
@@ -138,6 +142,19 @@ fn is_demo_file(p: &Path) -> bool {
     }
 }
 
+/// Quake writes the active recording to `<demos_folder>/temp/<file>` and
+/// atomically renames into `<demos_folder>/<file>` on stop-record. So
+/// anything under a `temp` subdirectory is an in-progress demo we must
+/// never upload — it'd be truncated + the server would reject it.
+fn is_in_temp_subfolder(p: &Path) -> bool {
+    p.components().any(|c| {
+        c.as_os_str()
+            .to_str()
+            .map(|s| s.eq_ignore_ascii_case("temp"))
+            .unwrap_or(false)
+    })
+}
+
 async fn worker_loop(
     mut rx: mpsc::UnboundedReceiver<Message>,
     state: Arc<UploadState>,
@@ -162,7 +179,10 @@ async fn worker_loop(
                 if let Ok(entries) = std::fs::read_dir(&folder) {
                     for e in entries.flatten() {
                         let p = e.path();
-                        if p.is_file() && is_demo_file(&p) {
+                        // is_in_temp_subfolder shouldn't match here (we
+                        // read_dir non-recursively) but keep the check
+                        // to be symmetric with the watcher branch.
+                        if p.is_file() && is_demo_file(&p) && !is_in_temp_subfolder(&p) {
                             handle_file(&client, &state, &app, p).await;
                         }
                     }
