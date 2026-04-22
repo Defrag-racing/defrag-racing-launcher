@@ -13,6 +13,7 @@ export const useConfigStore = defineStore('config', () => {
         demos_path: null,
         auto_upload_enabled: false,
         onboarding_completed: false,
+        config_version: null,
     });
     const hasToken = ref(false);
     const autoUploadRunning = ref(false);

@@ -51,6 +51,33 @@ pub fn complete_onboarding() -> Result<(), String> {
     Ok(())
 }
 
+/// Returns the launcher version the persisted config was last written by,
+/// but only when it's different from the current running version. Used by
+/// the UI to show a one-time "Previous install detected — start fresh or
+/// keep settings?" screen on boot.
+#[tauri::command]
+pub fn previous_version() -> Result<Option<String>, String> {
+    let cfg = Config::load().map_err(err_to_string)?;
+    Ok(config::previous_version(&cfg))
+}
+
+/// Stamp the persisted config with the current launcher version. Called
+/// by the UI after the user dismisses the version-mismatch dialog with
+/// "Keep settings".
+#[tauri::command]
+pub fn acknowledge_version() -> Result<(), String> {
+    let cfg = Config::load().map_err(err_to_string)?;
+    cfg.save().map_err(err_to_string)?;
+    Ok(())
+}
+
+/// Version string of the running launcher — frontend uses it to render
+/// "v0.1.3" consistently without hard-coding in Vue files.
+#[tauri::command]
+pub fn app_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
 // ---- Token -----------------------------------------------------------------
 
 #[tauri::command]

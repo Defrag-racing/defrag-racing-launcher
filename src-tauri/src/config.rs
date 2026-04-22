@@ -32,6 +32,13 @@ pub struct Config {
     /// First-run flag so we show onboarding exactly once and skip it
     /// afterwards, even if every individual field is still empty.
     pub onboarding_completed: bool,
+
+    /// Version of the launcher that last wrote this config. Lets us detect
+    /// "you just upgraded / reinstalled" on startup so the user can choose
+    /// to start fresh or keep their settings without manually running
+    /// Reset. None = config written before we added this field (pre-0.1.3).
+    #[serde(default)]
+    pub config_version: Option<String>,
 }
 
 impl Config {
@@ -55,13 +62,31 @@ impl Config {
 
     pub fn save(&self) -> Result<()> {
         let path = Self::path()?;
-        let raw = serde_json::to_string_pretty(self)?;
-        // Write atomically via tempfile-rename so a crash mid-write doesn't
-        // truncate the config to zero bytes.
+        // Stamp the current launcher version so the next boot can tell
+        // whether the config was last touched by this version or an older
+        // one — drives the "Previous install detected" dialog.
+        let mut to_write = self.clone();
+        to_write.config_version = Some(env!("CARGO_PKG_VERSION").to_string());
+        let raw = serde_json::to_string_pretty(&to_write)?;
         let tmp = path.with_extension("json.tmp");
         fs::write(&tmp, raw).with_context(|| format!("write {:?}", tmp))?;
         fs::rename(&tmp, &path).with_context(|| format!("rename to {:?}", path))?;
         Ok(())
+    }
+}
+
+/// Returns Some(previous_version) if the persisted config was written by
+/// a launcher version different from the one running now, None otherwise.
+///
+/// Interprets a missing `config_version` field as "pre-0.1.3 config"
+/// (which is when the field was added) so the upgrade prompt fires once
+/// after users upgrade into a version that knows about the field.
+pub fn previous_version(cfg: &Config) -> Option<String> {
+    let current = env!("CARGO_PKG_VERSION");
+    match &cfg.config_version {
+        Some(v) if v != current => Some(v.clone()),
+        None if cfg.onboarding_completed => Some("pre-0.1.3".to_string()),
+        _ => None,
     }
 }
 

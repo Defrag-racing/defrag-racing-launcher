@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleanup fragment for the Windows MSI installer: removes the launcher's
+  %APPDATA%\defrag\launcher\ directory (config + token) on uninstall.
+
+  Tauri's default MSI bundle only removes the Program Files install dir,
+  leaving user data behind (standard Windows convention). For this app
+  that's a footgun: "uninstalled, reinstalled, still sees my old token"
+  is the single most common confused-user symptom from v0.1.x testing.
+
+  Path structure we clean (matches `directories` crate's ProjectDirs::
+  from("racing", "defrag", "launcher").config_dir()):
+    %APPDATA%\defrag\launcher\config\       ← files + this dir removed
+    %APPDATA%\defrag\launcher\              ← this dir removed
+    %APPDATA%\defrag\                       ← intentionally NOT removed
+                                              (reserved for future
+                                              defrag.racing products)
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <DirectoryRef Id="TARGETDIR">
+      <Directory Id="AppDataFolder">
+        <Directory Id="DefragOrgDir" Name="defrag">
+          <Directory Id="LauncherAppDir" Name="launcher">
+            <!-- launcher\ dir itself — becomes empty once config\ is
+                 removed below, then this Component wipes the empty dir. -->
+            <Component Id="CleanupLauncherDir"
+                       Guid="C4B9F2E3-5D8F-4C9B-9F4C-2B4C6D8E0F3B">
+              <RegistryValue Root="HKCU"
+                             Key="Software\DefragRacing\Launcher\Cleanup"
+                             Name="launcher_dir"
+                             Type="integer"
+                             Value="1"
+                             KeyPath="yes" />
+              <RemoveFolder Id="RemoveLauncherDir" On="uninstall" />
+            </Component>
+            <Directory Id="LauncherConfigDir" Name="config">
+              <!-- Files first (RemoveFile with Name="*"), then the empty
+                   dir. WiX won't recurse into subdirs so if we ever add
+                   one under config\ we must register + remove it too. -->
+              <Component Id="CleanupConfig"
+                         Guid="B3A8F1D2-4C7E-4B9A-8F3B-1A3B5C7D9E2A">
+                <RegistryValue Root="HKCU"
+                               Key="Software\DefragRacing\Launcher\Cleanup"
+                               Name="config_dir"
+                               Type="integer"
+                               Value="1"
+                               KeyPath="yes" />
+                <RemoveFile Id="RemoveAllConfigFiles" Name="*" On="uninstall" />
+                <RemoveFolder Id="RemoveConfigDir" On="uninstall" />
+              </Component>
+            </Directory>
+          </Directory>
+        </Directory>
+      </Directory>
+    </DirectoryRef>
+
+    <ComponentGroup Id="LauncherCleanup">
+      <ComponentRef Id="CleanupLauncherDir" />
+      <ComponentRef Id="CleanupConfig" />
+    </ComponentGroup>
+  </Fragment>
+</Wix>

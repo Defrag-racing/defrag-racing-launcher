@@ -1,6 +1,7 @@
 <script setup lang="ts">
     import { onMounted } from 'vue';
     import { useRouter } from 'vue-router';
+    import { tauri } from './lib/tauri';
     import { useConfigStore } from './stores/config';
 
     const router = useRouter();
@@ -8,10 +9,24 @@
 
     onMounted(async () => {
         await config.refresh();
-        // First run always takes the user through the onboarding wizard
-        // before the real UI opens. They can re-run it later from settings.
+
+        // Upgrade-aware boot flow:
+        //  1. Fresh install (no onboarding) → onboarding wizard
+        //  2. Config left behind by an older launcher → mismatch screen
+        //     (user picks keep-or-wipe before the dashboard)
+        //  3. Normal same-version boot → dashboard (via the default route)
         if (! config.config.onboarding_completed) {
             router.replace({ name: 'onboarding' });
+            return;
+        }
+
+        const previous = await tauri.previousVersion();
+        if (previous) {
+            const current = await tauri.appVersion();
+            router.replace({
+                name: 'version-mismatch',
+                query: { previous, current },
+            });
         }
     });
 </script>

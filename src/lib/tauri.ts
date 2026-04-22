@@ -9,6 +9,7 @@ export interface LauncherConfig {
     demos_path: string | null;
     auto_upload_enabled: boolean;
     onboarding_completed: boolean;
+    config_version: string | null;
 }
 
 export interface EngineCandidate {
@@ -41,6 +42,9 @@ export const tauri = {
     getConfig: () => invoke<LauncherConfig>('get_config'),
     saveConfig: (cfg: LauncherConfig) => invoke<void>('save_config', { cfg }),
     completeOnboarding: () => invoke<void>('complete_onboarding'),
+    previousVersion: () => invoke<string | null>('previous_version'),
+    acknowledgeVersion: () => invoke<void>('acknowledge_version'),
+    appVersion: () => invoke<string>('app_version'),
 
     saveToken: (token: string) => invoke<void>('save_token', { token }),
     hasToken: () => invoke<boolean>('has_token'),

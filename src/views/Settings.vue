@@ -15,8 +15,11 @@
     const tokenError = ref<string | null>(null);
     const showTokenForm = ref(false);
 
+    const appVersion = ref('');
+
     onMounted(async () => {
         engines.value = await tauri.detectEngines();
+        appVersion.value = await tauri.appVersion();
     });
 
     const pickEngine = async () => {
@@ -164,7 +167,7 @@
             </section>
 
             <div class="text-xs text-neutral-600 text-center pt-4">
-                Defrag Racing Launcher v{{ '0.1.2' }}
+                Defrag Racing Launcher v{{ appVersion || '…' }}
             </div>
         </div>
     </div>
