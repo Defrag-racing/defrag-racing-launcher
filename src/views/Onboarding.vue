@@ -235,6 +235,19 @@
                         <button class="text-xs text-neutral-500 hover:text-neutral-300" @click="rescanEngines">Rescan</button>
                     </div>
 
+                    <div v-if="selectedEngine" class="space-y-2 pt-2">
+                        <div class="text-xs uppercase tracking-wider text-neutral-500">Selected engine</div>
+                        <div class="flex items-center gap-2 bg-emerald-500/5 border border-emerald-500/30 rounded p-3">
+                            <svg class="w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                            </svg>
+                            <div class="flex-1 text-sm text-neutral-200 break-all min-w-0">
+                                {{ selectedEngine }}
+                            </div>
+                            <button class="btn-ghost flex-shrink-0" @click="selectedEngine = null">Change</button>
+                        </div>
+                    </div>
+
                     <div v-if="selectedEngine || demosPath" class="space-y-2 pt-2">
                         <div class="text-xs uppercase tracking-wider text-neutral-500">Demos folder</div>
                         <div class="flex items-center gap-2 bg-black/30 border border-white/10 rounded p-3">

@@ -50,6 +50,10 @@ hex = "0.4"
 directories = "5"
 walkdir = "2"
 
+# Base64 obfuscation for the on-disk token file. Not real encryption —
+# just keeps the token from appearing verbatim in casual filesystem scans.
+base64 = "0.22"
+
 # Simple logging for dev + bug reports from users. tauri-plugin-log would
 # be fancier but adds bundle size we don't need yet.
 log = "0.4"

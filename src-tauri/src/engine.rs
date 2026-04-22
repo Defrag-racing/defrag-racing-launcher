@@ -155,11 +155,11 @@ fn candidate_roots() -> Vec<PathBuf> {
 
     #[cfg(target_os = "windows")]
     {
+        // Standard per-user locations first — fastest and catches 90% of installs.
         for var in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
             if let Ok(v) = std::env::var(var) {
                 let p = PathBuf::from(v);
                 roots.push(p.clone());
-                // Steam's canonical location under Program Files (x86).
                 if var == "ProgramFiles(x86)" {
                     roots.push(p.join("Steam").join("steamapps").join("common"));
                 }
@@ -169,11 +169,51 @@ fn candidate_roots() -> Vec<PathBuf> {
             roots.push(h.join("Games"));
             roots.push(h.join("Documents").join("Games"));
         }
-        // Steam install path from the registry — covers users who installed
-        // Steam somewhere other than Program Files (x86), which is common
-        // on systems with small C: drives.
+
+        // Cross-drive scan — lots of people put games on a dedicated SSD
+        // (D:, E:, …) using folder names like `Games`, `GamesLibraries`,
+        // `SteamLibrary`. We walk every drive letter that exists and test
+        // the well-known library folder names. Walkdir's max_depth caps
+        // each root so unrelated huge drives don't stall the scan.
+        for drive_letter in b'A'..=b'Z' {
+            let drive = format!("{}:\\", drive_letter as char);
+            let drive_path = PathBuf::from(&drive);
+            if !drive_path.exists() {
+                continue;
+            }
+            for subdir in [
+                "Games",
+                "GamesLibraries",
+                "GameLibrary",
+                "SteamLibrary",
+                "Programs",
+                "quake",
+                "Quake",
+                "Quake3",
+            ] {
+                let candidate = drive_path.join(subdir);
+                if candidate.exists() {
+                    roots.push(candidate);
+                }
+            }
+            // Steam on this drive? Covers users who moved Steam itself off C:.
+            let steam_on_drive = drive_path.join("Steam").join("steamapps").join("common");
+            if steam_on_drive.exists() {
+                roots.push(steam_on_drive);
+            }
+        }
+
+        // Steam's canonical install path from the registry.
         if let Some(steam) = steam_install_path_windows() {
             roots.push(steam.join("steamapps").join("common"));
+            // All Steam libraries (including on other drives) live in
+            // <steam_install>/steamapps/libraryfolders.vdf. Parse it so
+            // we find games regardless of which disk the user put them on.
+            roots.extend(
+                parse_steam_library_folders(&steam.join("steamapps").join("libraryfolders.vdf"))
+                    .into_iter()
+                    .map(|p| p.join("steamapps").join("common")),
+            );
         }
     }
 
@@ -193,6 +233,30 @@ fn candidate_roots() -> Vec<PathBuf> {
     }
 
     roots
+}
+
+/// Parse Steam's libraryfolders.vdf to find every Steam library path.
+/// The file is a small custom KV format — regex-grade parsing is fine,
+/// we only need the "path" values. Lines that don't match are skipped.
+#[cfg(target_os = "windows")]
+fn parse_steam_library_folders(vdf: &Path) -> Vec<PathBuf> {
+    let Ok(text) = std::fs::read_to_string(vdf) else { return Vec::new() };
+    let mut paths = Vec::new();
+    for line in text.lines() {
+        // Lines look like:    "path"    "D:\\SteamLibrary"
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("\"path\"") {
+            if let Some(start) = rest.find('"') {
+                let tail = &rest[start + 1..];
+                if let Some(end) = tail.find('"') {
+                    // VDF escapes backslashes — \\ → \
+                    let raw = tail[..end].replace("\\\\", "\\");
+                    paths.push(PathBuf::from(raw));
+                }
+            }
+        }
+    }
+    paths
 }
 
 #[cfg(target_os = "windows")]

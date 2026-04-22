@@ -61,6 +61,13 @@
     };
 
     const runOnboarding = () => router.push({ name: 'onboarding' });
+
+    const resetLauncher = async () => {
+        if (! confirm('Clear all launcher settings and the stored token? This cannot be undone. Demos on your PC are not affected.')) return;
+        await tauri.resetLauncher();
+        await config.refresh();
+        router.replace({ name: 'onboarding' });
+    };
 </script>
 
 <template>
@@ -145,8 +152,19 @@
                 <button class="btn-ghost" @click="runOnboarding">Run</button>
             </section>
 
+            <!-- Reset — wipes every setting and token so the user can start
+                 fresh without uninstalling. Lives in a red-tinted card so
+                 it reads as destructive at a glance. -->
+            <section class="bg-red-500/5 border border-red-500/30 rounded-lg p-4 flex items-center justify-between">
+                <div>
+                    <div class="font-semibold text-red-300">Reset launcher</div>
+                    <div class="text-xs text-neutral-500 mt-0.5">Clear all settings and the stored token. Demos on your PC are not touched.</div>
+                </div>
+                <button class="btn-danger" @click="resetLauncher">Reset</button>
+            </section>
+
             <div class="text-xs text-neutral-600 text-center pt-4">
-                Defrag Racing Launcher v{{ '0.1.0' }}
+                Defrag Racing Launcher v{{ '0.1.1' }}
             </div>
         </div>
     </div>

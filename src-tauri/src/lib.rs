@@ -30,6 +30,7 @@ pub fn run() {
             commands::save_token,
             commands::has_token,
             commands::clear_token,
+            commands::reset_launcher,
             commands::detect_engines,
             commands::guess_demos_path,
             commands::start_auto_upload,

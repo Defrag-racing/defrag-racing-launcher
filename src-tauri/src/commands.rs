@@ -68,6 +68,20 @@ pub fn clear_token() -> Result<(), String> {
     token::clear().map_err(err_to_string)
 }
 
+/// Wipe every bit of persistent state the launcher owns: token, config,
+/// and the running watcher. Used when the user clicks "Reset launcher" in
+/// settings so they can start over without uninstalling. Does NOT touch
+/// the demos folder itself.
+#[tauri::command]
+pub fn reset_launcher(state: State<'_, AppState>) -> Result<(), String> {
+    *state.watcher.lock().unwrap() = None;
+    let _ = token::clear();
+    if let Ok(path) = Config::path() {
+        let _ = std::fs::remove_file(path);
+    }
+    Ok(())
+}
+
 // ---- Engine detection ------------------------------------------------------
 
 #[tauri::command]

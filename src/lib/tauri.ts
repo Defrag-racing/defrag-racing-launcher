@@ -45,6 +45,7 @@ export const tauri = {
     saveToken: (token: string) => invoke<void>('save_token', { token }),
     hasToken: () => invoke<boolean>('has_token'),
     clearToken: () => invoke<void>('clear_token'),
+    resetLauncher: () => invoke<void>('reset_launcher'),
 
     detectEngines: () => invoke<EngineCandidate[]>('detect_engines'),
     guessDemosPath: (enginePath: string) => invoke<string | null>('guess_demos_path', { enginePath }),
