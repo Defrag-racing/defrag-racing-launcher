@@ -164,7 +164,7 @@
             </section>
 
             <div class="text-xs text-neutral-600 text-center pt-4">
-                Defrag Racing Launcher v{{ '0.1.1' }}
+                Defrag Racing Launcher v{{ '0.1.2' }}
             </div>
         </div>
     </div>
