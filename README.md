@@ -8,7 +8,7 @@ Built with [Tauri 2](https://tauri.app), Vue 3, and Rust.
 
 - **Auto demo backup** — watches your `defrag/demos/` folder and uploads new demos to defrag.racing. Deduplicated by MD5, so re-scanning is free. Opt-in; requires a personal access token from the website.
 - **Engine auto-detect** — scans the usual install paths on Windows, macOS and Linux (including Steam, Flatpak) for oDFe and iDFe. Never picks for you — always shows a list and lets you choose.
-- **`defrag://` protocol handler** — coming in v0.2; launches map links from the website in your selected engine.
+- **`defrag://` protocol handler** — clicking a server link on defrag.racing (`defrag://1.2.3.4:27960`) opens the configured engine with `+connect 1.2.3.4:27960` and brings the connect prompt up immediately.
 
 The auth token is stored in the OS keyring (Windows Credential Manager / macOS Keychain / libsecret). No secrets on disk.
 

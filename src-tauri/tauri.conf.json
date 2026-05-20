@@ -52,6 +52,15 @@
       "desktop": {
         "schemes": ["defrag"]
       }
+    },
+    "updater": {
+      "active": true,
+      "dialog": false,
+      "endpoints": [
+        "https://defrag.racing/launcher/latest.json",
+        "https://github.com/Defrag-racing/defrag-racing-launcher/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFENkQ0NUYyMTdBM0I3Q0MKUldUTXQ2TVg4a1Z0cmQ3a01kMHdZK2ZjM3UxNE9FNVNTcDFaVTBCaFBRUDQ5dDB5RTdPekg0QUgK"
     }
   }
 }

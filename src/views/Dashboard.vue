@@ -2,7 +2,9 @@
     import { onMounted, onUnmounted, ref } from 'vue';
     import { useRouter } from 'vue-router';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+    import type { Update } from '@tauri-apps/plugin-updater';
     import { tauri, type UploadStateSnapshot, type PendingUpload } from '../lib/tauri';
+    import { checkForUpdate, runUpdate, type UpdateState } from '../lib/updater';
     import { useConfigStore } from '../stores/config';
 
     const router = useRouter();
@@ -22,6 +24,16 @@
     const deepLink = ref<DeepLinkResult | null>(null);
     let deepLinkTimer: number | undefined;
 
+    // Auto-update banner. Quiet on success (just shows "up to date" for
+    // a beat); persistent on "Update available" until the user installs.
+    //
+    // We can't store the Update object inside `ref` — its private field
+    // doesn't survive Vue's reactive proxy and breaks the TS type. Keep
+    // the class instance in a plain `let` and have the ref carry only
+    // serializable data needed for the template.
+    const updateState = ref<UpdateState>({ kind: 'idle' });
+    let pendingUpdate: Update | null = null;
+
     let unlisten: UnlistenFn | null = null;
     let unlistenDeepLink: UnlistenFn | null = null;
 
@@ -32,13 +44,30 @@
         });
         unlistenDeepLink = await listen<DeepLinkResult>('deep-link://result', (ev) => {
             deepLink.value = ev.payload;
-            // Success toasts auto-dismiss; errors stick around so the
-            // user can read what went wrong.
             if (ev.payload.ok) {
                 window.clearTimeout(deepLinkTimer);
                 deepLinkTimer = window.setTimeout(() => { deepLink.value = null; }, 4000);
             }
         });
+
+        // Update check only fires if the user has it enabled. We treat
+        // a network failure as "skip silently" rather than a red error
+        // banner — most users opening the launcher won't care that the
+        // updater couldn't reach defrag.racing right now.
+        if (config.config.auto_update_enabled) {
+            try {
+                updateState.value = { kind: 'checking' };
+                const update = await checkForUpdate();
+                if (update) {
+                    pendingUpdate = update;
+                    updateState.value = { kind: 'available', version: update.version };
+                } else {
+                    updateState.value = { kind: 'idle' };
+                }
+            } catch {
+                updateState.value = { kind: 'idle' };
+            }
+        }
     });
 
     onUnmounted(() => {
@@ -50,6 +79,11 @@
     const dismissDeepLink = () => {
         deepLink.value = null;
         window.clearTimeout(deepLinkTimer);
+    };
+
+    const installUpdate = async () => {
+        if (!pendingUpdate) return;
+        await runUpdate(pendingUpdate, (s) => { updateState.value = s; });
     };
 
     const toggle = async () => {
@@ -137,6 +171,34 @@
                 Couldn't open <code class="font-mono">{{ deepLink.url }}</code> — {{ deepLink.error }}
             </span>
             <button class="ml-auto text-neutral-400 hover:text-neutral-200" @click="dismissDeepLink">×</button>
+        </div>
+
+        <div
+            v-if="updateState.kind === 'available'"
+            class="px-5 py-2 border-b border-brand-500/20 bg-brand-500/10 text-xs text-brand-300 flex items-center gap-3"
+        >
+            <span>Update <strong>v{{ updateState.version }}</strong> is available.</span>
+            <button class="ml-auto px-2 py-0.5 rounded bg-brand-500/20 hover:bg-brand-500/30 font-semibold" @click="installUpdate">
+                Install &amp; restart
+            </button>
+        </div>
+        <div
+            v-else-if="updateState.kind === 'downloading'"
+            class="px-5 py-2 border-b border-brand-500/20 bg-brand-500/10 text-xs text-brand-300"
+        >
+            Downloading update… {{ updateState.percent }}%
+        </div>
+        <div
+            v-else-if="updateState.kind === 'installing'"
+            class="px-5 py-2 border-b border-brand-500/20 bg-brand-500/10 text-xs text-brand-300"
+        >
+            Installing… the launcher will restart in a moment.
+        </div>
+        <div
+            v-else-if="updateState.kind === 'error'"
+            class="px-5 py-2 border-b border-red-500/20 bg-red-500/10 text-xs text-red-300"
+        >
+            Update failed: {{ updateState.message }}
         </div>
 
         <!-- body -->

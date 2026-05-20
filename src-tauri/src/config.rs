@@ -15,7 +15,9 @@ use std::path::{Path, PathBuf};
 
 pub const DEFAULT_API_URL: &str = "https://defrag.racing";
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+fn default_true() -> bool { true }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// Absolute path to the chosen engine binary (oDFe.x86_64, iDFe.exe, ...).
     /// None until the user picks one from the detected list or browses manually.
@@ -29,6 +31,13 @@ pub struct Config {
     /// launcher is harmless until the user opts in + provides a token.
     pub auto_upload_enabled: bool,
 
+    /// Auto-update opt-in. On by default — security fixes need to reach
+    /// users without them having to remember to check Releases. Users
+    /// can flip it off in Settings if they want manual control over
+    /// when binaries change.
+    #[serde(default = "default_true")]
+    pub auto_update_enabled: bool,
+
     /// First-run flag so we show onboarding exactly once and skip it
     /// afterwards, even if every individual field is still empty.
     pub onboarding_completed: bool,
@@ -39,6 +48,22 @@ pub struct Config {
     /// Reset. None = config written before we added this field (pre-0.1.3).
     #[serde(default)]
     pub config_version: Option<String>,
+}
+
+impl Default for Config {
+    // Manual impl rather than #[derive(Default)] because auto_update_enabled
+    // needs to default to true. Everything else uses Default::default() for
+    // its type — Option/bool/etc — which the field declarations document.
+    fn default() -> Self {
+        Self {
+            engine_path: None,
+            demos_path: None,
+            auto_upload_enabled: false,
+            auto_update_enabled: true,
+            onboarding_completed: false,
+            config_version: None,
+        }
+    }
 }
 
 impl Config {

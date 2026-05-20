@@ -8,6 +8,7 @@ export interface LauncherConfig {
     engine_path: string | null;
     demos_path: string | null;
     auto_upload_enabled: boolean;
+    auto_update_enabled: boolean;
     onboarding_completed: boolean;
     config_version: string | null;
 }

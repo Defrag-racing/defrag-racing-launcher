@@ -30,6 +30,17 @@ tauri-plugin-store = "2"
 # without it every click would spawn a second launcher window.
 tauri-plugin-deep-link = "2"
 
+# Auto-update: pulls signed `latest.json` from defrag.racing (primary)
+# or GitHub Releases (fallback) and verifies the signature against the
+# embedded pubkey before installing. Private signing key lives in GH
+# Actions secrets — see release.yml.
+tauri-plugin-updater = "2"
+
+# process: gives the frontend a `relaunch()` JS call for use after an
+# update finishes installing. Without this, the only way to restart
+# the app post-install is to close-and-reopen manually.
+tauri-plugin-process = "2"
+
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"

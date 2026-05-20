@@ -12,6 +12,7 @@ export const useConfigStore = defineStore('config', () => {
         engine_path: null,
         demos_path: null,
         auto_upload_enabled: false,
+        auto_update_enabled: true,
         onboarding_completed: false,
         config_version: null,
     });

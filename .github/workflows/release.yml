@@ -77,6 +77,13 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signing creds for tauri-plugin-updater. tauri-action passes
+          # these to the bundler which signs the platform artifact and
+          # emits `latest.json` alongside it. Keep both secrets set — a
+          # missing password makes the bundler skip signing silently
+          # and the resulting release won't auto-update for anyone.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
           releaseName: 'Defrag Racing Launcher ${{ github.event.inputs.tag || github.ref_name }}'

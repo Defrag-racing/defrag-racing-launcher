@@ -146,6 +146,27 @@
                 <p v-if="tokenError" class="text-xs text-red-400">{{ tokenError }}</p>
             </section>
 
+            <!-- Auto-update -->
+            <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 flex items-center justify-between gap-3">
+                <div>
+                    <div class="font-semibold">Automatic updates</div>
+                    <div class="text-xs text-neutral-500 mt-0.5">
+                        Checks <code class="bg-black/40 px-1 rounded">defrag.racing</code> and GitHub
+                        on startup for a newer signed release. Off = check Releases manually.
+                    </div>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                    <input
+                        type="checkbox"
+                        class="sr-only peer"
+                        :checked="config.config.auto_update_enabled"
+                        @change="config.save({ auto_update_enabled: ($event.target as HTMLInputElement).checked })"
+                    />
+                    <div class="w-10 h-5 bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors"></div>
+                    <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+                </label>
+            </section>
+
             <!-- Run setup again -->
             <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 flex items-center justify-between">
                 <div>
