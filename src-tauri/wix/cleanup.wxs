@@ -16,42 +16,47 @@
                                               (reserved for future
                                               defrag.racing products)
 
-  AppDataFolder is a WiX-defined system folder — we reference it via
-  DirectoryRef, never redeclare it (doing so is what blew up the v0.1.3
-  light.exe build).
+  AppDataFolder is a Windows Installer system property but tauri-bundler's
+  generated main.wxs doesn't declare it, so we must — otherwise light.exe
+  bails with LGHT0094 "Unresolved reference to symbol Directory:AppDataFolder"
+  (which is what killed v0.1.4). We declare it under TARGETDIR here.
+  DirectoryRef'ing TARGETDIR is safe: main.wxs also references TARGETDIR
+  via the same mechanism so WiX merges both contributions without colliding.
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Fragment>
-    <DirectoryRef Id="AppDataFolder">
-      <Directory Id="DefragOrgDir" Name="defrag">
-        <Directory Id="LauncherAppDir" Name="launcher">
-          <!-- launcher\ dir itself — becomes empty once config\ is
-               removed below, then this Component wipes the empty dir. -->
-          <Component Id="CleanupLauncherDir"
-                     Guid="C4B9F2E3-5D8F-4C9B-9F4C-2B4C6D8E0F3B">
-            <RegistryValue Root="HKCU"
-                           Key="Software\DefragRacing\Launcher\Cleanup"
-                           Name="launcher_dir"
-                           Type="integer"
-                           Value="1"
-                           KeyPath="yes" />
-            <RemoveFolder Id="RemoveLauncherDir" On="uninstall" />
-          </Component>
-          <Directory Id="LauncherConfigDir" Name="config">
-            <!-- Files first (RemoveFile with Name="*"), then the empty
-                 dir. WiX won't recurse into subdirs so if we ever add
-                 one under config\ we must register + remove it too. -->
-            <Component Id="CleanupConfig"
-                       Guid="B3A8F1D2-4C7E-4B9A-8F3B-1A3B5C7D9E2A">
+    <DirectoryRef Id="TARGETDIR">
+      <Directory Id="AppDataFolder" Name="AppDataFolder">
+        <Directory Id="DefragOrgDir" Name="defrag">
+          <Directory Id="LauncherAppDir" Name="launcher">
+            <!-- launcher\ dir itself — becomes empty once config\ is
+                 removed below, then this Component wipes the empty dir. -->
+            <Component Id="CleanupLauncherDir"
+                       Guid="C4B9F2E3-5D8F-4C9B-9F4C-2B4C6D8E0F3B">
               <RegistryValue Root="HKCU"
                              Key="Software\DefragRacing\Launcher\Cleanup"
-                             Name="config_dir"
+                             Name="launcher_dir"
                              Type="integer"
                              Value="1"
                              KeyPath="yes" />
-              <RemoveFile Id="RemoveAllConfigFiles" Name="*" On="uninstall" />
-              <RemoveFolder Id="RemoveConfigDir" On="uninstall" />
+              <RemoveFolder Id="RemoveLauncherDir" On="uninstall" />
             </Component>
+            <Directory Id="LauncherConfigDir" Name="config">
+              <!-- Files first (RemoveFile with Name="*"), then the empty
+                   dir. WiX won't recurse into subdirs so if we ever add
+                   one under config\ we must register + remove it too. -->
+              <Component Id="CleanupConfig"
+                         Guid="B3A8F1D2-4C7E-4B9A-8F3B-1A3B5C7D9E2A">
+                <RegistryValue Root="HKCU"
+                               Key="Software\DefragRacing\Launcher\Cleanup"
+                               Name="config_dir"
+                               Type="integer"
+                               Value="1"
+                               KeyPath="yes" />
+                <RemoveFile Id="RemoveAllConfigFiles" Name="*" On="uninstall" />
+                <RemoveFolder Id="RemoveConfigDir" On="uninstall" />
+              </Component>
+            </Directory>
           </Directory>
         </Directory>
       </Directory>
