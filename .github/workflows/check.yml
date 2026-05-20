@@ -1,7 +1,15 @@
-# Fast sanity check on every PR and push to main: cargo check + vue-tsc +
-# vite build on Linux only. Catches a broken build before anyone tries to
-# publish a release. Deliberately a single-platform smoke test — cross-
-# platform issues get caught by `release.yml` when we tag.
+# Two jobs:
+#   - `check`: fast single-platform smoke test (Linux cargo check + vite
+#     build). Runs on PRs and main pushes so a broken Rust/TS change is
+#     caught in seconds.
+#   - `windows-msi-preview`: builds the actual Windows MSI on every main
+#     push and uploads it as an artifact. Lets us iterate on WiX / bundle
+#     config without cutting a release tag every attempt. Diagnostic
+#     step surfaces light.exe stderr when MSI bundling fails (tauri-
+#     action swallows it otherwise). Skipped on PRs to keep PR CI fast.
+#
+# Cross-platform release builds + actual GitHub Release publication still
+# live in release.yml (tag-triggered).
 
 name: Check
 
@@ -38,3 +46,80 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: cargo check --manifest-path src-tauri/Cargo.toml
+
+  windows-msi-preview:
+    # Main pushes only — PR builds skip the ~12-minute Windows compile.
+    if: github.event_name == 'push'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - run: npm ci
+
+      - name: Build MSI
+        run: npm run tauri build
+
+      - name: Upload MSI artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: defrag-launcher-msi-${{ github.sha }}
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: warn
+          retention-days: 14
+
+      # Same diagnostic as release.yml: tauri-action / npm run tauri build
+      # swallow light.exe stderr. Re-run candle + light manually with -v
+      # so the real WiX error shows up in the log.
+      - name: Diagnose WiX light.exe failure
+        if: failure()
+        shell: pwsh
+        working-directory: src-tauri
+        continue-on-error: true
+        run: |
+          $wix = "$env:LOCALAPPDATA\tauri\WixTools314"
+          Write-Host "=== WiX tools: $wix ==="
+          if (-not (Test-Path $wix)) {
+            Write-Host "WiX tools dir not found."
+            exit 0
+          }
+          Get-ChildItem $wix | Select-Object Name | Format-Table -AutoSize | Out-String | Write-Host
+
+          $main = "target\release\wix\x64\main.wxs"
+          $frag = "wix\cleanup.wxs"
+          $outDir = "target\release\wix\debug"
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
+          Write-Host "=== main.wxs exists: $(Test-Path $main) ==="
+          Write-Host "=== cleanup.wxs exists: $(Test-Path $frag) ==="
+
+          Write-Host "`n=== candle main.wxs ==="
+          & "$wix\candle.exe" -arch x64 -out "$outDir\main.wixobj" $main
+          Write-Host "candle main exit: $LASTEXITCODE"
+
+          Write-Host "`n=== candle cleanup.wxs ==="
+          & "$wix\candle.exe" -arch x64 -out "$outDir\cleanup.wixobj" $frag
+          Write-Host "candle cleanup exit: $LASTEXITCODE"
+
+          Write-Host "`n=== light -v (verbose, validation on) ==="
+          & "$wix\light.exe" -v -ext WixUtilExtension -ext WixUIExtension -cultures:en-US `
+            -out "$outDir\debug.msi" "$outDir\main.wixobj" "$outDir\cleanup.wixobj"
+          Write-Host "`n=== light exit: $LASTEXITCODE ==="
+
+          Write-Host "`n=== light -v -sval (skip ICE validation, to isolate real errors) ==="
+          & "$wix\light.exe" -v -sval -ext WixUtilExtension -ext WixUIExtension -cultures:en-US `
+            -out "$outDir\debug-sval.msi" "$outDir\main.wixobj" "$outDir\cleanup.wixobj"
+          Write-Host "`n=== light -sval exit: $LASTEXITCODE ==="
