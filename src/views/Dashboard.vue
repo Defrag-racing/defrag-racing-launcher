@@ -12,18 +12,45 @@
     const toggling = ref(false);
     const toggleError = ref<string | null>(null);
 
+    // defrag:// deep-link toast. The backend emits `deep-link://result`
+    // after every link arrives (from the browser, single-instance, or
+    // manual trigger). We render a transient banner so the user sees
+    // what happened before the engine grabs focus.
+    type DeepLinkResult =
+        | { ok: true; address: string }
+        | { ok: false; error: string; url: string };
+    const deepLink = ref<DeepLinkResult | null>(null);
+    let deepLinkTimer: number | undefined;
+
     let unlisten: UnlistenFn | null = null;
+    let unlistenDeepLink: UnlistenFn | null = null;
 
     onMounted(async () => {
         queue.value = await tauri.getUploadState();
         unlisten = await listen<UploadStateSnapshot>('upload_state_changed', (ev) => {
             queue.value = ev.payload;
         });
+        unlistenDeepLink = await listen<DeepLinkResult>('deep-link://result', (ev) => {
+            deepLink.value = ev.payload;
+            // Success toasts auto-dismiss; errors stick around so the
+            // user can read what went wrong.
+            if (ev.payload.ok) {
+                window.clearTimeout(deepLinkTimer);
+                deepLinkTimer = window.setTimeout(() => { deepLink.value = null; }, 4000);
+            }
+        });
     });
 
     onUnmounted(() => {
         if (unlisten) unlisten();
+        if (unlistenDeepLink) unlistenDeepLink();
+        window.clearTimeout(deepLinkTimer);
     });
+
+    const dismissDeepLink = () => {
+        deepLink.value = null;
+        window.clearTimeout(deepLinkTimer);
+    };
 
     const toggle = async () => {
         toggleError.value = null;
@@ -97,6 +124,20 @@
         <p v-if="toggleError" class="px-5 py-2 bg-red-500/10 border-b border-red-500/20 text-xs text-red-300">
             {{ toggleError }}
         </p>
+
+        <div
+            v-if="deepLink"
+            class="px-5 py-2 border-b text-xs flex items-center gap-2"
+            :class="deepLink.ok
+                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+                : 'bg-red-500/10 border-red-500/20 text-red-300'"
+        >
+            <span v-if="deepLink.ok">Connecting to <strong>{{ deepLink.address }}</strong>…</span>
+            <span v-else>
+                Couldn't open <code class="font-mono">{{ deepLink.url }}</code> — {{ deepLink.error }}
+            </span>
+            <button class="ml-auto text-neutral-400 hover:text-neutral-200" @click="dismissDeepLink">×</button>
+        </div>
 
         <!-- body -->
         <div class="flex-1 overflow-auto">

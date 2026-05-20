@@ -46,5 +46,12 @@
         "componentGroupRefs": ["LauncherCleanup"]
       }
     }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["defrag"]
+      }
+    }
   }
 }

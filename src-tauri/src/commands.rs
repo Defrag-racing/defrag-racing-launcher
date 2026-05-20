@@ -7,6 +7,7 @@
 
 use crate::config::{self, Config};
 use crate::engine::{self, EngineCandidate};
+use crate::protocol;
 use crate::token;
 use crate::watcher::{self, UploadStateSnapshot, WatcherHandle};
 use std::path::PathBuf;
@@ -165,4 +166,22 @@ pub fn get_upload_state(state: State<'_, AppState>) -> UploadStateSnapshot {
         Some(h) => h.state.snapshot(),
         None => UploadStateSnapshot::default(),
     }
+}
+
+// ---- defrag:// protocol -----------------------------------------------------
+
+/// Handle a `defrag://<ip>:<port>` deep link: validate the URL, look up
+/// the configured engine, and spawn it with `+connect <ip>:<port>`.
+///
+/// Called both from the Rust deep-link plugin handler (when the link
+/// fires the launcher externally) and directly from the UI (e.g. a
+/// "Connect" button on the dashboard that takes a manually-entered ip).
+/// Returns the parsed address as a string so the UI can show a toast
+/// like "Connecting to 1.2.3.4:27960…".
+#[tauri::command]
+pub fn handle_protocol_url(url: String) -> Result<String, String> {
+    let addr = protocol::parse_url(&url).map_err(err_to_string)?;
+    let cfg = Config::load().map_err(err_to_string)?;
+    protocol::launch(cfg.engine_path.as_deref(), addr).map_err(err_to_string)?;
+    Ok(addr.to_string())
 }
