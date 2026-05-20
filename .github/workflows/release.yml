@@ -91,3 +91,46 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      # Diagnostic step: tauri-action swallows light.exe stderr, so when the
+      # MSI bundle step fails we re-run candle + light manually with -v to
+      # surface the actual WiX error.
+      - name: Diagnose WiX light.exe failure
+        if: failure() && matrix.platform == 'windows-latest'
+        shell: pwsh
+        working-directory: src-tauri
+        continue-on-error: true
+        run: |
+          $wix = "$env:LOCALAPPDATA\tauri\WixTools314"
+          Write-Host "=== WiX tools: $wix ==="
+          if (-not (Test-Path $wix)) {
+            Write-Host "WiX tools dir not found."
+            exit 0
+          }
+          Get-ChildItem $wix | Select-Object Name | Format-Table -AutoSize | Out-String | Write-Host
+
+          $main = "target\release\wix\x64\main.wxs"
+          $frag = "wix\cleanup.wxs"
+          $outDir = "target\release\wix\debug"
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
+          Write-Host "=== main.wxs exists: $(Test-Path $main) ==="
+          Write-Host "=== cleanup.wxs exists: $(Test-Path $frag) ==="
+
+          Write-Host "`n=== candle main.wxs ==="
+          & "$wix\candle.exe" -arch x64 -out "$outDir\main.wixobj" $main
+          Write-Host "candle main exit: $LASTEXITCODE"
+
+          Write-Host "`n=== candle cleanup.wxs ==="
+          & "$wix\candle.exe" -arch x64 -out "$outDir\cleanup.wixobj" $frag
+          Write-Host "candle cleanup exit: $LASTEXITCODE"
+
+          Write-Host "`n=== light -v (verbose, validation on) ==="
+          & "$wix\light.exe" -v -ext WixUtilExtension -ext WixUIExtension -cultures:en-US `
+            -out "$outDir\debug.msi" "$outDir\main.wixobj" "$outDir\cleanup.wixobj"
+          Write-Host "`n=== light exit: $LASTEXITCODE ==="
+
+          Write-Host "`n=== light -v -sval (skip ICE validation, to isolate real errors) ==="
+          & "$wix\light.exe" -v -sval -ext WixUtilExtension -ext WixUIExtension -cultures:en-US `
+            -out "$outDir\debug-sval.msi" "$outDir\main.wixobj" "$outDir\cleanup.wixobj"
+          Write-Host "`n=== light -sval exit: $LASTEXITCODE ==="
