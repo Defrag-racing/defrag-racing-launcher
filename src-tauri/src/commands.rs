@@ -5,6 +5,7 @@
 //! support — the frontend gets a human-readable message and shows it in a
 //! toast.
 
+use crate::cache::UploadCache;
 use crate::config::{self, Config};
 use crate::engine::{self, EngineCandidate};
 use crate::protocol;
@@ -107,7 +108,20 @@ pub fn reset_launcher(state: State<'_, AppState>) -> Result<(), String> {
     if let Ok(path) = Config::path() {
         let _ = std::fs::remove_file(path);
     }
+    // Cache is owned by us — wipe it too so a reset really does start
+    // from zero (otherwise re-onboarded user with new token would skip
+    // re-uploading demos the prior token already covered).
+    let _ = UploadCache::clear();
     Ok(())
+}
+
+/// Force the next rescan to re-hash every file and re-query the server,
+/// regardless of cache state. Used when an admin deleted a demo on the
+/// server and the user wants to re-upload, or when the user suspects
+/// the cache has drifted.
+#[tauri::command]
+pub fn clear_upload_cache() -> Result<(), String> {
+    UploadCache::clear().map_err(err_to_string)
 }
 
 // ---- Engine detection ------------------------------------------------------

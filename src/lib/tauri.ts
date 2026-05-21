@@ -60,4 +60,5 @@ export const tauri = {
     stopAutoUpload: () => invoke<void>('stop_auto_upload'),
     isAutoUploadRunning: () => invoke<boolean>('is_auto_upload_running'),
     getUploadState: () => invoke<UploadStateSnapshot>('get_upload_state'),
+    clearUploadCache: () => invoke<void>('clear_upload_cache'),
 };

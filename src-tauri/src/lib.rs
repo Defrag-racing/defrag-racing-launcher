@@ -1,4 +1,5 @@
 mod api;
+mod cache;
 mod commands;
 mod config;
 mod engine;
@@ -89,6 +90,7 @@ pub fn run() {
             commands::stop_auto_upload,
             commands::is_auto_upload_running,
             commands::get_upload_state,
+            commands::clear_upload_cache,
             commands::handle_protocol_url,
         ])
         .run(tauri::generate_context!())

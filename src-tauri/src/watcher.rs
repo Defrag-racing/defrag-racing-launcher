@@ -13,6 +13,7 @@
 //! error, so retries are cheap.
 
 use crate::api::{ApiError, Client};
+use crate::cache::UploadCache;
 use crate::hashing;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, FileIdMap};
@@ -180,10 +181,17 @@ async fn worker_loop(
         }
     };
 
+    // Single in-memory cache shared across all messages processed by
+    // this worker. Reload from disk once on start so we pick up state
+    // from previous launcher sessions. The cache is consulted on every
+    // file (rescan and live watcher) before we spend cycles on hash +
+    // server lookup.
+    let mut cache = UploadCache::load();
+
     while let Some(msg) = rx.recv().await {
         match msg {
             Message::FileAdded(path) => {
-                handle_file(&client, &state, &app, path).await;
+                handle_file(&client, &state, &app, &mut cache, path).await;
             }
             Message::RescanFolder { folder, recursive } => {
                 // Two scan modes by user choice. Recursive uses walkdir
@@ -201,14 +209,14 @@ async fn worker_loop(
                             && is_demo_file(p)
                             && !is_in_temp_subfolder(p)
                         {
-                            handle_file(&client, &state, &app, p.to_path_buf()).await;
+                            handle_file(&client, &state, &app, &mut cache, p.to_path_buf()).await;
                         }
                     }
                 } else if let Ok(entries) = std::fs::read_dir(&folder) {
                     for e in entries.flatten() {
                         let p = e.path();
                         if p.is_file() && is_demo_file(&p) && !is_in_temp_subfolder(&p) {
-                            handle_file(&client, &state, &app, p).await;
+                            handle_file(&client, &state, &app, &mut cache, p).await;
                         }
                     }
                 }
@@ -221,6 +229,7 @@ async fn handle_file(
     client: &Client,
     state: &Arc<UploadState>,
     app: &AppHandle,
+    cache: &mut UploadCache,
     path: PathBuf,
 ) {
     let filename = path
@@ -237,6 +246,19 @@ async fn handle_file(
             .any(|i| i.path == path && matches!(i.status, UploadStatus::Done | UploadStatus::Duplicate))
     });
     if already_present {
+        return;
+    }
+
+    // Persistent cache: if the file's current size+mtime match what we
+    // recorded last time we uploaded it, we don't need to re-hash or
+    // call the server. Surface it as Done/Duplicate directly so the
+    // queue UI still shows the user what happened on this rescan.
+    if let Some(entry) = cache.get_if_fresh(&path) {
+        let status = match entry.status.as_str() {
+            "done" => UploadStatus::Done,
+            _ => UploadStatus::Duplicate,
+        };
+        push_or_update(state, app, &path, &filename, status, entry.demo_id, None);
         return;
     }
 
@@ -271,6 +293,8 @@ async fn handle_file(
                 r.demo_id,
                 None,
             );
+            cache.insert(&path, md5.clone(), "duplicate", r.demo_id);
+            let _ = cache.save();
             return;
         }
         Ok(_) => {}
@@ -285,11 +309,17 @@ async fn handle_file(
     match client.upload_demo(&path, &md5).await {
         Ok(r) => {
             push_or_update(state, app, &path, &filename, UploadStatus::Done, Some(r.demo_id), None);
+            cache.insert(&path, md5, "done", Some(r.demo_id));
+            let _ = cache.save();
         }
         Err(ApiError::Duplicate { demo_id }) => {
             push_or_update(state, app, &path, &filename, UploadStatus::Duplicate, Some(demo_id), None);
+            cache.insert(&path, md5, "duplicate", Some(demo_id));
+            let _ = cache.save();
         }
         Err(e) => {
+            // Don't cache errors — we want a retry on next start to
+            // either succeed or surface the same error again.
             push_or_update(state, app, &path, &filename, UploadStatus::Error, None, Some(format!("{e}")));
         }
     }

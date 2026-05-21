@@ -16,6 +16,7 @@
     const showTokenForm = ref(false);
 
     const appVersion = ref('');
+    const reCheckBusy = ref(false);
 
     onMounted(async () => {
         engines.value = await tauri.detectEngines();
@@ -64,6 +65,16 @@
     };
 
     const runOnboarding = () => router.push({ name: 'onboarding' });
+
+    const forceRecheck = async () => {
+        if (! confirm('Forget which demos have been uploaded? Next Start will re-hash and re-check every demo with the server.')) return;
+        reCheckBusy.value = true;
+        try {
+            await tauri.clearUploadCache();
+        } finally {
+            reCheckBusy.value = false;
+        }
+    };
 
     const resetLauncher = async () => {
         if (! confirm('Clear all launcher settings and the stored token? This cannot be undone. Demos on your PC are not affected.')) return;
@@ -163,6 +174,21 @@
                     </button>
                 </div>
                 <p v-if="tokenError" class="text-xs text-red-400">{{ tokenError }}</p>
+            </section>
+
+            <!-- Force re-check uploaded demos -->
+            <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 flex items-center justify-between gap-3">
+                <div>
+                    <div class="font-semibold">Re-check uploaded demos</div>
+                    <div class="text-xs text-neutral-500 mt-0.5">
+                        Forget the local "already uploaded" cache. Next Start re-asks the server
+                        for every demo — useful if a demo was deleted on defrag.racing and you want
+                        to re-upload it.
+                    </div>
+                </div>
+                <button class="btn-ghost flex-shrink-0" :disabled="reCheckBusy" @click="forceRecheck">
+                    {{ reCheckBusy ? '…' : 'Force re-check' }}
+                </button>
             </section>
 
             <!-- Auto-update -->
