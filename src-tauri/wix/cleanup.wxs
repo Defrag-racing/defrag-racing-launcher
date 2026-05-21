@@ -12,22 +12,46 @@
   "racing", "defrag", "launcher").config_dir()` on Windows):
     %APPDATA%\defrag\launcher\config\       ← files + this dir removed
     %APPDATA%\defrag\launcher\              ← this dir removed
-    %APPDATA%\defrag\                       ← intentionally NOT removed
-                                              (reserved for future
-                                              defrag.racing products)
+    %APPDATA%\defrag\                       ← removed IF empty (see below)
+
+  Why every level has a RemoveFolder
+  ICE64 requires every directory we declare under a user-profile root
+  to have an entry in the RemoveFile table — otherwise the validator
+  errors with LGHT0204 (which is what killed v0.1.5). RemoveFolder
+  writes to the same MSI table, so we add one per directory. The good
+  part: RemoveFolder only deletes if the directory is empty at
+  uninstall, so the DefragOrgDir entry naturally cooperates with any
+  future defrag.racing product that ships into %APPDATA%\defrag\:
+    - launcher is the only consumer → defrag\ ends up empty → removed
+    - another product still has files there → defrag\ not empty → kept
+  No shared-refcount or registry-marker dance needed.
 
   AppDataFolder is a Windows Installer system property but tauri-bundler's
   generated main.wxs doesn't declare it, so we must — otherwise light.exe
   bails with LGHT0094 "Unresolved reference to symbol Directory:AppDataFolder"
-  (which is what killed v0.1.4). We declare it under TARGETDIR here.
-  DirectoryRef'ing TARGETDIR is safe: main.wxs also references TARGETDIR
-  via the same mechanism so WiX merges both contributions without colliding.
+  (which killed v0.1.4). We declare it under TARGETDIR here. DirectoryRef'ing
+  TARGETDIR is safe: main.wxs references TARGETDIR via the same mechanism so
+  WiX merges both contributions without colliding.
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Fragment>
     <DirectoryRef Id="TARGETDIR">
       <Directory Id="AppDataFolder" Name="AppDataFolder">
         <Directory Id="DefragOrgDir" Name="defrag">
+          <!-- The defrag\ org parent. RemoveFolder runs last in MSI
+               sequence (after everything below) and is a no-op unless
+               the directory ended up empty — the shared-with-future-
+               products behavior described in the file header. -->
+          <Component Id="CleanupDefragOrgDir"
+                     Guid="A1F9C7D4-3E6B-4F1A-9D2C-5E8A0B3F1C7D">
+            <RegistryValue Root="HKCU"
+                           Key="Software\DefragRacing\Launcher\Cleanup"
+                           Name="org_dir"
+                           Type="integer"
+                           Value="1"
+                           KeyPath="yes" />
+            <RemoveFolder Id="RemoveDefragOrgDir" On="uninstall" />
+          </Component>
           <Directory Id="LauncherAppDir" Name="launcher">
             <!-- launcher\ dir itself — becomes empty once config\ is
                  removed below, then this Component wipes the empty dir. -->
@@ -63,6 +87,7 @@
     </DirectoryRef>
 
     <ComponentGroup Id="LauncherCleanup">
+      <ComponentRef Id="CleanupDefragOrgDir" />
       <ComponentRef Id="CleanupLauncherDir" />
       <ComponentRef Id="CleanupConfig" />
     </ComponentGroup>
