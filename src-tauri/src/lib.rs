@@ -147,8 +147,19 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &quit])?;
 
+    // Prefer the bundle's window icon — Windows packs that into the .exe
+    // and Tauri exposes it via default_window_icon(). On a fresh MSI
+    // install the icon resource has been observed as not-yet-loaded
+    // when setup() runs (0.1.6 crashed with 0xc0000409 on first launch
+    // because we unwrap()'d the None). Fall back to a PNG embedded at
+    // compile time so tray creation can never fail for "no icon".
+    let icon = app
+        .default_window_icon()
+        .cloned()
+        .unwrap_or_else(|| tauri::include_image!("icons/128x128.png"));
+
     let _tray = TrayIconBuilder::new()
-        .icon(app.default_window_icon().unwrap().clone())
+        .icon(icon)
         .tooltip("Defrag Racing Launcher")
         .menu(&menu)
         .show_menu_on_left_click(false)

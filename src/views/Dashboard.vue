@@ -156,15 +156,29 @@
 <template>
     <div class="flex-1 flex flex-col">
         <!-- top bar -->
-        <header class="px-5 py-3 border-b border-white/10 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-                <div class="w-2 h-2 rounded-full" :class="config.autoUploadRunning ? 'bg-emerald-400' : 'bg-neutral-600'"></div>
-                <div class="text-sm">
-                    <span class="font-semibold">Auto-upload</span>
-                    <span class="text-neutral-500 ml-1">{{ config.autoUploadRunning ? 'running' : 'off' }}</span>
+        <header class="px-5 py-3 border-b border-white/10 flex items-start justify-between gap-3">
+            <div class="flex items-start gap-2 min-w-0">
+                <div class="w-2 h-2 rounded-full mt-1.5 flex-shrink-0"
+                     :class="config.autoUploadRunning ? 'bg-emerald-400' : 'bg-neutral-600'"></div>
+                <div class="text-sm min-w-0">
+                    <div>
+                        <span class="font-semibold">Auto-upload</span>
+                        <span class="text-neutral-500 ml-1">{{ config.autoUploadRunning ? 'running' : 'off' }}</span>
+                    </div>
+                    <div class="text-xs text-neutral-500 mt-0.5 leading-snug">
+                        <template v-if="config.autoUploadRunning">
+                            Watching your demos folder. New <code class="bg-black/40 px-1 rounded">.dm_*</code> files
+                            are hashed locally and uploaded to defrag.racing if the server doesn't already have them.
+                        </template>
+                        <template v-else>
+                            Click <strong class="text-brand-400">Start</strong> to watch
+                            <code class="bg-black/40 px-1 rounded">{{ config.config.demos_path || 'your demos folder' }}</code>
+                            and back up new demos to defrag.racing automatically.
+                        </template>
+                    </div>
                 </div>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-shrink-0">
                 <button
                     class="px-3 py-1.5 rounded text-sm font-semibold"
                     :class="config.autoUploadRunning
