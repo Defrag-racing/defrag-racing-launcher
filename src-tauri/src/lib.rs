@@ -20,15 +20,53 @@ use tauri_plugin_autostart::MacosLauncher;
 /// "Show" from the tray to see the dashboard.
 const HIDDEN_FLAG: &str = "--hidden";
 
+/// Append a line to %APPDATA%\defrag\launcher\startup.log. Used by the
+/// init code paths to leave breadcrumbs about how far we got — when
+/// the launcher exits silently on first run there's no Event Viewer
+/// entry and no CMD output (GUI subsystem swallows stderr), so a file
+/// is the only diagnostic surface that survives.
+fn log_startup(msg: &str) {
+    let Some(dirs) = directories::ProjectDirs::from("racing", "defrag", "launcher") else {
+        return;
+    };
+    let dir = dirs.config_dir();
+    let _ = std::fs::create_dir_all(dir);
+    let path = dir.join("startup.log");
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "[{}] {}", ts, msg);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Panic hook BEFORE anything else — catches panics during plugin
+    // init, tray construction, etc. and writes them to startup.log so
+    // we have something to look at when the process disappears with
+    // no Event Viewer trace.
+    std::panic::set_hook(Box::new(|info| {
+        log_startup(&format!("PANIC: {}", info));
+    }));
+
+    log_startup(&format!(
+        "=== launch === version={} argv={:?}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::args().collect::<Vec<_>>()
+    ));
+
     // Logging is environment-controlled (RUST_LOG=debug) so a shipped
     // binary stays quiet unless the user flips it on while debugging.
     let _ = env_logger::try_init();
 
     let started_hidden = std::env::args().any(|a| a == HIDDEN_FLAG);
+    log_startup(&format!("started_hidden={}", started_hidden));
 
     let builder = tauri::Builder::default();
+    log_startup("Builder::default ok");
 
     // single-instance MUST be the first plugin registered — when a second
     // launcher process is spawned (e.g. by a defrag:// click while the
@@ -39,6 +77,7 @@ pub fn run() {
     // unused_mut warning.
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+        log_startup(&format!("single_instance callback fired argv={:?}", argv));
         // argv from the second instance — on Windows + Linux a
         // defrag://… deep link arrives as one of the argv entries.
         // Hand it off to the same handler the deep-link plugin uses
@@ -47,6 +86,7 @@ pub fn run() {
         // Surface the existing window so the user sees the toast.
         show_main_window(app);
     }));
+    log_startup("single_instance plugin registered");
 
     builder
         .plugin(tauri_plugin_deep_link::init())
@@ -69,12 +109,15 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(AppState::default())
         .setup(move |app| {
+            log_startup("setup() entered");
+
             // Hide on launch if we were started by the OS at login —
             // user explicitly opted into autostart and expects a quiet
             // background process, not a pop-up.
             if started_hidden {
                 if let Some(w) = app.get_webview_window("main") {
                     let _ = w.hide();
+                    log_startup("hid main window (started_hidden)");
                 }
             }
 
@@ -82,7 +125,9 @@ pub fn run() {
             // closes the window so the demo watcher + defrag:// handler
             // keep doing their job. Without this the process would exit
             // on last-window-close (default Tauri behavior).
+            log_startup("calling build_tray");
             build_tray(app)?;
+            log_startup("build_tray ok");
 
             // Register defrag:// scheme at runtime — needed in dev where
             // the bundled installer hasn't registered it with the OS,
@@ -102,6 +147,7 @@ pub fn run() {
                     }
                 });
             }
+            log_startup("setup() complete");
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -137,6 +183,8 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+
+    log_startup("=== exit ===");
 }
 
 /// Build the tray icon, attach a Show / Quit menu, and wire left-click
