@@ -17,11 +17,28 @@
 
     const appVersion = ref('');
     const reCheckBusy = ref(false);
+    const autostart = ref(false);
 
     onMounted(async () => {
         engines.value = await tauri.detectEngines();
         appVersion.value = await tauri.appVersion();
+        // Read the OS-level autostart state, not just our config —
+        // catches the case where the user removed the registration
+        // manually (Task Manager → Startup) outside the launcher.
+        autostart.value = await tauri.isAutostartEnabled();
     });
+
+    const toggleAutostart = async (next: boolean) => {
+        try {
+            await tauri.setAutostartEnabled(next);
+            autostart.value = next;
+        } catch (e) {
+            // Re-read OS state so the toggle reflects reality even if
+            // our write failed (e.g. permission denied on Linux).
+            autostart.value = await tauri.isAutostartEnabled();
+            alert(`Couldn't change autostart: ${e}`);
+        }
+    };
 
     const pickEngine = async () => {
         const picked = await openDialog({ multiple: false, directory: false });
@@ -189,6 +206,28 @@
                 <button class="btn-ghost flex-shrink-0" :disabled="reCheckBusy" @click="forceRecheck">
                     {{ reCheckBusy ? '…' : 'Force re-check' }}
                 </button>
+            </section>
+
+            <!-- Autostart -->
+            <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 flex items-center justify-between gap-3">
+                <div>
+                    <div class="font-semibold">Start with system</div>
+                    <div class="text-xs text-neutral-500 mt-0.5">
+                        Launch silently to the tray on login so the demo watcher
+                        and <code class="bg-black/40 px-1 rounded">defrag://</code> links
+                        keep working without you having to open the launcher manually.
+                    </div>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                    <input
+                        type="checkbox"
+                        class="sr-only peer"
+                        :checked="autostart"
+                        @change="toggleAutostart(($event.target as HTMLInputElement).checked)"
+                    />
+                    <div class="w-10 h-5 bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors"></div>
+                    <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+                </label>
             </section>
 
             <!-- Auto-update -->

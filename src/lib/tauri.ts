@@ -61,4 +61,7 @@ export const tauri = {
     isAutoUploadRunning: () => invoke<boolean>('is_auto_upload_running'),
     getUploadState: () => invoke<UploadStateSnapshot>('get_upload_state'),
     clearUploadCache: () => invoke<void>('clear_upload_cache'),
+
+    isAutostartEnabled: () => invoke<boolean>('is_autostart_enabled'),
+    setAutostartEnabled: (enabled: boolean) => invoke<void>('set_autostart_enabled', { enabled }),
 };

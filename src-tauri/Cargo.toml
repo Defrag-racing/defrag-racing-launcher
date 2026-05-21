@@ -13,7 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
@@ -40,6 +40,12 @@ tauri-plugin-updater = "2"
 # update finishes installing. Without this, the only way to restart
 # the app post-install is to close-and-reopen manually.
 tauri-plugin-process = "2"
+
+# Autostart on user login. Used so the launcher can live in the tray
+# from boot, keeping the demo watcher + defrag:// handler responsive
+# without the user having to open it manually after every reboot.
+# Default OFF in our Settings — opt-in.
+tauri-plugin-autostart = "2"
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

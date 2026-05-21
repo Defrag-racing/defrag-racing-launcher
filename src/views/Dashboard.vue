@@ -36,6 +36,27 @@
 
     let unlisten: UnlistenFn | null = null;
     let unlistenDeepLink: UnlistenFn | null = null;
+    let updateCheckTimer: number | undefined;
+
+    // Re-check for updates every 6h while the launcher is alive. The
+    // interval keeps firing even when the main window is hidden in the
+    // tray — JS lifecycle is bound to the process, not the OS window —
+    // so the "set and forget" user who installed once and stays in
+    // tray for weeks still gets caught up on security patches.
+    const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+    const checkUpdate = async () => {
+        if (!config.config.auto_update_enabled) return;
+        try {
+            const update = await checkForUpdate();
+            if (update) {
+                pendingUpdate = update;
+                updateState.value = { kind: 'available', version: update.version };
+            }
+        } catch {
+            // Network blip; the next interval will retry.
+        }
+    };
 
     onMounted(async () => {
         queue.value = await tauri.getUploadState();
@@ -67,6 +88,11 @@
             } catch {
                 updateState.value = { kind: 'idle' };
             }
+
+            // After the initial check, poll every 6h. Lightweight HTTP
+            // GET against the manifest endpoint — no demo work, no
+            // gameplay impact even if a check happens mid-frag.
+            updateCheckTimer = window.setInterval(checkUpdate, UPDATE_CHECK_INTERVAL_MS);
         }
     });
 
@@ -74,6 +100,7 @@
         if (unlisten) unlisten();
         if (unlistenDeepLink) unlistenDeepLink();
         window.clearTimeout(deepLinkTimer);
+        if (updateCheckTimer !== undefined) window.clearInterval(updateCheckTimer);
     });
 
     const dismissDeepLink = () => {

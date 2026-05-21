@@ -14,6 +14,7 @@ use crate::watcher::{self, UploadStateSnapshot, WatcherHandle};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{AppHandle, State};
+use tauri_plugin_autostart::ManagerExt;
 
 /// Shared app state — the current watcher (if running) and a cached config.
 /// Swapped out when the user changes demos path or rotates the token.
@@ -122,6 +123,33 @@ pub fn reset_launcher(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 pub fn clear_upload_cache() -> Result<(), String> {
     UploadCache::clear().map_err(err_to_string)
+}
+
+// ---- Autostart -------------------------------------------------------------
+
+/// Returns whether the OS has the launcher registered to autostart on
+/// login. Reflects current OS state, not just our Settings UI — if the
+/// user removed it manually (e.g. via Task Manager → Startup) we'll
+/// pick that up next time the toggle is read.
+#[tauri::command]
+pub fn is_autostart_enabled(app: AppHandle) -> Result<bool, String> {
+    app.autolaunch().is_enabled().map_err(err_to_string)
+}
+
+/// Flip the OS-level autostart registration. Plugin writes to Windows
+/// Run reg key / macOS LaunchAgent plist / Linux ~/.config/autostart/
+/// .desktop depending on platform. The HIDDEN_FLAG configured in lib.rs
+/// is included automatically by the plugin so the next autostart launch
+/// starts to the tray.
+#[tauri::command]
+pub fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let mgr = app.autolaunch();
+    if enabled {
+        mgr.enable().map_err(err_to_string)?;
+    } else {
+        mgr.disable().map_err(err_to_string)?;
+    }
+    Ok(())
 }
 
 // ---- Engine detection ------------------------------------------------------
