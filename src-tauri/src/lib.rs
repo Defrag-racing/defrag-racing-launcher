@@ -16,28 +16,28 @@ pub fn run() {
     // binary stays quiet unless the user flips it on while debugging.
     let _ = env_logger::try_init();
 
-    let mut builder = tauri::Builder::default();
+    let builder = tauri::Builder::default();
 
     // single-instance MUST be the first plugin registered — when a second
     // launcher process is spawned (e.g. by a defrag:// click while the
     // launcher is already open) this plugin hands the new process's argv
     // to the existing one and exits the new one. Anything later would
-    // run in both processes briefly.
+    // run in both processes briefly. Shadow `builder` rather than mutate
+    // so macOS (where the cfg block is dead code) doesn't trip an
+    // unused_mut warning.
     #[cfg(any(target_os = "windows", target_os = "linux"))]
-    {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            // argv from the second instance — on Windows + Linux a
-            // defrag://… deep link arrives as one of the argv entries.
-            // Hand it off to the same handler the deep-link plugin uses
-            // so both paths produce identical behavior.
-            handle_deep_link_argv(app, &argv);
-            // Surface the existing window so the user sees the toast.
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.unminimize();
-                let _ = w.set_focus();
-            }
-        }));
-    }
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+        // argv from the second instance — on Windows + Linux a
+        // defrag://… deep link arrives as one of the argv entries.
+        // Hand it off to the same handler the deep-link plugin uses
+        // so both paths produce identical behavior.
+        handle_deep_link_argv(app, &argv);
+        // Surface the existing window so the user sees the toast.
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.unminimize();
+            let _ = w.set_focus();
+        }
+    }));
 
     builder
         .plugin(tauri_plugin_deep_link::init())
