@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Tauri updater signing keys — private key lives in ~/.tauri/ (outside
+# the repo) and in GH Actions secrets, never here. These patterns are
+# belt-and-suspenders: if a key file ever gets copied into the repo by
+# accident, git refuses to stage it.
+*.key
+*.key.pub
+.tauri/
