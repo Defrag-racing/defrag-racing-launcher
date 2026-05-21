@@ -103,8 +103,20 @@ jobs:
           $outDir = "target\release\wix\debug"
           New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
+          Write-Host "=== Contents of target\release\wix\x64\ ==="
+          Get-ChildItem "target\release\wix\x64\" | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Host
+
           Write-Host "=== main.wxs exists: $(Test-Path $main) ==="
           Write-Host "=== cleanup.wxs exists: $(Test-Path $frag) ==="
+
+          # tauri-bundler generates one or more .wxl localization files
+          # (TauriCodepage / TauriLanguage / etc.) and passes them to light
+          # via -loc. Without them the linker rejects every !(loc.*)
+          # reference in main.wxs with LGHT0102, masking the real error.
+          $wxlFiles = Get-ChildItem "target\release\wix\x64\" -Filter "*.wxl" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+          Write-Host "=== Found .wxl files: $(if ($wxlFiles) { $wxlFiles -join ', ' } else { '(none)' }) ==="
+          $locArgs = @()
+          foreach ($wxl in $wxlFiles) { $locArgs += "-loc"; $locArgs += $wxl }
 
           Write-Host "`n=== candle main.wxs ==="
           & "$wix\candle.exe" -arch x64 -out "$outDir\main.wixobj" $main
@@ -114,12 +126,12 @@ jobs:
           & "$wix\candle.exe" -arch x64 -out "$outDir\cleanup.wixobj" $frag
           Write-Host "candle cleanup exit: $LASTEXITCODE"
 
-          Write-Host "`n=== light -v (verbose, validation on) ==="
-          & "$wix\light.exe" -v -ext WixUtilExtension -ext WixUIExtension -cultures:en-US `
+          Write-Host "`n=== light -v (verbose, validation on, with -loc) ==="
+          & "$wix\light.exe" -v @locArgs -ext WixUtilExtension -ext WixUIExtension -cultures:en-US `
             -out "$outDir\debug.msi" "$outDir\main.wixobj" "$outDir\cleanup.wixobj"
           Write-Host "`n=== light exit: $LASTEXITCODE ==="
 
-          Write-Host "`n=== light -v -sval (skip ICE validation, to isolate real errors) ==="
-          & "$wix\light.exe" -v -sval -ext WixUtilExtension -ext WixUIExtension -cultures:en-US `
+          Write-Host "`n=== light -v -sval (skip ICE validation, with -loc) ==="
+          & "$wix\light.exe" -v -sval @locArgs -ext WixUtilExtension -ext WixUIExtension -cultures:en-US `
             -out "$outDir\debug-sval.msi" "$outDir\main.wixobj" "$outDir\cleanup.wixobj"
           Write-Host "`n=== light -sval exit: $LASTEXITCODE ==="
