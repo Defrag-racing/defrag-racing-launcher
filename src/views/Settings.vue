@@ -96,7 +96,7 @@
             </section>
 
             <!-- Demos path -->
-            <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-2">
+            <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
                 <div class="flex items-start justify-between gap-3">
                     <div>
                         <div class="font-semibold">Demos folder</div>
@@ -106,6 +106,25 @@
                 </div>
                 <div class="text-sm text-neutral-300 break-all">
                     {{ config.config.demos_path || '(not set)' }}
+                </div>
+                <div class="flex items-center justify-between gap-3 pt-2 border-t border-white/[0.05]">
+                    <div>
+                        <div class="text-sm font-medium">Include subfolders</div>
+                        <div class="text-xs text-neutral-500 mt-0.5">
+                            Watch nested folders too (e.g. <code class="bg-black/40 px-1 rounded">demos/2024/</code>).
+                            Takes effect on next Start.
+                        </div>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                        <input
+                            type="checkbox"
+                            class="sr-only peer"
+                            :checked="config.config.include_subfolders"
+                            @change="config.save({ include_subfolders: ($event.target as HTMLInputElement).checked })"
+                        />
+                        <div class="w-10 h-5 bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors"></div>
+                        <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+                    </label>
                 </div>
             </section>
 

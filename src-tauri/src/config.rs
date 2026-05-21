@@ -31,6 +31,15 @@ pub struct Config {
     /// launcher is harmless until the user opts in + provides a token.
     pub auto_upload_enabled: bool,
 
+    /// Recurse into subdirectories of demos_path when watching/scanning.
+    /// Off by default because Defrag itself writes demos to the top level
+    /// and recursive watching would surprise users who archive old demos
+    /// into subfolders specifically to STOP backing them up. Turning it
+    /// on covers organized demos folders ("by date", "by map", etc.)
+    /// without forcing the user to flatten everything.
+    #[serde(default)]
+    pub include_subfolders: bool,
+
     /// Auto-update opt-in. On by default — security fixes need to reach
     /// users without them having to remember to check Releases. Users
     /// can flip it off in Settings if they want manual control over
@@ -59,6 +68,7 @@ impl Default for Config {
             engine_path: None,
             demos_path: None,
             auto_upload_enabled: false,
+            include_subfolders: false,
             auto_update_enabled: true,
             onboarding_completed: false,
             config_version: None,

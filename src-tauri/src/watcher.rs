@@ -68,7 +68,10 @@ impl UploadState {
 /// Message sent to the worker task.
 enum Message {
     FileAdded(PathBuf),
-    RescanFolder(PathBuf),
+    /// Walk the folder once at startup. `recursive` mirrors the
+    /// include_subfolders user setting so the rescan matches what the
+    /// live watcher will pick up afterward.
+    RescanFolder { folder: PathBuf, recursive: bool },
 }
 
 pub struct WatcherHandle {
@@ -83,6 +86,7 @@ pub struct WatcherHandle {
 pub fn start(
     app: AppHandle,
     demos_path: PathBuf,
+    include_subfolders: bool,
     api_base_url: String,
     token: String,
 ) -> anyhow::Result<WatcherHandle> {
@@ -113,14 +117,20 @@ pub fn start(
             }
         },
     )?;
-    debouncer
-        .watcher()
-        .watch(&demos_path, RecursiveMode::NonRecursive)?;
+    let mode = if include_subfolders {
+        RecursiveMode::Recursive
+    } else {
+        RecursiveMode::NonRecursive
+    };
+    debouncer.watcher().watch(&demos_path, mode)?;
 
     // Kick off a rescan on start so demos created while the launcher was
-    // closed still get uploaded. Bounded so an enormous legacy folder can
-    // still finish in finite time — user can tune later.
-    let _ = tx.send(Message::RescanFolder(demos_path.clone()));
+    // closed still get uploaded. The Message variant carries the
+    // recursive flag so the worker uses the same setting as the watcher.
+    let _ = tx.send(Message::RescanFolder {
+        folder: demos_path.clone(),
+        recursive: include_subfolders,
+    });
 
     let state_worker = state.clone();
     let app_worker = app.clone();
@@ -175,13 +185,28 @@ async fn worker_loop(
             Message::FileAdded(path) => {
                 handle_file(&client, &state, &app, path).await;
             }
-            Message::RescanFolder(folder) => {
-                if let Ok(entries) = std::fs::read_dir(&folder) {
+            Message::RescanFolder { folder, recursive } => {
+                // Two scan modes by user choice. Recursive uses walkdir
+                // (already a dep) with follow_links off so a stray
+                // symlink can't loop. is_in_temp_subfolder filters out
+                // Quake's WIP-recording dir at any depth.
+                if recursive {
+                    for entry in walkdir::WalkDir::new(&folder)
+                        .follow_links(false)
+                        .into_iter()
+                        .filter_map(|e| e.ok())
+                    {
+                        let p = entry.path();
+                        if entry.file_type().is_file()
+                            && is_demo_file(p)
+                            && !is_in_temp_subfolder(p)
+                        {
+                            handle_file(&client, &state, &app, p.to_path_buf()).await;
+                        }
+                    }
+                } else if let Ok(entries) = std::fs::read_dir(&folder) {
                     for e in entries.flatten() {
                         let p = e.path();
-                        // is_in_temp_subfolder shouldn't match here (we
-                        // read_dir non-recursively) but keep the check
-                        // to be symmetric with the watcher branch.
                         if p.is_file() && is_demo_file(&p) && !is_in_temp_subfolder(&p) {
                             handle_file(&client, &state, &app, p).await;
                         }

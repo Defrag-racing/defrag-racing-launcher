@@ -141,8 +141,14 @@ pub fn start_auto_upload(
         .map_err(err_to_string)?
         .ok_or_else(|| "No token saved — generate one at defrag.racing and paste it in settings".to_string())?;
 
-    let handle = watcher::start(app, demos, config::api_base_url(), token)
-        .map_err(err_to_string)?;
+    let handle = watcher::start(
+        app,
+        demos,
+        cfg.include_subfolders,
+        config::api_base_url(),
+        token,
+    )
+    .map_err(err_to_string)?;
 
     *state.watcher.lock().unwrap() = Some(handle);
     Ok(())
