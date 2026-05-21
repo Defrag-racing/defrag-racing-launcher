@@ -67,8 +67,19 @@ jobs:
 
       - run: npm ci
 
-      - name: Build MSI
-        run: npm run tauri build
+      # tauri.conf.json has createUpdaterArtifacts: true so the tag-
+      # triggered release.yml signs releases for the updater. check.yml
+      # doesn't have signing secrets (those exist only on tag pushes),
+      # so we override that flag to false for the preview build —
+      # otherwise tauri-bundler errors with "public key found, no
+      # private key" right after the .msi/.exe are bundled.
+      - name: Build MSI (no updater signing for preview)
+        shell: pwsh
+        run: |
+          @'
+          {"bundle":{"createUpdaterArtifacts":false}}
+          '@ | Set-Content -Path build-override.json
+          npm run tauri build -- --config build-override.json
 
       - name: Upload MSI artifact
         if: success()
