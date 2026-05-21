@@ -30,6 +30,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "category": "Utility",
     "shortDescription": "Demo backup and map launcher for defrag.racing",
     "longDescription": "Automatically back up Quake 3 Defrag demos to defrag.racing and open defrag:// deep links directly in the engine of your choice.",
