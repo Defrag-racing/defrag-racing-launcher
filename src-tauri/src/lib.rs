@@ -75,15 +75,16 @@ pub fn run() {
     // run in both processes briefly. Shadow `builder` rather than mutate
     // so macOS (where the cfg block is dead code) doesn't trip an
     // unused_mut warning.
+    //
+    // We deliberately do NOT process the argv URL ourselves here —
+    // `tauri-plugin-deep-link` integrates with single-instance and will
+    // fire `on_open_url` for the forwarded URL. Doing it manually as
+    // well caused the engine to launch twice for one defrag:// click.
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
         log_startup(&format!("single_instance callback fired argv={:?}", argv));
-        // argv from the second instance — on Windows + Linux a
-        // defrag://… deep link arrives as one of the argv entries.
-        // Hand it off to the same handler the deep-link plugin uses
-        // so both paths produce identical behavior.
-        handle_deep_link_argv(app, &argv);
-        // Surface the existing window so the user sees the toast.
+        // Surface the existing window so the user sees the toast emitted
+        // by the deep-link handler.
         show_main_window(app);
     }));
     log_startup("single_instance plugin registered");
@@ -273,16 +274,3 @@ fn handle_deep_link_url(app: &tauri::AppHandle, url: &str) {
     show_main_window(app);
 }
 
-/// Sift defrag:// URLs out of a process argv vector. Used by the
-/// single-instance plugin which receives the entire argv of the second
-/// process (program name + flags + the URL). We don't trust positional
-/// arguments — we look for the first arg that starts with `defrag://`.
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-fn handle_deep_link_argv(app: &tauri::AppHandle, argv: &[String]) {
-    for arg in argv {
-        if arg.starts_with("defrag://") {
-            handle_deep_link_url(app, arg);
-            return;
-        }
-    }
-}
