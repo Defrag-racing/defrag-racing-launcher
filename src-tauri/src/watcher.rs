@@ -91,8 +91,13 @@ pub fn start(
     api_base_url: String,
     token: String,
 ) -> anyhow::Result<WatcherHandle> {
+    crate::log_startup(&format!(
+        "watcher::start: demos_path={:?} include_subfolders={}",
+        demos_path, include_subfolders
+    ));
     let state = Arc::new(UploadState::default());
     let (tx, rx) = mpsc::unbounded_channel::<Message>();
+    crate::log_startup("watcher::start: channel created");
 
     // Debounce bursts while Defrag is still writing the file. The debounce
     // window is deliberately generous (2s) — demos aren't written at high
@@ -123,7 +128,9 @@ pub fn start(
     } else {
         RecursiveMode::NonRecursive
     };
+    crate::log_startup("watcher::start: debouncer built, calling watch()");
     debouncer.watcher().watch(&demos_path, mode)?;
+    crate::log_startup("watcher::start: watch() ok");
 
     // Kick off a rescan on start so demos created while the launcher was
     // closed still get uploaded. The Message variant carries the
@@ -132,10 +139,13 @@ pub fn start(
         folder: demos_path.clone(),
         recursive: include_subfolders,
     });
+    crate::log_startup("watcher::start: rescan message queued");
 
     let state_worker = state.clone();
     let app_worker = app.clone();
+    crate::log_startup("watcher::start: about to tokio::spawn worker_loop");
     let worker = tokio::spawn(worker_loop(rx, state_worker, app_worker, api_base_url, token));
+    crate::log_startup("watcher::start: tokio::spawn returned");
 
     Ok(WatcherHandle {
         _debouncer: debouncer,

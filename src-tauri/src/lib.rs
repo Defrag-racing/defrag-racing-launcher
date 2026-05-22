@@ -25,7 +25,7 @@ const HIDDEN_FLAG: &str = "--hidden";
 /// the launcher exits silently on first run there's no Event Viewer
 /// entry and no CMD output (GUI subsystem swallows stderr), so a file
 /// is the only diagnostic surface that survives.
-fn log_startup(msg: &str) {
+pub fn log_startup(msg: &str) {
     let Some(dirs) = directories::ProjectDirs::from("racing", "defrag", "launcher") else {
         return;
     };

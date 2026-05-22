@@ -171,18 +171,27 @@ pub fn start_auto_upload(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    crate::log_startup("start_auto_upload: entry");
     let cfg = Config::load().map_err(err_to_string)?;
+    crate::log_startup(&format!(
+        "start_auto_upload: cfg loaded demos_path={:?} include_subfolders={}",
+        cfg.demos_path, cfg.include_subfolders
+    ));
     let demos = cfg
         .demos_path
         .clone()
         .ok_or_else(|| "Demos path is not set".to_string())?;
     if !demos.is_dir() {
+        crate::log_startup(&format!("start_auto_upload: demos not a dir: {:?}", demos));
         return Err(format!("Demos path {:?} does not exist", demos));
     }
+    crate::log_startup("start_auto_upload: demos dir ok, loading token");
     let token = token::load()
         .map_err(err_to_string)?
         .ok_or_else(|| "No token saved — generate one at defrag.racing and paste it in settings".to_string())?;
+    crate::log_startup(&format!("start_auto_upload: token loaded ({} bytes)", token.len()));
 
+    crate::log_startup("start_auto_upload: calling watcher::start");
     let handle = watcher::start(
         app,
         demos,
@@ -191,8 +200,10 @@ pub fn start_auto_upload(
         token,
     )
     .map_err(err_to_string)?;
+    crate::log_startup("start_auto_upload: watcher::start returned ok");
 
     *state.watcher.lock().unwrap() = Some(handle);
+    crate::log_startup("start_auto_upload: stored handle, returning");
     Ok(())
 }
 
