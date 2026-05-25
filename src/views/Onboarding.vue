@@ -103,20 +103,21 @@
     const finish = async () => {
         finishing.value = true;
         try {
+            // Auto-upload stays OFF until the user clicks Start on the
+            // dashboard. Earlier this fired up the watcher right after
+            // onboarding if both token and demos were set ("one fewer
+            // click for the happy path") - but that flat-out contradicted
+            // the step-2 promise of "off by default", and silently
+            // starting to hash + upload the user's entire demo folder
+            // the second they paste a token was the right call to
+            // reverse. The dashboard banner explains it and the Start
+            // button is impossible to miss.
             await config.save({
                 engine_path: selectedEngine.value,
                 demos_path: demosPath.value,
-                auto_upload_enabled: !! (demosPath.value && ! tokenSkipped.value),
+                auto_upload_enabled: false,
                 onboarding_completed: true,
             });
-            // If the user supplied both a token and demos path, fire up the
-            // watcher right away - one fewer click for the happy path.
-            if (config.hasToken && config.config.demos_path) {
-                try {
-                    await tauri.startAutoUpload();
-                    await config.refresh();
-                } catch { /* user can enable manually on dashboard */ }
-            }
             router.replace({ name: 'dashboard' });
         } finally {
             finishing.value = false;
