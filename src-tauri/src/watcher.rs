@@ -93,6 +93,19 @@ const QUEUE_CAP: usize = 500;
 /// feeling live (a user looking at the queue doesn't notice 50ms).
 const EMIT_MIN_GAP_MS: u64 = 50;
 
+/// Minimum gap between two hash STARTS, in milliseconds. Caps CPU usage
+/// during rescans: at 100ms gap, a worst-case rescan-of-everything
+/// pegs at ~10 hashes/sec, which on most CPUs stays well under 100%
+/// single-core. Live FileAdded events also pass through this gate but
+/// their natural rate (one demo per several seconds) is already below
+/// the cap, so user-facing latency is unchanged.
+///
+/// Only the actual MD5 streaming path waits — cache hits and skips of
+/// already-uploaded files bypass entirely. Otherwise a user with 5000
+/// cached demos would sit through 8 minutes of no-op throttle waits on
+/// every rescan.
+const HASH_MIN_GAP_MS: u64 = 100;
+
 #[derive(Default)]
 pub struct UploadState {
     inner: Mutex<Vec<PendingUpload>>,
@@ -105,6 +118,10 @@ pub struct UploadState {
     /// Last time we emitted an upload_state_changed event. Used to
     /// rate-limit emits — see `EMIT_MIN_GAP_MS`.
     last_emit_at: Mutex<Option<Instant>>,
+    /// Start time of the most recent MD5 hashing pass. The next hash
+    /// won't start until `HASH_MIN_GAP_MS` after this — that's the
+    /// CPU throttle on rescan floods. Set in `wait_for_hash_slot`.
+    last_hash_at: Mutex<Option<Instant>>,
 }
 
 impl UploadState {
@@ -130,6 +147,26 @@ impl UploadState {
     /// can't hold a `&UploadState` across an `.await`.
     fn pause_flag(&self) -> Arc<AtomicBool> {
         self.paused.clone()
+    }
+
+    /// Block (asynchronously) until enough time has passed since the
+    /// previous hash start to satisfy `HASH_MIN_GAP_MS`, then mark
+    /// "now" as the most recent hash start. Caller invokes this
+    /// immediately before kicking off the `spawn_blocking` MD5 pass.
+    async fn wait_for_hash_slot(&self) {
+        let wait_for = {
+            let last = self.last_hash_at.lock().unwrap();
+            last.map(|prev| {
+                let target = prev + Duration::from_millis(HASH_MIN_GAP_MS);
+                target.saturating_duration_since(Instant::now())
+            })
+        };
+        if let Some(d) = wait_for {
+            if !d.is_zero() {
+                tokio::time::sleep(d).await;
+            }
+        }
+        *self.last_hash_at.lock().unwrap() = Some(Instant::now());
     }
 
     fn with_mut<R>(&self, f: impl FnOnce(&mut Vec<PendingUpload>) -> R) -> R {
@@ -479,10 +516,20 @@ async fn handle_file(
         return;
     }
 
+    // Show the file in the queue as Pending while we wait for our slot
+    // in the hash rate-limit — honest about "we know about you, just
+    // pacing the CPU". Without this, a rescan of many files would all
+    // jump to Hashing at once even though only one is actually running.
     state.update(app, &path, &filename, |u| {
-        u.status = UploadStatus::Hashing;
+        u.status = UploadStatus::Pending;
         u.size_bytes = size_bytes;
         u.error = None;
+    });
+
+    state.wait_for_hash_slot().await;
+
+    state.update(app, &path, &filename, |u| {
+        u.status = UploadStatus::Hashing;
     });
 
     let t_hash = Instant::now();

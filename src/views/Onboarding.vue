@@ -189,21 +189,38 @@
                         Without a token, only <code class="bg-black/40 px-1 rounded">defrag://</code> server-join links work. You can paste a token later from Settings.
                     </p>
 
-                    <ol class="text-sm text-neutral-300 list-decimal list-inside space-y-1 pt-1">
-                        <li>
-                            <button class="text-brand-400 hover:underline" @click="openTokensPage">
-                                Open defrag.racing → Settings → Security
-                            </button>
-                        </li>
-                        <li>Under <em>Launcher tokens</em>, click <em>New token</em> and give it a label (e.g. "Home PC")</li>
+                    <!-- Big obvious step-1 CTA. Was "blue underlined link"
+                         before and users overlooked it; making it a chunky
+                         primary-style button removes the "where do I get
+                         the token?" friction. -->
+                    <div class="pt-1">
+                        <button
+                            class="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-brand-500/20 hover:bg-brand-500/30 border border-brand-500/40 transition"
+                            @click="openTokensPage"
+                        >
+                            <div class="text-left">
+                                <div class="text-sm font-semibold text-brand-200">
+                                    Step 1 — Open token page in your browser
+                                </div>
+                                <div class="text-xs text-brand-300/70 mt-0.5 font-mono">
+                                    defrag.racing → Settings → Security
+                                </div>
+                            </div>
+                            <span class="text-brand-300 text-lg flex-shrink-0">↗</span>
+                        </button>
+                    </div>
+
+                    <ol class="text-sm text-neutral-300 list-decimal list-inside space-y-1 pt-1 pl-1">
+                        <li class="text-neutral-500"><span class="text-neutral-300">(step 1 done above ↑)</span></li>
+                        <li>Under <em>Launcher tokens</em>, click <em>New token</em> and label it (e.g. "Home PC")</li>
                         <li>Copy the generated token and paste it below</li>
                     </ol>
 
                     <input
                         v-model="token"
                         type="text"
-                        placeholder="1|abc123def…"
-                        class="w-full bg-black/60 border border-white/10 rounded px-3 py-2 text-sm font-mono"
+                        placeholder="1|abc123def…  (paste token here)"
+                        class="w-full bg-black/60 border border-white/10 rounded px-3 py-2 text-sm font-mono focus:border-brand-500/60 focus:outline-none"
                         @keydown.enter="saveToken"
                     />
                     <p v-if="tokenError" class="text-xs text-red-400">{{ tokenError }}</p>
