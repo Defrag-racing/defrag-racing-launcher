@@ -144,17 +144,30 @@
                 <div v-if="step === 1" class="space-y-4">
                     <h1 class="text-2xl font-bold">Welcome to Defrag Racing Launcher</h1>
                     <p class="text-sm text-neutral-400 leading-relaxed">
-                        This little app does two things: it can
-                        <strong class="text-neutral-200">automatically back up</strong> every demo you record to your
-                        <a href="#" @click.prevent="openUrl('https://defrag.racing')" class="text-brand-400 hover:underline">defrag.racing</a>
-                        account, and it opens
-                        <code class="text-xs bg-black/40 px-1 rounded">defrag://</code>
-                        links from the website directly in your engine of choice.
+                        A small companion app for
+                        <a href="#" @click.prevent="openUrl('https://defrag.racing')" class="text-brand-400 hover:underline">defrag.racing</a>.
+                        It does four things:
                     </p>
-                    <p class="text-sm text-neutral-400 leading-relaxed">
-                        Setup takes under a minute. You can skip the auto-upload if you only want the
-                        <code class="text-xs bg-black/40 px-1 rounded">defrag://</code>
-                        link handler.
+                    <ul class="text-sm text-neutral-300 space-y-1.5 pl-1">
+                        <li class="flex gap-2">
+                            <span class="text-brand-400 mt-0.5">•</span>
+                            <span><strong>Auto-backup demos</strong> — every new <code class="text-xs bg-black/40 px-1 rounded">.dm_*</code> file in your demos folder gets uploaded to your account.</span>
+                        </li>
+                        <li class="flex gap-2">
+                            <span class="text-brand-400 mt-0.5">•</span>
+                            <span><strong>Server browser</strong> — live list of Defrag servers with your PB and rank on each map.</span>
+                        </li>
+                        <li class="flex gap-2">
+                            <span class="text-brand-400 mt-0.5">•</span>
+                            <span><strong>Notifications</strong> — record-related and account alerts from the website, in the launcher.</span>
+                        </li>
+                        <li class="flex gap-2">
+                            <span class="text-brand-400 mt-0.5">•</span>
+                            <span><strong><code class="text-xs bg-black/40 px-1 rounded">defrag://</code> links</strong> — click "Join" on the website, the launcher asks you to confirm, your engine launches.</span>
+                        </li>
+                    </ul>
+                    <p class="text-xs text-neutral-500 leading-relaxed pt-1">
+                        First three need a token from your defrag.racing account. The <code class="bg-black/40 px-1 rounded">defrag://</code> handler works without one. Setup takes under a minute.
                     </p>
                     <div class="flex justify-end pt-2">
                         <button class="btn-primary" @click="step = 2">Next</button>
@@ -163,14 +176,20 @@
 
                 <!-- step 2: token -->
                 <div v-else-if="step === 2" class="space-y-4">
-                    <h2 class="text-xl font-bold">Auto-upload token</h2>
+                    <h2 class="text-xl font-bold">Account token</h2>
                     <p class="text-sm text-neutral-400 leading-relaxed">
-                        To automatically back up demos, paste a personal access token from your defrag.racing account.
-                        Without a token the launcher still works for
-                        <code class="text-xs bg-black/40 px-1 rounded">defrag://</code> links.
+                        A token links the launcher to your defrag.racing account. It unlocks:
+                    </p>
+                    <ul class="text-sm text-neutral-300 space-y-1 pl-1">
+                        <li class="flex gap-2"><span class="text-brand-400 mt-0.5">✓</span><span>Auto-upload of new demos</span></li>
+                        <li class="flex gap-2"><span class="text-brand-400 mt-0.5">✓</span><span>Server browser with your personal best / rank per map</span></li>
+                        <li class="flex gap-2"><span class="text-brand-400 mt-0.5">✓</span><span>Notifications — record + system alerts for your account</span></li>
+                    </ul>
+                    <p class="text-xs text-neutral-500 leading-relaxed">
+                        Without a token, only <code class="bg-black/40 px-1 rounded">defrag://</code> server-join links work. You can paste a token later from Settings.
                     </p>
 
-                    <ol class="text-sm text-neutral-300 list-decimal list-inside space-y-1">
+                    <ol class="text-sm text-neutral-300 list-decimal list-inside space-y-1 pt-1">
                         <li>
                             <button class="text-brand-400 hover:underline" @click="openTokensPage">
                                 Open defrag.racing → Settings → Security
@@ -190,7 +209,7 @@
                     <p v-if="tokenError" class="text-xs text-red-400">{{ tokenError }}</p>
 
                     <div class="flex justify-between pt-2">
-                        <button class="btn-ghost" @click="skipToken">Skip (no auto-upload)</button>
+                        <button class="btn-ghost" @click="skipToken">Skip — defrag:// only</button>
                         <button class="btn-primary" :disabled="!token.trim() || tokenSaving" @click="saveToken">
                             {{ tokenSaving ? 'Saving…' : 'Save & continue' }}
                         </button>

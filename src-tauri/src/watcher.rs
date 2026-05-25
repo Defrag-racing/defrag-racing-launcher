@@ -76,6 +76,23 @@ pub struct UploadStateSnapshot {
     pub items: Vec<PendingUpload>,
 }
 
+/// Cap on the number of rows kept in the visible queue. Anything older
+/// than this gets dropped when a new row is inserted at the head. The
+/// motivation is webview survival: each emit ships a copy of the full
+/// snapshot and Vue runs a list-diff on it, so an unbounded queue plus
+/// a rescan of a several-thousand-file folder can crash the webview
+/// with the white-screen-of-death we saw in 0.1.6 testing. 500 is
+/// generous enough for a normal session (the user can still scroll
+/// through their recent activity) while keeping the IPC payload small.
+const QUEUE_CAP: usize = 500;
+
+/// Minimum gap between two `upload_state_changed` emits. During a tight
+/// inner loop (rescan with pause-aborted hashing) the per-update emit
+/// rate can exceed what Vue + the webview IPC can absorb; throttling
+/// to ~20 emits/sec stays well under the danger zone while still
+/// feeling live (a user looking at the queue doesn't notice 50ms).
+const EMIT_MIN_GAP_MS: u64 = 50;
+
 #[derive(Default)]
 pub struct UploadState {
     inner: Mutex<Vec<PendingUpload>>,
@@ -85,6 +102,9 @@ pub struct UploadState {
     /// `spawn_blocking` closure and abort mid-chunk on pause.
     paused: Arc<AtomicBool>,
     notify: Notify,
+    /// Last time we emitted an upload_state_changed event. Used to
+    /// rate-limit emits — see `EMIT_MIN_GAP_MS`.
+    last_emit_at: Mutex<Option<Instant>>,
 }
 
 impl UploadState {
@@ -118,7 +138,10 @@ impl UploadState {
 
     /// Find-or-insert by path, apply `f` to the entry, emit a change event.
     /// Insertion goes at the head so the newest activity is visible without
-    /// scrolling — matches user expectation of an "activity feed".
+    /// scrolling — matches user expectation of an "activity feed". The
+    /// emit is rate-limited (see EMIT_MIN_GAP_MS) and the queue is capped
+    /// (QUEUE_CAP) so a burst of updates from a multi-thousand-file
+    /// rescan can't crash the webview.
     fn update(
         &self,
         app: &AppHandle,
@@ -133,9 +156,32 @@ impl UploadState {
                 let mut new = PendingUpload::new(path.to_path_buf(), filename.to_string());
                 f(&mut new);
                 items.insert(0, new);
+                if items.len() > QUEUE_CAP {
+                    items.truncate(QUEUE_CAP);
+                }
             }
         });
-        let _ = app.emit("upload_state_changed", self.snapshot());
+
+        // Throttle: only emit if EMIT_MIN_GAP_MS has elapsed since the
+        // last one. We don't queue a trailing emit when we skip — when
+        // the burst eventually stops, the *next* update will emit the
+        // settled snapshot. Worst case the UI is up to 50ms stale
+        // (imperceptible).
+        let should_emit = {
+            let mut last = self.last_emit_at.lock().unwrap();
+            let now = Instant::now();
+            let due = match *last {
+                Some(prev) => now.duration_since(prev) >= Duration::from_millis(EMIT_MIN_GAP_MS),
+                None => true,
+            };
+            if due {
+                *last = Some(now);
+            }
+            due
+        };
+        if should_emit {
+            let _ = app.emit("upload_state_changed", self.snapshot());
+        }
     }
 }
 
@@ -326,6 +372,16 @@ async fn worker_loop(
                 // (already a dep) with follow_links off so a stray symlink
                 // can't loop. is_in_temp_subfolder filters out Quake's
                 // WIP-recording dir at any depth.
+                //
+                // The pause-park has to happen per-FILE here, not just at
+                // the top of the outer match. Without it, a rescan that
+                // started before pause was hit will tear through every
+                // file in the folder back-to-back: each handle_file
+                // notices the pause and aborts hashing within ms, but
+                // the for-loop instantly moves to the next file and
+                // does the same dance — so the user sees a flood of
+                // Hashing→Pending status flips even though they hit
+                // Pause. Parking between files actually halts the work.
                 if recursive {
                     for entry in walkdir::WalkDir::new(&folder)
                         .follow_links(false)
@@ -337,6 +393,13 @@ async fn worker_loop(
                             && is_demo_file(p)
                             && !is_in_temp_subfolder(p)
                         {
+                            loop {
+                                let notified = state.notify.notified();
+                                if !state.is_paused() {
+                                    break;
+                                }
+                                notified.await;
+                            }
                             handle_file(&client, &state, &app, &mut cache, p.to_path_buf()).await;
                         }
                     }
@@ -344,6 +407,13 @@ async fn worker_loop(
                     for e in entries.flatten() {
                         let p = e.path();
                         if p.is_file() && is_demo_file(&p) && !is_in_temp_subfolder(&p) {
+                            loop {
+                                let notified = state.notify.notified();
+                                if !state.is_paused() {
+                                    break;
+                                }
+                                notified.await;
+                            }
                             handle_file(&client, &state, &app, &mut cache, p).await;
                         }
                     }
