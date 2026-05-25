@@ -318,6 +318,22 @@ pub fn launch_engine() -> Result<(), String> {
     protocol::launch_no_connect(cfg.engine_path.as_deref()).map_err(err_to_string)
 }
 
+// ---- Server browser --------------------------------------------------------
+
+/// Fetch the live server list from defrag.racing. Token-locked endpoint -
+/// requires a launcher token with the `launcher:read` ability. The
+/// returned JSON is the same shape the website /api/servers/live serves
+/// (via the shared ServerListService) plus per-user mytime/myrank
+/// fields populated for the token's owner. Frontend renders directly.
+#[tauri::command]
+pub async fn get_servers() -> Result<serde_json::Value, String> {
+    let token = token::load()
+        .map_err(err_to_string)?
+        .ok_or_else(|| "No token saved - server browser requires a launcher token from defrag.racing/user/settings".to_string())?;
+    let client = crate::api::Client::new(config::api_base_url(), token).map_err(err_to_string)?;
+    client.fetch_servers().await.map_err(err_to_string)
+}
+
 /// Read (without consuming) the URL waiting for user confirmation. Called
 /// by the frontend on mount so cold-start-via-deep-link surfaces the
 /// Connect prompt without the user needing to re-click the link.

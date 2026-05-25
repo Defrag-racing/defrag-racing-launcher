@@ -134,6 +134,26 @@ impl Client {
         Ok(body)
     }
 
+    /// Pull the server-browser feed from /api/launcher/servers. Returns
+    /// the raw JSON value the Laravel endpoint produced - we don't define
+    /// a Rust struct mirror because the shape comes straight from the
+    /// existing web /api/servers/live (same ServerListService) and will
+    /// grow new columns over time. The Vue layer types it loosely and
+    /// renders directly, so a backend addition doesn't need a launcher
+    /// release.
+    pub async fn fetch_servers(&self) -> ApiResult<serde_json::Value> {
+        let resp = self
+            .http
+            .get(self.url("/api/launcher/servers"))
+            .bearer_auth(&self.token)
+            .header("Accept", "application/json")
+            .send()
+            .await?;
+        self.check_status(&resp).await?;
+        let body = resp.json::<serde_json::Value>().await?;
+        Ok(body)
+    }
+
     async fn check_status(&self, resp: &reqwest::Response) -> ApiResult<()> {
         // `Response::json()` consumes the body - we only read it here when
         // the status is already known to be an error, so the success path

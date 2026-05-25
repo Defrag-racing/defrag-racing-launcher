@@ -84,4 +84,46 @@ export const tauri = {
     getPendingDeepLink: () => invoke<string | null>('get_pending_deep_link'),
     confirmPendingDeepLink: () => invoke<string>('confirm_pending_deep_link'),
     cancelPendingDeepLink: () => invoke<void>('cancel_pending_deep_link'),
+
+    // Untyped on purpose: the JSON shape is owned by the Laravel
+    // ServerListService and will grow new fields over time. Frontend
+    // uses a minimal interface (DefragServer below) for the columns it
+    // actually renders.
+    getServers: () => invoke<{ servers: DefragServer[] }>('get_servers'),
 };
+
+/** Minimal shape for the columns the launcher renders. The backend
+ *  payload has many more fields (besttime_*, mapdata, onlinePlayers
+ *  with spectators, etc.) - add to this interface when surfacing a
+ *  new one in the UI. */
+export interface DefragServer {
+    id: number;
+    name: string;
+    plain_name?: string;
+    ip: string;
+    port: number;
+    map: string;
+    defrag: string;
+    /** Number of currently-connected players (excludes spectators). */
+    onlinePlayers?: DefragPlayer[];
+    mapdata?: { thumbnail?: string | null } | null;
+    /** Per-user fields populated for the token owner; null when the
+     *  user has no PB on the current map. */
+    mytime_time?: number | null;
+    mytime_date?: string | null;
+    myrank_position?: number | null;
+    myrank_total?: number | null;
+    besttime_time?: number | null;
+    besttime_name?: string | null;
+    besttime_country?: string | null;
+    besttime_date?: string | null;
+}
+
+export interface DefragPlayer {
+    id?: number;
+    name: string;
+    plain_name?: string;
+    country?: string | null;
+    nospec?: boolean;
+    spectators?: DefragPlayer[];
+}
