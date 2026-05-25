@@ -183,6 +183,7 @@ pub fn run() {
             commands::clear_upload_cache,
             commands::get_cpu_throttle_pct,
             commands::set_cpu_throttle_pct_runtime,
+            commands::get_rate_limit_resume_at_ms,
             commands::handle_protocol_url,
             commands::launch_engine,
             commands::get_servers,

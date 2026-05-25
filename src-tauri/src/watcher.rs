@@ -19,7 +19,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, FileIdMap};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
@@ -115,14 +115,24 @@ pub struct UploadState {
     /// `spawn_blocking` closure and abort mid-chunk on pause.
     paused: Arc<AtomicBool>,
     notify: Notify,
-    /// Last time we emitted an upload_state_changed event. Used to
-    /// rate-limit emits - see `EMIT_MIN_GAP_MS`.
-    last_emit_at: Mutex<Option<Instant>>,
+    /// Flipped to true by `update()` on every state mutation; cleared by
+    /// the background emit-pump task right after it emits the snapshot
+    /// to the webview. Decouples the hot mutation path from IPC + Vue
+    /// reactivity cost, AND ensures the FINAL mutation of a burst still
+    /// reaches the frontend (the previous in-update throttle would drop
+    /// it because the next-update gap check would never run).
+    dirty: AtomicBool,
     /// Target CPU duty-cycle for the hashing worker, in percent (0-100).
     /// 0 disables the throttle entirely (no idle wait between hashes).
     /// Live-mutable from commands so the Speed-up button on Dashboard
     /// takes effect immediately, without restarting the watcher.
     cpu_throttle_pct: AtomicU8,
+    /// Unix-epoch ms at which a current 429 backoff ends, or 0 when no
+    /// rate-limit wait is active. Set by the API client via the
+    /// observer callback installed in start(); read by Tauri command
+    /// `get_rate_limit_resume_at` so the Dashboard can render a
+    /// countdown banner while uploads are paced down by the server.
+    rate_limit_resume_at_ms: AtomicU64,
 }
 
 impl UploadState {
@@ -159,6 +169,22 @@ impl UploadState {
         self.cpu_throttle_pct.store(clamped, Ordering::Release);
     }
 
+    /// Unix-epoch ms at which the active 429 backoff ends, or 0 when
+    /// not rate-limited. Read by the Tauri command.
+    pub fn rate_limit_resume_at_ms(&self) -> u64 {
+        self.rate_limit_resume_at_ms.load(Ordering::Acquire)
+    }
+
+    /// Set by the API client's rate-limit observer (see Client::set_rate_limit_observer).
+    /// Passing 0 clears the countdown.
+    pub fn set_rate_limit_resume_at_ms(&self, ms: u64) {
+        self.rate_limit_resume_at_ms.store(ms, Ordering::Release);
+        // Mark state dirty so the emit pump pushes a fresh snapshot
+        // and the frontend can update its banner immediately rather
+        // than waiting for an unrelated update to fire.
+        self.dirty.store(true, Ordering::Release);
+    }
+
     /// Idle period to wait AFTER a hash of `hash_duration`, computed to
     /// keep total CPU usage at the configured duty cycle. The math is
     /// straightforward: at target T%, the hash should occupy T% of any
@@ -181,15 +207,22 @@ impl UploadState {
         f(&mut self.inner.lock().unwrap())
     }
 
-    /// Find-or-insert by path, apply `f` to the entry, emit a change event.
-    /// Insertion goes at the head so the newest activity is visible without
-    /// scrolling - matches user expectation of an "activity feed". The
-    /// emit is rate-limited (see EMIT_MIN_GAP_MS) and the queue is capped
-    /// (QUEUE_CAP) so a burst of updates from a multi-thousand-file
-    /// rescan can't crash the webview.
+    /// Find-or-insert by path, apply `f` to the entry, mark state
+    /// dirty. The background emit-pump task (started in `start()`)
+    /// notices the dirty flag on its next tick and emits the snapshot
+    /// to the webview at most once per EMIT_MIN_GAP_MS - the previous
+    /// in-update throttle dropped the LAST emit of a burst (no
+    /// follow-up update to retry), so a cache-hit rescan of 300 demos
+    /// in <50ms ended up showing zero rows in the UI. Pump model
+    /// guarantees the final state always lands within one tick.
+    ///
+    /// Insertion goes at the head so the newest activity is visible
+    /// without scrolling - matches user expectation of an "activity
+    /// feed". Queue cap (QUEUE_CAP) is enforced here so a multi-
+    /// thousand-file rescan can't blow up the snapshot payload.
     fn update(
         &self,
-        app: &AppHandle,
+        _app: &AppHandle,
         path: &Path,
         filename: &str,
         f: impl FnOnce(&mut PendingUpload),
@@ -206,27 +239,7 @@ impl UploadState {
                 }
             }
         });
-
-        // Throttle: only emit if EMIT_MIN_GAP_MS has elapsed since the
-        // last one. We don't queue a trailing emit when we skip - when
-        // the burst eventually stops, the *next* update will emit the
-        // settled snapshot. Worst case the UI is up to 50ms stale
-        // (imperceptible).
-        let should_emit = {
-            let mut last = self.last_emit_at.lock().unwrap();
-            let now = Instant::now();
-            let due = match *last {
-                Some(prev) => now.duration_since(prev) >= Duration::from_millis(EMIT_MIN_GAP_MS),
-                None => true,
-            };
-            if due {
-                *last = Some(now);
-            }
-            due
-        };
-        if should_emit {
-            let _ = app.emit("upload_state_changed", self.snapshot());
-        }
+        self.dirty.store(true, Ordering::Release);
     }
 }
 
@@ -246,11 +259,23 @@ pub enum Message {
 
 pub struct WatcherHandle {
     _debouncer: Debouncer<RecommendedWatcher, FileIdMap>,
-    _worker: tauri::async_runtime::JoinHandle<()>,
+    worker: tauri::async_runtime::JoinHandle<()>,
+    emit_pump: tauri::async_runtime::JoinHandle<()>,
     pub state: Arc<UploadState>,
     /// Kept so `resume_auto_upload` can poke the worker awake with
     /// `Message::RedrivePending` after lifting the pause gate.
     pub tx: tokio::sync::mpsc::UnboundedSender<Message>,
+}
+
+impl Drop for WatcherHandle {
+    fn drop(&mut self) {
+        // Both background tasks hold clones of the AppHandle and the
+        // shared UploadState - they need an explicit abort, otherwise
+        // dropping the handle (Stop button, app close) leaves them
+        // running forever and each Stop+Start leaks a new pair.
+        self.worker.abort();
+        self.emit_pump.abort();
+    }
 }
 
 /// Start watching `demos_path` and return a handle whose drop stops the
@@ -323,9 +348,31 @@ pub fn start(
     let worker = tauri::async_runtime::spawn(worker_loop(rx, state_worker, app_worker, api_base_url, token));
     crate::log_startup("watcher::start: async_runtime::spawn returned");
 
+    // Emit pump: ticks every EMIT_MIN_GAP_MS and forwards the current
+    // snapshot to the webview if state has been mutated since the last
+    // emit. Decouples the IPC cost from the hot mutation path and -
+    // crucially - guarantees the LAST mutation of a burst still reaches
+    // the frontend (the old in-update throttle dropped it because the
+    // next-update-with-gap-check never came).
+    let state_pump = state.clone();
+    let app_pump = app.clone();
+    let emit_pump = tauri::async_runtime::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_millis(EMIT_MIN_GAP_MS));
+        // Skip the immediate-fire of the first tick - there's nothing
+        // to emit before the worker has had a chance to mutate state.
+        tick.tick().await;
+        loop {
+            tick.tick().await;
+            if state_pump.dirty.swap(false, Ordering::AcqRel) {
+                let _ = app_pump.emit("upload_state_changed", state_pump.snapshot());
+            }
+        }
+    });
+
     Ok(WatcherHandle {
         _debouncer: debouncer,
-        _worker: worker,
+        worker,
+        emit_pump,
         state,
         tx,
     })
@@ -360,13 +407,22 @@ async fn worker_loop(
     api_base_url: String,
     token: String,
 ) {
-    let client = match Client::new(api_base_url, token) {
+    let mut client = match Client::new(api_base_url, token) {
         Ok(c) => c,
         Err(e) => {
             log::error!("failed to build API client: {e}");
             return;
         }
     };
+
+    // Wire up the 429 countdown: the API client pings this observer
+    // whenever it starts/stops waiting on a Retry-After. Worker side
+    // forwards into UploadState so a Tauri command can expose it and
+    // the Dashboard can render a "resuming in Xs" banner.
+    let state_for_observer = state.clone();
+    client.set_rate_limit_observer(Arc::new(move |resume_at_ms| {
+        state_for_observer.set_rate_limit_resume_at_ms(resume_at_ms.unwrap_or(0));
+    }));
 
     // Single in-memory cache shared across all messages processed by this
     // worker. Reload from disk once on start so we pick up state from

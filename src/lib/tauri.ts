@@ -76,6 +76,11 @@ export const tauri = {
     /** Runtime override; does not persist to config. */
     setCpuThrottlePctRuntime: (pct: number) => invoke<void>('set_cpu_throttle_pct_runtime', { pct }),
 
+    /** Unix-epoch ms at which a current 429 backoff ends, or 0 if
+     *  no rate-limit wait is active. Frontend polls every ~1s and
+     *  renders a countdown banner while > Date.now(). */
+    getRateLimitResumeAtMs: () => invoke<number>('get_rate_limit_resume_at_ms'),
+
     isAutostartEnabled: () => invoke<boolean>('is_autostart_enabled'),
     setAutostartEnabled: (enabled: boolean) => invoke<void>('set_autostart_enabled', { enabled }),
 

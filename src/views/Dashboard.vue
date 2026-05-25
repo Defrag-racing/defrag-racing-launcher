@@ -29,6 +29,27 @@
         } catch { /* watcher not running */ }
     };
 
+    // Rate-limit countdown. Backend stores a unix-epoch-ms timestamp at
+    // which the active 429 backoff ends; we poll once a second while
+    // the watcher is running and render a banner when > now. The 1s
+    // poll is cheap (single AtomicU64 load) and makes the countdown
+    // visibly tick without needing event-driven plumbing.
+    const rateLimitResumeAtMs = ref(0);
+    const nowMs = ref(Date.now());
+    const rateLimitSecondsLeft = computed(() => {
+        const delta = rateLimitResumeAtMs.value - nowMs.value;
+        return delta > 0 ? Math.ceil(delta / 1000) : 0;
+    });
+    const isRateLimited = computed(() => rateLimitSecondsLeft.value > 0);
+    let rateLimitPollTimer: number | undefined;
+    let nowTickTimer: number | undefined;
+
+    const pollRateLimit = async () => {
+        try {
+            rateLimitResumeAtMs.value = await tauri.getRateLimitResumeAtMs();
+        } catch { /* watcher not running, leave at 0 */ }
+    };
+
     // Cycle order: user's saved preference first, then any strictly-
     // faster tier (50% Fast, then 0% No-limit). 0 is treated as the
     // fastest because the throttle code interprets 0 as "no idle wait".
@@ -173,6 +194,13 @@
         queue.value = await tauri.getUploadState();
         await refreshPaused();
         await refreshThrottle();
+        await pollRateLimit();
+
+        // Poll the rate-limit timestamp once a second; tick the local
+        // "now" every 250ms so the countdown feels live without an
+        // extra Tauri round-trip per frame.
+        rateLimitPollTimer = window.setInterval(pollRateLimit, 1000);
+        nowTickTimer = window.setInterval(() => { nowMs.value = Date.now(); }, 250);
 
         unlisten = await listen<UploadStateSnapshot>('upload_state_changed', (ev) => {
             queue.value = ev.payload;
@@ -231,6 +259,8 @@
         if (unlistenResult) unlistenResult();
         window.clearTimeout(deepLinkErrorTimer);
         if (updateCheckTimer !== undefined) window.clearInterval(updateCheckTimer);
+        if (rateLimitPollTimer !== undefined) window.clearInterval(rateLimitPollTimer);
+        if (nowTickTimer !== undefined) window.clearInterval(nowTickTimer);
     });
 
     const dismissDeepLinkError = () => {
@@ -448,6 +478,22 @@
         <p v-if="toggleError" class="px-5 py-2 bg-red-500/10 border-b border-red-500/20 text-xs text-red-300">
             {{ toggleError }}
         </p>
+
+        <!-- Rate-limit countdown. Renders whenever the API client is
+             currently sleeping on a 429 Retry-After. The launcher
+             auto-resumes when the timer hits zero; banner is just
+             informational so the user knows nothing is broken. -->
+        <div
+            v-if="isRateLimited"
+            class="px-5 py-2 border-b border-amber-500/20 bg-amber-500/10 text-xs text-amber-200 flex items-center gap-2"
+        >
+            <span class="text-amber-400">⏳</span>
+            <span>
+                Rate-limited by defrag.racing - resuming in
+                <strong>{{ rateLimitSecondsLeft }}s</strong>.
+                The launcher will retry automatically.
+            </span>
+        </div>
 
         <!-- No-token banner. Surfaces explicitly which features the user
              is missing so they don't sit on an empty dashboard wondering

@@ -262,6 +262,19 @@ pub fn is_auto_upload_paused(state: State<'_, AppState>) -> bool {
         .map_or(false, |h| h.state.is_paused())
 }
 
+/// Unix-epoch ms at which the active 429 backoff ends, or 0 when not
+/// rate-limited. Dashboard polls this once a second and renders a
+/// countdown banner while > now.
+#[tauri::command]
+pub fn get_rate_limit_resume_at_ms(state: State<'_, AppState>) -> u64 {
+    state
+        .watcher
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map_or(0, |h| h.state.rate_limit_resume_at_ms())
+}
+
 /// Current CPU-throttle target the running watcher is using. Falls back
 /// to the persisted config value when no watcher is up - UI uses this
 /// to show the live percentage on the Speed-up button.
