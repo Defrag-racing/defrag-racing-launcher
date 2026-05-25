@@ -184,6 +184,7 @@ pub fn run() {
             commands::get_cpu_throttle_pct,
             commands::set_cpu_throttle_pct_runtime,
             commands::handle_protocol_url,
+            commands::launch_engine,
             commands::get_pending_deep_link,
             commands::confirm_pending_deep_link,
             commands::cancel_pending_deep_link,

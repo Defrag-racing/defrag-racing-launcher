@@ -80,6 +80,7 @@ export const tauri = {
     setAutostartEnabled: (enabled: boolean) => invoke<void>('set_autostart_enabled', { enabled }),
 
     handleProtocolUrl: (url: string) => invoke<string>('handle_protocol_url', { url }),
+    launchEngine: () => invoke<void>('launch_engine'),
     getPendingDeepLink: () => invoke<string | null>('get_pending_deep_link'),
     confirmPendingDeepLink: () => invoke<string>('confirm_pending_deep_link'),
     cancelPendingDeepLink: () => invoke<void>('cancel_pending_deep_link'),

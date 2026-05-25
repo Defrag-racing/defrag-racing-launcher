@@ -42,6 +42,23 @@
         }
     };
 
+    // "Play" button — launches the configured engine at the main menu
+    // (no +connect). Disabled when no engine is set, with a tooltip
+    // pointing the user at Settings rather than failing silently.
+    const launchError = ref<string | null>(null);
+    const launching = ref(false);
+    const launchGame = async () => {
+        launchError.value = null;
+        launching.value = true;
+        try {
+            await tauri.launchEngine();
+        } catch (e: any) {
+            launchError.value = e?.toString?.() ?? 'Failed to launch';
+        } finally {
+            launching.value = false;
+        }
+    };
+
     // Per-row expand state. Keyed by path so the same row stays open
     // through queue updates (sort order doesn't shuffle anything; new
     // items appear at the top).
@@ -332,6 +349,23 @@
                 </div>
             </div>
             <div class="flex items-center gap-2 flex-shrink-0">
+                <!-- Play: launches the configured engine at the main menu.
+                     Primary action for the "I want to actually play" use
+                     case — without it the user has to find the engine
+                     binary in their filesystem every time. Disabled with
+                     a hint when the engine path isn't configured yet. -->
+                <button
+                    class="px-3 py-1.5 rounded text-sm font-semibold flex items-center gap-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                    :disabled="!config.config.engine_path || launching"
+                    :title="!config.config.engine_path
+                        ? 'Pick an engine in Settings first'
+                        : `Launch ${config.config.engine_path}`"
+                    @click="launchGame"
+                >
+                    <span>▶</span>
+                    <span>{{ launching ? 'Launching…' : 'Play' }}</span>
+                </button>
+
                 <!-- Speed-up: visible whenever the watcher is alive. Bumps the
                      live duty-cycle to 50% so a backlog drains faster than
                      the user's default (typically 15%). Re-click to drop
@@ -374,6 +408,10 @@
 
         <p v-if="toggleError" class="px-5 py-2 bg-red-500/10 border-b border-red-500/20 text-xs text-red-300">
             {{ toggleError }}
+        </p>
+        <p v-if="launchError" class="px-5 py-2 bg-red-500/10 border-b border-red-500/20 text-xs text-red-300 flex items-center gap-2">
+            <span>{{ launchError }}</span>
+            <button class="ml-auto text-neutral-400 hover:text-neutral-200" @click="launchError = null">×</button>
         </p>
 
         <!-- No-token banner. Surfaces explicitly which features the user

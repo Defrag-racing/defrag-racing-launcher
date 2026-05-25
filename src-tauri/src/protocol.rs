@@ -76,16 +76,33 @@ pub fn parse_url(url: &str) -> Result<SocketAddr, ProtocolError> {
 /// once the process is started — we don't wait for it to exit because
 /// the engine stays open for the entire gaming session.
 pub fn launch(engine: Option<&Path>, addr: SocketAddr) -> Result<(), ProtocolError> {
+    spawn_engine(engine, |cmd| {
+        // Q3-family engines parse `+connect <ip>:<port>` as a startup
+        // console command. Two args, not one — `+connect ip:port` as a
+        // single string is silently ignored by the engine.
+        cmd.arg("+connect").arg(addr.to_string());
+    })
+}
+
+/// Spawns the configured engine without any `+connect` — just opens
+/// Defrag at the main menu. Used by the Dashboard "Play" button so a
+/// user who keeps the launcher in their tray can jump into the game
+/// without finding the engine .exe in their filesystem.
+pub fn launch_no_connect(engine: Option<&Path>) -> Result<(), ProtocolError> {
+    spawn_engine(engine, |_| {})
+}
+
+fn spawn_engine(
+    engine: Option<&Path>,
+    extra_args: impl FnOnce(&mut Command),
+) -> Result<(), ProtocolError> {
     let engine = engine.ok_or(ProtocolError::EngineNotConfigured)?;
     if !engine.exists() {
         return Err(ProtocolError::EngineMissing(engine.to_path_buf()));
     }
 
-    // Q3-family engines parse `+connect <ip>:<port>` as a startup
-    // console command. Two args, not one — `+connect ip:port` as a
-    // single string is silently ignored by the engine.
     let mut cmd = Command::new(engine);
-    cmd.arg("+connect").arg(addr.to_string());
+    extra_args(&mut cmd);
 
     // Set CWD to the engine's directory. oDFe/iDFe load fs_basepath
     // relative to CWD on Linux, and starting the engine from a random

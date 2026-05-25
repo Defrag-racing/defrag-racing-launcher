@@ -309,6 +309,15 @@ pub fn handle_protocol_url(url: String) -> Result<String, String> {
     Ok(addr.to_string())
 }
 
+/// Launch the configured engine at the main menu (no +connect). One-click
+/// "play the game" from the Dashboard for tray-resident users who don't
+/// want to dig the engine binary out of their filesystem.
+#[tauri::command]
+pub fn launch_engine() -> Result<(), String> {
+    let cfg = Config::load().map_err(err_to_string)?;
+    protocol::launch_no_connect(cfg.engine_path.as_deref()).map_err(err_to_string)
+}
+
 /// Read (without consuming) the URL waiting for user confirmation. Called
 /// by the frontend on mount so cold-start-via-deep-link surfaces the
 /// Connect prompt without the user needing to re-click the link.
