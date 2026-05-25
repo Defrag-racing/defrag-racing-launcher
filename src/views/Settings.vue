@@ -282,13 +282,19 @@
                 </label>
             </section>
 
-            <!-- Auto-update -->
+            <!-- Auto-update is intentionally not user-toggleable. Security
+                 fixes (token leak protection, signed-update bypasses, MSI
+                 cleanup bugs that wipe user data, etc.) have to reach
+                 every install without depending on the user remembering to
+                 check Releases. The config field still exists and defaults
+                 to true; the toggle UI is preserved below in case we ever
+                 want to add an "expert mode" escape hatch.
             <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 flex items-center justify-between gap-3">
                 <div>
                     <div class="font-semibold">Automatic updates</div>
                     <div class="text-xs text-neutral-500 mt-0.5">
-                        Checks <code class="bg-black/40 px-1 rounded">defrag.racing</code> and GitHub
-                        on startup for a newer signed release. Off = check Releases manually.
+                        Checks `defrag.racing` and GitHub on startup for a newer signed release.
+                        Off = check Releases manually.
                     </div>
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
@@ -301,6 +307,20 @@
                     <div class="w-10 h-5 bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors"></div>
                     <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
                 </label>
+            </section>
+            -->
+            <!-- Auto-update status (read-only, informational) -->
+            <section class="bg-neutral-900 border border-white/10 rounded-lg p-4">
+                <div class="flex items-center gap-2">
+                    <span class="text-emerald-400">●</span>
+                    <div class="font-semibold">Automatic updates: on</div>
+                </div>
+                <div class="text-xs text-neutral-500 mt-1.5 leading-relaxed">
+                    The launcher checks `defrag.racing` and GitHub for a newer signed release
+                    on every startup. Required to keep security fixes flowing - cannot be
+                    disabled. When an update is available the dashboard shows an "Install &amp; restart"
+                    banner.
+                </div>
             </section>
 
             <!-- Run setup again -->

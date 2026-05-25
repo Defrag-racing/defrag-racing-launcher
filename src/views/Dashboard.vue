@@ -95,6 +95,12 @@
     const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
     const checkUpdate = async () => {
+        // Auto-update is always on (the Settings toggle was retired -
+        // security fixes have to reach every install without depending
+        // on a user remembering to flip a switch). We still read the
+        // config flag for forward compatibility in case an expert-mode
+        // escape hatch reappears, but the default is true and the UI
+        // exposes no way to flip it off.
         if (!config.config.auto_update_enabled) return;
         try {
             const update = await checkForUpdate();
