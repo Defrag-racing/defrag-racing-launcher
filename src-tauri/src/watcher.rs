@@ -81,7 +81,9 @@ pub struct UploadState {
     inner: Mutex<Vec<PendingUpload>>,
     /// Pause gate for the worker. Set via `set_paused`; the worker checks
     /// this before pulling the next item and parks on `notify` while true.
-    paused: AtomicBool,
+    /// Held in an `Arc` so the hashing path can clone a handle into a
+    /// `spawn_blocking` closure and abort mid-chunk on pause.
+    paused: Arc<AtomicBool>,
     notify: Notify,
 }
 
@@ -102,6 +104,12 @@ impl UploadState {
             // Wake any worker parked in `notified().await`.
             self.notify.notify_one();
         }
+    }
+
+    /// Hand out a cheap clone of the pause flag for blocking tasks that
+    /// can't hold a `&UploadState` across an `.await`.
+    fn pause_flag(&self) -> Arc<AtomicBool> {
+        self.paused.clone()
     }
 
     fn with_mut<R>(&self, f: impl FnOnce(&mut Vec<PendingUpload>) -> R) -> R {
@@ -132,18 +140,26 @@ impl UploadState {
 }
 
 /// Message sent to the worker task.
-enum Message {
+pub enum Message {
     FileAdded(PathBuf),
     /// Walk the folder once at startup. `recursive` mirrors the
     /// include_subfolders user setting so the rescan matches what the
     /// live watcher will pick up afterward.
     RescanFolder { folder: PathBuf, recursive: bool },
+    /// Sent on resume so the worker re-processes anything that ended
+    /// up back in `Pending` because pause aborted its hashing pass.
+    /// Without this, paused-mid-hash files would stay Pending forever
+    /// until a new filesystem event happened to nudge the queue.
+    RedrivePending,
 }
 
 pub struct WatcherHandle {
     _debouncer: Debouncer<RecommendedWatcher, FileIdMap>,
     _worker: tauri::async_runtime::JoinHandle<()>,
     pub state: Arc<UploadState>,
+    /// Kept so `resume_auto_upload` can poke the worker awake with
+    /// `Message::RedrivePending` after lifting the pause gate.
+    pub tx: tokio::sync::mpsc::UnboundedSender<Message>,
 }
 
 /// Start watching `demos_path` and return a handle whose drop stops the
@@ -218,6 +234,7 @@ pub fn start(
         _debouncer: debouncer,
         _worker: worker,
         state,
+        tx,
     })
 }
 
@@ -278,6 +295,31 @@ async fn worker_loop(
         match msg {
             Message::FileAdded(path) => {
                 handle_file(&client, &state, &app, &mut cache, path).await;
+            }
+            Message::RedrivePending => {
+                // Walk the queue and re-process anything still Pending.
+                // handle_file is idempotent for Done/Duplicate (early
+                // return) so being broad here is safe.
+                let pending_paths: Vec<PathBuf> = state.with_mut(|items| {
+                    items
+                        .iter()
+                        .filter(|u| u.status == UploadStatus::Pending)
+                        .map(|u| u.path.clone())
+                        .collect()
+                });
+                for p in pending_paths {
+                    // Re-check pause between items: the user may
+                    // pause again mid-redrive and we should respect
+                    // that without finishing the whole queue.
+                    loop {
+                        let notified = state.notify.notified();
+                        if !state.is_paused() {
+                            break;
+                        }
+                        notified.await;
+                    }
+                    handle_file(&client, &state, &app, &mut cache, p).await;
+                }
             }
             Message::RescanFolder { folder, recursive } => {
                 // Two scan modes by user choice. Recursive uses walkdir
@@ -374,13 +416,28 @@ async fn handle_file(
     });
 
     let t_hash = Instant::now();
+    let pause_flag = state.pause_flag();
     let md5 = match tauri::async_runtime::spawn_blocking({
         let path = path.clone();
-        move || hashing::md5_hex(&path)
+        move || hashing::md5_hex_cancellable(&path, &pause_flag)
     })
     .await
     {
-        Ok(Ok(h)) => h,
+        // Hash completed normally.
+        Ok(Ok(Some(h))) => h,
+        // Hash aborted because user hit Pause mid-stream. Drop status
+        // back to Pending so the row UI shows it as waiting (rather
+        // than stuck on Hashing forever), and bail. resume_auto_upload
+        // sends a RedrivePending message that re-enters handle_file
+        // for everything in Pending status.
+        Ok(Ok(None)) => {
+            state.update(app, &path, &filename, |u| {
+                u.status = UploadStatus::Pending;
+                u.error = None;
+                u.hash_throughput_bps = None;
+            });
+            return;
+        }
         Ok(Err(e)) => {
             state.update(app, &path, &filename, |u| {
                 u.status = UploadStatus::Error;

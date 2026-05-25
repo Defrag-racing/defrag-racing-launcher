@@ -10,7 +10,7 @@ use crate::config::{self, Config};
 use crate::engine::{self, EngineCandidate};
 use crate::protocol;
 use crate::token;
-use crate::watcher::{self, UploadStateSnapshot, WatcherHandle};
+use crate::watcher::{self, Message, UploadStateSnapshot, WatcherHandle};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{AppHandle, State};
@@ -237,6 +237,11 @@ pub fn pause_auto_upload(state: State<'_, AppState>) -> Result<(), String> {
 pub fn resume_auto_upload(state: State<'_, AppState>) -> Result<(), String> {
     if let Some(h) = state.watcher.lock().unwrap().as_ref() {
         h.state.set_paused(false);
+        // Kick the worker to re-process anything stuck in Pending —
+        // most commonly, a file whose hashing pass was aborted by the
+        // pause. Without this, those rows would sit there waiting for
+        // an unrelated filesystem event to wake the queue.
+        let _ = h.tx.send(Message::RedrivePending);
     }
     Ok(())
 }
