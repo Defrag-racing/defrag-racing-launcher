@@ -77,7 +77,7 @@ enum Message {
 
 pub struct WatcherHandle {
     _debouncer: Debouncer<RecommendedWatcher, FileIdMap>,
-    _worker: tokio::task::JoinHandle<()>,
+    _worker: tauri::async_runtime::JoinHandle<()>,
     pub state: Arc<UploadState>,
 }
 
@@ -143,9 +143,14 @@ pub fn start(
 
     let state_worker = state.clone();
     let app_worker = app.clone();
-    crate::log_startup("watcher::start: about to tokio::spawn worker_loop");
-    let worker = tokio::spawn(worker_loop(rx, state_worker, app_worker, api_base_url, token));
-    crate::log_startup("watcher::start: tokio::spawn returned");
+    // tauri::async_runtime::spawn instead of tokio::spawn — this is
+    // called from a sync Tauri command, which on Windows has no Tokio
+    // runtime entered, so a bare tokio::spawn panics with "there is no
+    // reactor running". Tauri's wrapper drives an internal runtime
+    // that's always available from command context.
+    crate::log_startup("watcher::start: about to async_runtime::spawn worker_loop");
+    let worker = tauri::async_runtime::spawn(worker_loop(rx, state_worker, app_worker, api_base_url, token));
+    crate::log_startup("watcher::start: async_runtime::spawn returned");
 
     Ok(WatcherHandle {
         _debouncer: debouncer,
@@ -274,7 +279,7 @@ async fn handle_file(
 
     push_or_update(state, app, &path, &filename, UploadStatus::Hashing, None, None);
 
-    let md5 = match tokio::task::spawn_blocking({
+    let md5 = match tauri::async_runtime::spawn_blocking({
         let path = path.clone();
         move || hashing::md5_hex(&path)
     })
