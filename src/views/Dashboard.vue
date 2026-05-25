@@ -297,16 +297,36 @@
         return 'Skipped as duplicate.';
     };
 
-    // Demo URL on defrag.racing - used as a click-through from rows
-    // that resolved to a demo_id. Open in the system browser via the
-    // opener plugin so it doesn't try to render inside the webview.
-    const openDemo = async (id: number) => {
+    // Open a defrag.racing URL in the system browser via the opener
+    // plugin so it doesn't try to render inside our webview. Wrapper
+    // shared by the map-page link and the demo-download link below.
+    const openWebUrl = async (url: string) => {
         try {
             const { openUrl } = await import('@tauri-apps/plugin-opener');
-            await openUrl(`https://defrag.racing/demos/${id}`);
+            await openUrl(url);
         } catch {
             // best effort
         }
+    };
+
+    // Defrag demo filename convention: `<mapname>[<physics>]<time>(<player>).dm_*`.
+    // Map name is everything before the first `[`. Returns null when the
+    // filename doesn't match the convention - keeps the link hidden
+    // rather than building a /maps/garbage URL that would 404.
+    const mapNameFromFilename = (filename: string): string | null => {
+        const idx = filename.indexOf('[');
+        if (idx <= 0) return null;
+        const name = filename.slice(0, idx).trim();
+        return name.length > 0 ? name : null;
+    };
+
+    const openMapPage = (filename: string) => {
+        const map = mapNameFromFilename(filename);
+        if (map) openWebUrl(`https://defrag.racing/maps/${encodeURIComponent(map)}`);
+    };
+
+    const openDemoDownload = (id: number) => {
+        openWebUrl(`https://defrag.racing/demos/${id}/download`);
     };
 
     const queueSummary = computed(() => {
@@ -569,11 +589,29 @@
                             <span v-if="item.upload_throughput_bps">
                                 <span class="text-neutral-500">Upload:</span> {{ formatRate(item.upload_throughput_bps) }}
                             </span>
+                            <!-- Map name link, parsed from filename. Hidden
+                                 when the filename doesn't match the standard
+                                 <map>[physics]<time>(player).dm_* shape - we
+                                 don't want to build a /maps/<garbage> URL. -->
+                            <span v-if="mapNameFromFilename(item.filename)">
+                                <span class="text-neutral-500">Map:</span>
+                                <button
+                                    class="ml-1 text-brand-400 hover:underline"
+                                    @click.stop="openMapPage(item.filename)"
+                                >{{ mapNameFromFilename(item.filename) }} ↗</button>
+                            </span>
+                            <!-- Demo id is the launcher's primary record of
+                                 the upload; clicking goes to /demos/<id>/download
+                                 because /demos/<id> alone is a 405 on the
+                                 backend. Label says "Download" so the user
+                                 knows exactly what the click will do. -->
                             <span v-if="item.demo_id">
                                 <span class="text-neutral-500">Demo:</span>
-                                <button class="ml-1 text-brand-400 hover:underline" @click.stop="openDemo(item.demo_id!)">
-                                    #{{ item.demo_id }} ↗
-                                </button>
+                                <span class="ml-1">#{{ item.demo_id }}</span>
+                                <button
+                                    class="ml-2 text-brand-400 hover:underline"
+                                    @click.stop="openDemoDownload(item.demo_id!)"
+                                >Download ↓</button>
                             </span>
                         </div>
                     </div>
