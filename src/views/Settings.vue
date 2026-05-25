@@ -40,6 +40,16 @@
         }
     };
 
+    /// Persist the new CPU throttle preference AND push it live into the
+    /// running watcher so the change takes effect mid-rescan, not after
+    /// the next Stop/Start cycle.
+    const setThrottlePreference = async (pct: number) => {
+        await config.save({ cpu_throttle_pct: pct });
+        try {
+            await tauri.setCpuThrottlePctRuntime(pct);
+        } catch { /* watcher not running — config save is enough */ }
+    };
+
     const pickEngine = async () => {
         const picked = await openDialog({ multiple: false, directory: false });
         if (typeof picked === 'string') {
@@ -153,6 +163,41 @@
                         <div class="w-10 h-5 bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors"></div>
                         <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
                     </label>
+                </div>
+
+                <!-- CPU throttle -->
+                <div class="pt-3 border-t border-white/5">
+                    <div class="mb-2">
+                        <div class="text-sm font-medium">CPU usage during hashing</div>
+                        <div class="text-xs text-neutral-500 mt-0.5">
+                            How much of one CPU core the launcher may use while hashing your demos.
+                            Lower = more comfortable while gaming, slower rescans of big folders.
+                            The <strong class="text-brand-400">Speed up</strong> button on the dashboard
+                            temporarily overrides this for a backlog drain.
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <button
+                            v-for="opt in [
+                                { label: 'Background', sub: '15%', value: 15 },
+                                { label: 'Normal',     sub: '25%', value: 25 },
+                                { label: 'Fast',       sub: '50%', value: 50 },
+                                { label: 'No limit',   sub: 'max', value: 0  },
+                            ]"
+                            :key="opt.value"
+                            class="px-3 py-2 rounded text-sm border transition-colors text-left"
+                            :class="config.config.cpu_throttle_pct === opt.value
+                                ? 'bg-brand-500/20 border-brand-500/60 text-brand-200'
+                                : 'bg-white/5 border-white/10 hover:bg-white/10 text-neutral-300'"
+                            @click="setThrottlePreference(opt.value)"
+                        >
+                            <div class="font-semibold">{{ opt.label }}</div>
+                            <div class="text-xs text-neutral-500">{{ opt.sub }} CPU</div>
+                        </button>
+                    </div>
+                    <p class="text-xs text-neutral-500 mt-2">
+                        Takes effect immediately for the running watcher.
+                    </p>
                 </div>
             </section>
 

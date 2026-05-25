@@ -203,6 +203,7 @@ pub fn start_auto_upload(
         cfg.include_subfolders,
         config::api_base_url(),
         token,
+        cfg.cpu_throttle_pct,
     )
     .map_err(err_to_string)?;
     crate::log_startup("start_auto_upload: watcher::start returned ok");
@@ -259,6 +260,30 @@ pub fn is_auto_upload_paused(state: State<'_, AppState>) -> bool {
         .unwrap()
         .as_ref()
         .map_or(false, |h| h.state.is_paused())
+}
+
+/// Current CPU-throttle target the running watcher is using. Falls back
+/// to the persisted config value when no watcher is up — UI uses this
+/// to show the live percentage on the Speed-up button.
+#[tauri::command]
+pub fn get_cpu_throttle_pct(state: State<'_, AppState>) -> Result<u8, String> {
+    if let Some(h) = state.watcher.lock().unwrap().as_ref() {
+        return Ok(h.state.cpu_throttle_pct());
+    }
+    let cfg = Config::load().map_err(err_to_string)?;
+    Ok(cfg.cpu_throttle_pct)
+}
+
+/// Live-update the throttle target. Takes effect on the very next
+/// post-hash sleep — no watcher restart needed. Does NOT persist to
+/// config; the Speed-up button on Dashboard uses this to temporarily
+/// override the user's saved preference while a big rescan drains,
+/// without rewriting their preferred-default setting on disk.
+#[tauri::command]
+pub fn set_cpu_throttle_pct_runtime(state: State<'_, AppState>, pct: u8) {
+    if let Some(h) = state.watcher.lock().unwrap().as_ref() {
+        h.state.set_cpu_throttle_pct(pct);
+    }
 }
 
 #[tauri::command]

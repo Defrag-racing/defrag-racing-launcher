@@ -15,7 +15,14 @@ use std::path::{Path, PathBuf};
 
 pub const DEFAULT_API_URL: &str = "https://defrag.racing";
 
+/// Default CPU target for the hashing throttle. 15% keeps the launcher
+/// invisible during gameplay even on weaker hardware — the user can
+/// crank it up via the Speed-up button or Settings when they want a
+/// big rescan done quickly.
+pub const DEFAULT_CPU_THROTTLE_PCT: u8 = 15;
+
 fn default_true() -> bool { true }
+fn default_cpu_throttle_pct() -> u8 { DEFAULT_CPU_THROTTLE_PCT }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -47,6 +54,14 @@ pub struct Config {
     #[serde(default = "default_true")]
     pub auto_update_enabled: bool,
 
+    /// Target CPU percentage the hash worker is allowed to use, as a
+    /// duty-cycle. 0 = no throttle (full speed). Value flows into
+    /// UploadState at watcher::start; the Speed-up button on Dashboard
+    /// temporarily overrides it without touching this saved value.
+    /// 15% by default — see DEFAULT_CPU_THROTTLE_PCT.
+    #[serde(default = "default_cpu_throttle_pct")]
+    pub cpu_throttle_pct: u8,
+
     /// First-run flag so we show onboarding exactly once and skip it
     /// afterwards, even if every individual field is still empty.
     pub onboarding_completed: bool,
@@ -70,6 +85,7 @@ impl Default for Config {
             auto_upload_enabled: false,
             include_subfolders: false,
             auto_update_enabled: true,
+            cpu_throttle_pct: DEFAULT_CPU_THROTTLE_PCT,
             onboarding_completed: false,
             config_version: None,
         }

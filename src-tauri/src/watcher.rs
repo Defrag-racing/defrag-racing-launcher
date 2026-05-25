@@ -19,7 +19,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, FileIdMap};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
@@ -93,18 +93,18 @@ const QUEUE_CAP: usize = 500;
 /// feeling live (a user looking at the queue doesn't notice 50ms).
 const EMIT_MIN_GAP_MS: u64 = 50;
 
-/// Minimum gap between two hash STARTS, in milliseconds. Caps CPU usage
-/// during rescans: at 100ms gap, a worst-case rescan-of-everything
-/// pegs at ~10 hashes/sec, which on most CPUs stays well under 100%
-/// single-core. Live FileAdded events also pass through this gate but
-/// their natural rate (one demo per several seconds) is already below
-/// the cap, so user-facing latency is unchanged.
-///
-/// Only the actual MD5 streaming path waits — cache hits and skips of
-/// already-uploaded files bypass entirely. Otherwise a user with 5000
-/// cached demos would sit through 8 minutes of no-op throttle waits on
-/// every rescan.
-const HASH_MIN_GAP_MS: u64 = 100;
+/// Floor for the post-hash idle period regardless of throttle math, so
+/// even a hash that finished in 1ms still yields the runtime briefly
+/// before the next file. Keeps the worker from monopolising the async
+/// task scheduler on freakishly fast hardware.
+const HASH_MIN_FLOOR_MS: u64 = 5;
+
+/// Upper bound on a single post-hash idle period. With low throttle
+/// settings (5%) and a slow hash (5s) the math would otherwise demand
+/// a 95s wait — gives the user a hard responsiveness ceiling: if you
+/// hit Pause / Speed-up, you wait at most this long before the next
+/// file gets picked up.
+const HASH_MAX_WAIT_MS: u64 = 30_000;
 
 #[derive(Default)]
 pub struct UploadState {
@@ -118,10 +118,11 @@ pub struct UploadState {
     /// Last time we emitted an upload_state_changed event. Used to
     /// rate-limit emits — see `EMIT_MIN_GAP_MS`.
     last_emit_at: Mutex<Option<Instant>>,
-    /// Start time of the most recent MD5 hashing pass. The next hash
-    /// won't start until `HASH_MIN_GAP_MS` after this — that's the
-    /// CPU throttle on rescan floods. Set in `wait_for_hash_slot`.
-    last_hash_at: Mutex<Option<Instant>>,
+    /// Target CPU duty-cycle for the hashing worker, in percent (0-100).
+    /// 0 disables the throttle entirely (no idle wait between hashes).
+    /// Live-mutable from commands so the Speed-up button on Dashboard
+    /// takes effect immediately, without restarting the watcher.
+    cpu_throttle_pct: AtomicU8,
 }
 
 impl UploadState {
@@ -149,24 +150,31 @@ impl UploadState {
         self.paused.clone()
     }
 
-    /// Block (asynchronously) until enough time has passed since the
-    /// previous hash start to satisfy `HASH_MIN_GAP_MS`, then mark
-    /// "now" as the most recent hash start. Caller invokes this
-    /// immediately before kicking off the `spawn_blocking` MD5 pass.
-    async fn wait_for_hash_slot(&self) {
-        let wait_for = {
-            let last = self.last_hash_at.lock().unwrap();
-            last.map(|prev| {
-                let target = prev + Duration::from_millis(HASH_MIN_GAP_MS);
-                target.saturating_duration_since(Instant::now())
-            })
-        };
-        if let Some(d) = wait_for {
-            if !d.is_zero() {
-                tokio::time::sleep(d).await;
-            }
+    pub fn cpu_throttle_pct(&self) -> u8 {
+        self.cpu_throttle_pct.load(Ordering::Acquire)
+    }
+
+    pub fn set_cpu_throttle_pct(&self, pct: u8) {
+        let clamped = pct.min(100);
+        self.cpu_throttle_pct.store(clamped, Ordering::Release);
+    }
+
+    /// Idle period to wait AFTER a hash of `hash_duration`, computed to
+    /// keep total CPU usage at the configured duty cycle. The math is
+    /// straightforward: at target T%, the hash should occupy T% of any
+    /// (hash + wait) cycle, so wait = hash * (100 - T) / T. Clamped to
+    /// [HASH_MIN_FLOOR_MS, HASH_MAX_WAIT_MS] so a freakishly fast or
+    /// slow hash doesn't translate to a degenerate sleep. A target of
+    /// 0 (or out-of-range) disables the throttle entirely.
+    async fn wait_after_hash(&self, hash_duration: Duration) {
+        let target = self.cpu_throttle_pct.load(Ordering::Acquire);
+        if target == 0 || target >= 100 {
+            return;
         }
-        *self.last_hash_at.lock().unwrap() = Some(Instant::now());
+        let hash_ms = hash_duration.as_millis() as u64;
+        let raw_wait_ms = hash_ms.saturating_mul(100 - target as u64) / (target as u64).max(1);
+        let wait_ms = raw_wait_ms.clamp(HASH_MIN_FLOOR_MS, HASH_MAX_WAIT_MS);
+        tokio::time::sleep(Duration::from_millis(wait_ms)).await;
     }
 
     fn with_mut<R>(&self, f: impl FnOnce(&mut Vec<PendingUpload>) -> R) -> R {
@@ -254,12 +262,14 @@ pub fn start(
     include_subfolders: bool,
     api_base_url: String,
     token: String,
+    cpu_throttle_pct: u8,
 ) -> anyhow::Result<WatcherHandle> {
     crate::log_startup(&format!(
-        "watcher::start: demos_path={:?} include_subfolders={}",
-        demos_path, include_subfolders
+        "watcher::start: demos_path={:?} include_subfolders={} throttle={}%",
+        demos_path, include_subfolders, cpu_throttle_pct
     ));
     let state = Arc::new(UploadState::default());
+    state.set_cpu_throttle_pct(cpu_throttle_pct);
     let (tx, rx) = mpsc::unbounded_channel::<Message>();
     crate::log_startup("watcher::start: channel created");
 
@@ -516,20 +526,10 @@ async fn handle_file(
         return;
     }
 
-    // Show the file in the queue as Pending while we wait for our slot
-    // in the hash rate-limit — honest about "we know about you, just
-    // pacing the CPU". Without this, a rescan of many files would all
-    // jump to Hashing at once even though only one is actually running.
-    state.update(app, &path, &filename, |u| {
-        u.status = UploadStatus::Pending;
-        u.size_bytes = size_bytes;
-        u.error = None;
-    });
-
-    state.wait_for_hash_slot().await;
-
     state.update(app, &path, &filename, |u| {
         u.status = UploadStatus::Hashing;
+        u.size_bytes = size_bytes;
+        u.error = None;
     });
 
     let t_hash = Instant::now();
@@ -570,10 +570,19 @@ async fn handle_file(
             return;
         }
     };
-    let hash_bps = size_bytes.and_then(|s| throughput_bps(s, t_hash.elapsed()));
+    let hash_elapsed = t_hash.elapsed();
+    let hash_bps = size_bytes.and_then(|s| throughput_bps(s, hash_elapsed));
     state.update(app, &path, &filename, |u| {
         u.hash_throughput_bps = hash_bps;
     });
+
+    // Duty-cycle throttle: idle for a period proportional to how long the
+    // hash took, sized so total CPU usage averages out to the configured
+    // cpu_throttle_pct. Placed right after the hash so the sleep folds
+    // into the API round-trip on the upload path (extra low CPU for big
+    // files going up) but still enforces the target on the duplicate
+    // path where lookup-by-hash returns immediately.
+    state.wait_after_hash(hash_elapsed).await;
 
     // Pre-flight: is this already on the server?
     match client.lookup_by_hash(&md5).await {

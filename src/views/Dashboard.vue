@@ -15,6 +15,33 @@
     const toggleError = ref<string | null>(null);
     const paused = ref(false);
 
+    // CPU throttle — live mutable target percentage the worker is using
+    // *right now*. Separate from config.cpu_throttle_pct which is the
+    // user's saved preference. The Speed-up button bumps this without
+    // touching the saved value, so "Slow down" returns to whatever the
+    // user picked in Settings (15% by default, but could be 25% or 50%).
+    const currentThrottlePct = ref(15);
+    const FAST_THROTTLE_PCT = 50;
+    const isSpedUp = computed(() => currentThrottlePct.value >= FAST_THROTTLE_PCT);
+
+    const refreshThrottle = async () => {
+        try {
+            currentThrottlePct.value = await tauri.getCpuThrottlePct();
+        } catch { /* watcher not running */ }
+    };
+
+    const toggleSpeedUp = async () => {
+        const target = isSpedUp.value
+            ? (config.config.cpu_throttle_pct || 15)
+            : FAST_THROTTLE_PCT;
+        try {
+            await tauri.setCpuThrottlePctRuntime(target);
+            currentThrottlePct.value = target;
+        } catch (e: any) {
+            toggleError.value = e?.toString?.() ?? 'Speed change failed';
+        }
+    };
+
     // Per-row expand state. Keyed by path so the same row stays open
     // through queue updates (sort order doesn't shuffle anything; new
     // items appear at the top).
@@ -88,6 +115,7 @@
     onMounted(async () => {
         queue.value = await tauri.getUploadState();
         await refreshPaused();
+        await refreshThrottle();
 
         unlisten = await listen<UploadStateSnapshot>('upload_state_changed', (ev) => {
             queue.value = ev.payload;
@@ -188,6 +216,7 @@
             }
             await config.refresh();
             await refreshPaused();
+            await refreshThrottle();
         } catch (e: any) {
             toggleError.value = e.toString();
         } finally {
@@ -303,6 +332,24 @@
                 </div>
             </div>
             <div class="flex items-center gap-2 flex-shrink-0">
+                <!-- Speed-up: visible whenever the watcher is alive. Bumps the
+                     live duty-cycle to 50% so a backlog drains faster than
+                     the user's default (typically 15%). Re-click to drop
+                     back to the saved preference — explicit, not auto. -->
+                <button
+                    v-if="config.autoUploadRunning"
+                    class="px-3 py-1.5 rounded text-sm font-semibold flex items-center gap-1.5"
+                    :class="isSpedUp
+                        ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300'
+                        : 'bg-white/5 hover:bg-white/10 text-neutral-200'"
+                    :title="isSpedUp
+                        ? `Currently using up to ${currentThrottlePct}% CPU — click to drop back to ${config.config.cpu_throttle_pct || 15}% (your saved preference)`
+                        : `Currently using up to ${currentThrottlePct}% CPU — click to bump to ${FAST_THROTTLE_PCT}% temporarily`"
+                    @click="toggleSpeedUp"
+                >
+                    <span>{{ isSpedUp ? '🐌' : '🚀' }}</span>
+                    <span>{{ isSpedUp ? 'Slow down' : 'Speed up' }}</span>
+                </button>
                 <button
                     v-if="config.autoUploadRunning"
                     class="px-3 py-1.5 rounded text-sm font-semibold bg-white/5 hover:bg-white/10 text-neutral-200"

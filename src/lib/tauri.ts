@@ -10,6 +10,8 @@ export interface LauncherConfig {
     auto_upload_enabled: boolean;
     include_subfolders: boolean;
     auto_update_enabled: boolean;
+    /** Target CPU% for the hashing worker. 0 = no throttle. */
+    cpu_throttle_pct: number;
     onboarding_completed: boolean;
     config_version: string | null;
 }
@@ -70,6 +72,9 @@ export const tauri = {
     isAutoUploadPaused: () => invoke<boolean>('is_auto_upload_paused'),
     getUploadState: () => invoke<UploadStateSnapshot>('get_upload_state'),
     clearUploadCache: () => invoke<void>('clear_upload_cache'),
+    getCpuThrottlePct: () => invoke<number>('get_cpu_throttle_pct'),
+    /** Runtime override; does not persist to config. */
+    setCpuThrottlePctRuntime: (pct: number) => invoke<void>('set_cpu_throttle_pct_runtime', { pct }),
 
     isAutostartEnabled: () => invoke<boolean>('is_autostart_enabled'),
     setAutostartEnabled: (enabled: boolean) => invoke<void>('set_autostart_enabled', { enabled }),

@@ -14,6 +14,7 @@ export const useConfigStore = defineStore('config', () => {
         auto_upload_enabled: false,
         include_subfolders: false,
         auto_update_enabled: true,
+        cpu_throttle_pct: 15,
         onboarding_completed: false,
         config_version: null,
     });
