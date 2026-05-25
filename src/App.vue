@@ -102,12 +102,11 @@
 
                 <RouterLink
                     :to="{ name: 'settings' }"
-                    class="px-2.5 py-1.5 rounded text-sm transition-colors"
+                    class="px-3 py-1.5 rounded text-sm transition-colors"
                     :class="route.name === 'settings'
                         ? 'bg-white/10 text-neutral-100 font-semibold'
                         : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
-                    title="Settings"
-                >⚙</RouterLink>
+                >Settings</RouterLink>
             </div>
         </nav>
 
