@@ -19,10 +19,11 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, FileIdMap};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingUpload {
@@ -31,6 +32,32 @@ pub struct PendingUpload {
     pub status: UploadStatus,
     pub demo_id: Option<u64>,
     pub error: Option<String>,
+    /// "cache" when we skipped the network because our local cache already
+    /// said this file was uploaded (matched size+mtime); "server" when the
+    /// server's lookup-by-hash confirmed it. Lets the UI explain "Already
+    /// backed up — why?" rather than leaving the user guessing.
+    pub duplicate_reason: Option<String>,
+    pub size_bytes: Option<u64>,
+    /// Bytes/sec on the hashing pass, populated once hashing finishes.
+    pub hash_throughput_bps: Option<u64>,
+    /// Bytes/sec for the upload itself (multipart payload ≈ file size).
+    pub upload_throughput_bps: Option<u64>,
+}
+
+impl PendingUpload {
+    fn new(path: PathBuf, filename: String) -> Self {
+        Self {
+            path,
+            filename,
+            status: UploadStatus::Pending,
+            demo_id: None,
+            error: None,
+            duplicate_reason: None,
+            size_bytes: None,
+            hash_throughput_bps: None,
+            upload_throughput_bps: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -52,6 +79,10 @@ pub struct UploadStateSnapshot {
 #[derive(Default)]
 pub struct UploadState {
     inner: Mutex<Vec<PendingUpload>>,
+    /// Pause gate for the worker. Set via `set_paused`; the worker checks
+    /// this before pulling the next item and parks on `notify` while true.
+    paused: AtomicBool,
+    notify: Notify,
 }
 
 impl UploadState {
@@ -61,8 +92,42 @@ impl UploadState {
         }
     }
 
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::Acquire)
+    }
+
+    pub fn set_paused(&self, paused: bool) {
+        self.paused.store(paused, Ordering::Release);
+        if !paused {
+            // Wake any worker parked in `notified().await`.
+            self.notify.notify_one();
+        }
+    }
+
     fn with_mut<R>(&self, f: impl FnOnce(&mut Vec<PendingUpload>) -> R) -> R {
         f(&mut self.inner.lock().unwrap())
+    }
+
+    /// Find-or-insert by path, apply `f` to the entry, emit a change event.
+    /// Insertion goes at the head so the newest activity is visible without
+    /// scrolling — matches user expectation of an "activity feed".
+    fn update(
+        &self,
+        app: &AppHandle,
+        path: &Path,
+        filename: &str,
+        f: impl FnOnce(&mut PendingUpload),
+    ) {
+        self.with_mut(|items| {
+            if let Some(existing) = items.iter_mut().find(|i| i.path == path) {
+                f(existing);
+            } else {
+                let mut new = PendingUpload::new(path.to_path_buf(), filename.to_string());
+                f(&mut new);
+                items.insert(0, new);
+            }
+        });
+        let _ = app.emit("upload_state_changed", self.snapshot());
     }
 }
 
@@ -100,14 +165,11 @@ pub fn start(
     crate::log_startup("watcher::start: channel created");
 
     // Debounce bursts while Defrag is still writing the file. The debounce
-    // window is deliberately generous (2s) — demos aren't written at high
-    // frequency and we'd rather miss a 0.5s window than upload a truncated
-    // file.
+    // window is deliberately generous (5s) to absorb Windows Defender post-
+    // scan + any weird FS buffering after Quake's temp→demos rename, while
+    // still feeling near-instant to the user. The rename itself is atomic,
+    // so this is more about defensive coding than correctness.
     let tx_fs = tx.clone();
-    // 5s debounce is generous enough to absorb Windows Defender post-
-    // scan + any weird FS buffering after Quake's temp→demos rename,
-    // while still feeling near-instant to the user. The rename itself is
-    // atomic, so this is more about defensive coding than correctness.
     let mut debouncer = new_debouncer(
         Duration::from_secs(5),
         None,
@@ -133,8 +195,8 @@ pub fn start(
     crate::log_startup("watcher::start: watch() ok");
 
     // Kick off a rescan on start so demos created while the launcher was
-    // closed still get uploaded. The Message variant carries the
-    // recursive flag so the worker uses the same setting as the watcher.
+    // closed still get uploaded. The Message variant carries the recursive
+    // flag so the worker uses the same setting as the watcher.
     let _ = tx.send(Message::RescanFolder {
         folder: demos_path.clone(),
         recursive: include_subfolders,
@@ -143,11 +205,11 @@ pub fn start(
 
     let state_worker = state.clone();
     let app_worker = app.clone();
-    // tauri::async_runtime::spawn instead of tokio::spawn — this is
-    // called from a sync Tauri command, which on Windows has no Tokio
-    // runtime entered, so a bare tokio::spawn panics with "there is no
-    // reactor running". Tauri's wrapper drives an internal runtime
-    // that's always available from command context.
+    // tauri::async_runtime::spawn instead of tokio::spawn — this is called
+    // from a sync Tauri command, which on Windows has no Tokio runtime
+    // entered, so a bare tokio::spawn panics with "there is no reactor
+    // running". Tauri's wrapper drives an internal runtime that's always
+    // available from command context.
     crate::log_startup("watcher::start: about to async_runtime::spawn worker_loop");
     let worker = tauri::async_runtime::spawn(worker_loop(rx, state_worker, app_worker, api_base_url, token));
     crate::log_startup("watcher::start: async_runtime::spawn returned");
@@ -196,23 +258,32 @@ async fn worker_loop(
         }
     };
 
-    // Single in-memory cache shared across all messages processed by
-    // this worker. Reload from disk once on start so we pick up state
-    // from previous launcher sessions. The cache is consulted on every
-    // file (rescan and live watcher) before we spend cycles on hash +
-    // server lookup.
+    // Single in-memory cache shared across all messages processed by this
+    // worker. Reload from disk once on start so we pick up state from
+    // previous launcher sessions.
     let mut cache = UploadCache::load();
 
     while let Some(msg) = rx.recv().await {
+        // Park while paused. We register interest in notification FIRST
+        // and only then check the flag, so a pause→resume that happens
+        // between the check and the await isn't lost.
+        loop {
+            let notified = state.notify.notified();
+            if !state.is_paused() {
+                break;
+            }
+            notified.await;
+        }
+
         match msg {
             Message::FileAdded(path) => {
                 handle_file(&client, &state, &app, &mut cache, path).await;
             }
             Message::RescanFolder { folder, recursive } => {
                 // Two scan modes by user choice. Recursive uses walkdir
-                // (already a dep) with follow_links off so a stray
-                // symlink can't loop. is_in_temp_subfolder filters out
-                // Quake's WIP-recording dir at any depth.
+                // (already a dep) with follow_links off so a stray symlink
+                // can't loop. is_in_temp_subfolder filters out Quake's
+                // WIP-recording dir at any depth.
                 if recursive {
                     for entry in walkdir::WalkDir::new(&folder)
                         .follow_links(false)
@@ -240,6 +311,16 @@ async fn worker_loop(
     }
 }
 
+/// Compute bytes/sec from a (size, elapsed) pair. Guards against the
+/// degenerate < 1ms case where dividing by a near-zero would explode.
+fn throughput_bps(size: u64, elapsed: Duration) -> Option<u64> {
+    let secs = elapsed.as_secs_f64();
+    if secs < 0.001 {
+        return None;
+    }
+    Some((size as f64 / secs) as u64)
+}
+
 async fn handle_file(
     client: &Client,
     state: &Arc<UploadState>,
@@ -264,21 +345,35 @@ async fn handle_file(
         return;
     }
 
+    let size_bytes = std::fs::metadata(&path).ok().map(|m| m.len());
+
     // Persistent cache: if the file's current size+mtime match what we
-    // recorded last time we uploaded it, we don't need to re-hash or
-    // call the server. Surface it as Done/Duplicate directly so the
-    // queue UI still shows the user what happened on this rescan.
+    // recorded last time we uploaded it, we don't need to re-hash or call
+    // the server. Surface it as Done/Duplicate with reason="cache" so the
+    // user can tell apart "we already uploaded this" from "the server
+    // independently confirmed a hash match".
     if let Some(entry) = cache.get_if_fresh(&path) {
         let status = match entry.status.as_str() {
             "done" => UploadStatus::Done,
             _ => UploadStatus::Duplicate,
         };
-        push_or_update(state, app, &path, &filename, status, entry.demo_id, None);
+        state.update(app, &path, &filename, |u| {
+            u.status = status;
+            u.demo_id = entry.demo_id;
+            u.size_bytes = size_bytes;
+            u.duplicate_reason = Some("cache".to_string());
+            u.error = None;
+        });
         return;
     }
 
-    push_or_update(state, app, &path, &filename, UploadStatus::Hashing, None, None);
+    state.update(app, &path, &filename, |u| {
+        u.status = UploadStatus::Hashing;
+        u.size_bytes = size_bytes;
+        u.error = None;
+    });
 
+    let t_hash = Instant::now();
     let md5 = match tauri::async_runtime::spawn_blocking({
         let path = path.clone();
         move || hashing::md5_hex(&path)
@@ -287,87 +382,81 @@ async fn handle_file(
     {
         Ok(Ok(h)) => h,
         Ok(Err(e)) => {
-            push_or_update(state, app, &path, &filename, UploadStatus::Error, None, Some(format!("hash failed: {e}")));
+            state.update(app, &path, &filename, |u| {
+                u.status = UploadStatus::Error;
+                u.error = Some(format!("hash failed: {e}"));
+            });
             return;
         }
         Err(e) => {
-            push_or_update(state, app, &path, &filename, UploadStatus::Error, None, Some(format!("hash task panicked: {e}")));
+            state.update(app, &path, &filename, |u| {
+                u.status = UploadStatus::Error;
+                u.error = Some(format!("hash task panicked: {e}"));
+            });
             return;
         }
     };
+    let hash_bps = size_bytes.and_then(|s| throughput_bps(s, t_hash.elapsed()));
+    state.update(app, &path, &filename, |u| {
+        u.hash_throughput_bps = hash_bps;
+    });
 
     // Pre-flight: is this already on the server?
     match client.lookup_by_hash(&md5).await {
         Ok(r) if r.exists => {
-            push_or_update(
-                state,
-                app,
-                &path,
-                &filename,
-                UploadStatus::Duplicate,
-                r.demo_id,
-                None,
-            );
+            state.update(app, &path, &filename, |u| {
+                u.status = UploadStatus::Duplicate;
+                u.demo_id = r.demo_id;
+                u.duplicate_reason = Some("server".to_string());
+            });
             cache.insert(&path, md5.clone(), "duplicate", r.demo_id);
             let _ = cache.save();
             return;
         }
         Ok(_) => {}
         Err(e) => {
-            push_or_update(state, app, &path, &filename, UploadStatus::Error, None, Some(format!("lookup failed: {e}")));
+            state.update(app, &path, &filename, |u| {
+                u.status = UploadStatus::Error;
+                u.error = Some(format!("lookup failed: {e}"));
+            });
             return;
         }
     }
 
-    push_or_update(state, app, &path, &filename, UploadStatus::Uploading, None, None);
+    state.update(app, &path, &filename, |u| {
+        u.status = UploadStatus::Uploading;
+    });
 
-    match client.upload_demo(&path, &md5).await {
+    let t_up = Instant::now();
+    let upload_result = client.upload_demo(&path, &md5).await;
+    let up_bps = size_bytes.and_then(|s| throughput_bps(s, t_up.elapsed()));
+
+    match upload_result {
         Ok(r) => {
-            push_or_update(state, app, &path, &filename, UploadStatus::Done, Some(r.demo_id), None);
+            state.update(app, &path, &filename, |u| {
+                u.status = UploadStatus::Done;
+                u.demo_id = Some(r.demo_id);
+                u.upload_throughput_bps = up_bps;
+            });
             cache.insert(&path, md5, "done", Some(r.demo_id));
             let _ = cache.save();
         }
         Err(ApiError::Duplicate { demo_id }) => {
-            push_or_update(state, app, &path, &filename, UploadStatus::Duplicate, Some(demo_id), None);
+            state.update(app, &path, &filename, |u| {
+                u.status = UploadStatus::Duplicate;
+                u.demo_id = Some(demo_id);
+                u.duplicate_reason = Some("server".to_string());
+            });
             cache.insert(&path, md5, "duplicate", Some(demo_id));
             let _ = cache.save();
         }
         Err(e) => {
-            // Don't cache errors — we want a retry on next start to
-            // either succeed or surface the same error again.
-            push_or_update(state, app, &path, &filename, UploadStatus::Error, None, Some(format!("{e}")));
+            // Don't cache errors — we want a retry on next start to either
+            // succeed or surface the same error again.
+            state.update(app, &path, &filename, |u| {
+                u.status = UploadStatus::Error;
+                u.error = Some(format!("{e}"));
+            });
         }
     }
-}
-
-fn push_or_update(
-    state: &Arc<UploadState>,
-    app: &AppHandle,
-    path: &Path,
-    filename: &str,
-    status: UploadStatus,
-    demo_id: Option<u64>,
-    error: Option<String>,
-) {
-    state.with_mut(|items| {
-        if let Some(existing) = items.iter_mut().find(|i| i.path == path) {
-            existing.status = status;
-            if demo_id.is_some() {
-                existing.demo_id = demo_id;
-            }
-            existing.error = error;
-        } else {
-            items.insert(
-                0,
-                PendingUpload {
-                    path: path.to_path_buf(),
-                    filename: filename.to_string(),
-                    status,
-                    demo_id,
-                    error,
-                },
-            );
-        }
-    });
-    let _ = app.emit("upload_state_changed", state.snapshot());
 }

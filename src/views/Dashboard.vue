@@ -1,5 +1,5 @@
 <script setup lang="ts">
-    import { onMounted, onUnmounted, ref } from 'vue';
+    import { computed, onMounted, onUnmounted, ref } from 'vue';
     import { useRouter } from 'vue-router';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import type { Update } from '@tauri-apps/plugin-updater';
@@ -13,16 +13,34 @@
     const queue = ref<UploadStateSnapshot>({ items: [] });
     const toggling = ref(false);
     const toggleError = ref<string | null>(null);
+    const paused = ref(false);
 
-    // defrag:// deep-link toast. The backend emits `deep-link://result`
-    // after every link arrives (from the browser, single-instance, or
-    // manual trigger). We render a transient banner so the user sees
-    // what happened before the engine grabs focus.
-    type DeepLinkResult =
-        | { ok: true; address: string }
-        | { ok: false; error: string; url: string };
-    const deepLink = ref<DeepLinkResult | null>(null);
-    let deepLinkTimer: number | undefined;
+    // Per-row expand state. Keyed by path so the same row stays open
+    // through queue updates (sort order doesn't shuffle anything; new
+    // items appear at the top).
+    const expanded = ref<Set<string>>(new Set());
+    const toggleExpand = (path: string) => {
+        if (expanded.value.has(path)) expanded.value.delete(path);
+        else expanded.value.add(path);
+        // Force Vue reactivity on Set mutation.
+        expanded.value = new Set(expanded.value);
+    };
+
+    // defrag:// pending-connection prompt. Backend stashes the URL when
+    // a deep link arrives and emits `deep-link://pending`; we read both
+    // the live event AND the stashed value (cold-start case where the
+    // webview mounts after the event already fired).
+    type PendingDeepLink = { address: string; url: string };
+    const pendingDeepLink = ref<PendingDeepLink | null>(null);
+    const connectError = ref<string | null>(null);
+    const connecting = ref(false);
+
+    // Generic toast for connect errors / parse failures. Distinct from
+    // pendingDeepLink because errors don't have a Connect button — the
+    // URL was unusable.
+    type DeepLinkError = { url: string; error: string };
+    const deepLinkError = ref<DeepLinkError | null>(null);
+    let deepLinkErrorTimer: number | undefined;
 
     // Auto-update banner. Quiet on success (just shows "up to date" for
     // a beat); persistent on "Update available" until the user installs.
@@ -35,7 +53,8 @@
     let pendingUpdate: Update | null = null;
 
     let unlisten: UnlistenFn | null = null;
-    let unlistenDeepLink: UnlistenFn | null = null;
+    let unlistenPending: UnlistenFn | null = null;
+    let unlistenResult: UnlistenFn | null = null;
     let updateCheckTimer: number | undefined;
 
     // Re-check for updates every 6h while the launcher is alive. The
@@ -58,23 +77,52 @@
         }
     };
 
+    const refreshPaused = async () => {
+        try {
+            paused.value = await tauri.isAutoUploadPaused();
+        } catch {
+            paused.value = false;
+        }
+    };
+
     onMounted(async () => {
         queue.value = await tauri.getUploadState();
+        await refreshPaused();
+
         unlisten = await listen<UploadStateSnapshot>('upload_state_changed', (ev) => {
             queue.value = ev.payload;
         });
-        unlistenDeepLink = await listen<DeepLinkResult>('deep-link://result', (ev) => {
-            deepLink.value = ev.payload;
-            if (ev.payload.ok) {
-                window.clearTimeout(deepLinkTimer);
-                deepLinkTimer = window.setTimeout(() => { deepLink.value = null; }, 4000);
-            }
+        unlistenPending = await listen<PendingDeepLink>('deep-link://pending', (ev) => {
+            pendingDeepLink.value = ev.payload;
+            connectError.value = null;
         });
+        unlistenResult = await listen<{ ok: false; url: string; error: string }>(
+            'deep-link://result',
+            (ev) => {
+                // Only error payloads ever land here now — success goes
+                // through the user-confirmed `confirm_pending_deep_link`
+                // command instead.
+                if (!ev.payload.ok) {
+                    deepLinkError.value = { url: ev.payload.url, error: ev.payload.error };
+                    window.clearTimeout(deepLinkErrorTimer);
+                    deepLinkErrorTimer = window.setTimeout(() => { deepLinkError.value = null; }, 6000);
+                }
+            },
+        );
 
-        // Update check only fires if the user has it enabled. We treat
-        // a network failure as "skip silently" rather than a red error
-        // banner — most users opening the launcher won't care that the
-        // updater couldn't reach defrag.racing right now.
+        // Cold-start case: deep-link plugin may have fired its event
+        // before this component mounted. Pull the stashed value.
+        try {
+            const url = await tauri.getPendingDeepLink();
+            if (url && !pendingDeepLink.value) {
+                // Display the host:port portion of the URL while we
+                // don't have a parsed address — same regex shape the
+                // backend uses in protocol::parse_url.
+                const m = url.match(/^defrag:\/\/([^/]+)/);
+                pendingDeepLink.value = { url, address: m ? m[1] : url };
+            }
+        } catch { /* no-op */ }
+
         if (config.config.auto_update_enabled) {
             try {
                 updateState.value = { kind: 'checking' };
@@ -88,24 +136,40 @@
             } catch {
                 updateState.value = { kind: 'idle' };
             }
-
-            // After the initial check, poll every 6h. Lightweight HTTP
-            // GET against the manifest endpoint — no demo work, no
-            // gameplay impact even if a check happens mid-frag.
             updateCheckTimer = window.setInterval(checkUpdate, UPDATE_CHECK_INTERVAL_MS);
         }
     });
 
     onUnmounted(() => {
         if (unlisten) unlisten();
-        if (unlistenDeepLink) unlistenDeepLink();
-        window.clearTimeout(deepLinkTimer);
+        if (unlistenPending) unlistenPending();
+        if (unlistenResult) unlistenResult();
+        window.clearTimeout(deepLinkErrorTimer);
         if (updateCheckTimer !== undefined) window.clearInterval(updateCheckTimer);
     });
 
-    const dismissDeepLink = () => {
-        deepLink.value = null;
-        window.clearTimeout(deepLinkTimer);
+    const dismissDeepLinkError = () => {
+        deepLinkError.value = null;
+        window.clearTimeout(deepLinkErrorTimer);
+    };
+
+    const confirmConnect = async () => {
+        connectError.value = null;
+        connecting.value = true;
+        try {
+            await tauri.confirmPendingDeepLink();
+            pendingDeepLink.value = null;
+        } catch (e: any) {
+            connectError.value = e?.toString?.() ?? 'Connect failed';
+        } finally {
+            connecting.value = false;
+        }
+    };
+
+    const cancelConnect = async () => {
+        await tauri.cancelPendingDeepLink();
+        pendingDeepLink.value = null;
+        connectError.value = null;
     };
 
     const installUpdate = async () => {
@@ -123,10 +187,21 @@
                 await tauri.startAutoUpload();
             }
             await config.refresh();
+            await refreshPaused();
         } catch (e: any) {
             toggleError.value = e.toString();
         } finally {
             toggling.value = false;
+        }
+    };
+
+    const togglePause = async () => {
+        try {
+            if (paused.value) await tauri.resumeAutoUpload();
+            else await tauri.pauseAutoUpload();
+            await refreshPaused();
+        } catch (e: any) {
+            toggleError.value = e.toString();
         }
     };
 
@@ -151,6 +226,48 @@
             default: return 'text-neutral-500';
         }
     };
+
+    /** "2.3 MB", "412 KB", "—" for null/zero. */
+    const formatBytes = (n: number | null) => {
+        if (n == null || n <= 0) return '—';
+        if (n < 1024) return `${n} B`;
+        if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+        if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+        return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+    };
+
+    /** Bytes-per-second → human "12.4 MB/s" etc. */
+    const formatRate = (bps: number | null) => {
+        if (bps == null || bps <= 0) return '—';
+        if (bps < 1024) return `${bps} B/s`;
+        if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(0)} KB/s`;
+        return `${(bps / (1024 * 1024)).toFixed(1)} MB/s`;
+    };
+
+    const duplicateExplain = (item: PendingUpload) => {
+        if (item.status !== 'duplicate') return null;
+        if (item.duplicate_reason === 'cache') return 'Skipped: matched local cache (we already uploaded this file before).';
+        if (item.duplicate_reason === 'server') return 'Skipped: defrag.racing already has this demo (matched by MD5).';
+        return 'Skipped as duplicate.';
+    };
+
+    // Demo URL on defrag.racing — used as a click-through from rows
+    // that resolved to a demo_id. Open in the system browser via the
+    // opener plugin so it doesn't try to render inside the webview.
+    const openDemo = async (id: number) => {
+        try {
+            const { openUrl } = await import('@tauri-apps/plugin-opener');
+            await openUrl(`https://defrag.racing/demos/${id}`);
+        } catch {
+            // best effort
+        }
+    };
+
+    const queueSummary = computed(() => {
+        const counts = { uploading: 0, hashing: 0, done: 0, duplicate: 0, error: 0, pending: 0 };
+        for (const it of queue.value.items) counts[it.status as keyof typeof counts]++;
+        return counts;
+    });
 </script>
 
 <template>
@@ -158,17 +275,24 @@
         <!-- top bar -->
         <header class="px-5 py-3 border-b border-white/10 flex items-start justify-between gap-3">
             <div class="flex items-start gap-2 min-w-0">
-                <div class="w-2 h-2 rounded-full mt-1.5 flex-shrink-0"
-                     :class="config.autoUploadRunning ? 'bg-emerald-400' : 'bg-neutral-600'"></div>
+                <div
+                    class="w-2 h-2 rounded-full mt-1.5 flex-shrink-0"
+                    :class="!config.autoUploadRunning ? 'bg-neutral-600' : (paused ? 'bg-amber-400' : 'bg-emerald-400')"
+                ></div>
                 <div class="text-sm min-w-0">
                     <div>
                         <span class="font-semibold">Auto-upload</span>
-                        <span class="text-neutral-500 ml-1">{{ config.autoUploadRunning ? 'running' : 'off' }}</span>
+                        <span class="text-neutral-500 ml-1">
+                            {{ !config.autoUploadRunning ? 'off' : (paused ? 'paused' : 'running') }}
+                        </span>
                     </div>
                     <div class="text-xs text-neutral-500 mt-0.5 leading-snug">
-                        <template v-if="config.autoUploadRunning">
+                        <template v-if="config.autoUploadRunning && !paused">
                             Watching your demos folder. New <code class="bg-black/40 px-1 rounded">.dm_*</code> files
                             are hashed locally and uploaded to defrag.racing if the server doesn't already have them.
+                        </template>
+                        <template v-else-if="config.autoUploadRunning && paused">
+                            Watcher is still picking up new demos, but uploads are paused. Click Resume to drain the queue.
                         </template>
                         <template v-else>
                             Click <strong class="text-brand-400">Start</strong> to watch
@@ -179,6 +303,11 @@
                 </div>
             </div>
             <div class="flex items-center gap-2 flex-shrink-0">
+                <button
+                    v-if="config.autoUploadRunning"
+                    class="px-3 py-1.5 rounded text-sm font-semibold bg-white/5 hover:bg-white/10 text-neutral-200"
+                    @click="togglePause"
+                >{{ paused ? 'Resume' : 'Pause' }}</button>
                 <button
                     class="px-3 py-1.5 rounded text-sm font-semibold"
                     :class="config.autoUploadRunning
@@ -200,18 +329,34 @@
             {{ toggleError }}
         </p>
 
+        <!-- defrag:// pending-connection prompt: user-explicit confirm -->
         <div
-            v-if="deepLink"
-            class="px-5 py-2 border-b text-xs flex items-center gap-2"
-            :class="deepLink.ok
-                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
-                : 'bg-red-500/10 border-red-500/20 text-red-300'"
+            v-if="pendingDeepLink"
+            class="px-5 py-3 border-b border-brand-500/20 bg-brand-500/10 text-sm flex items-center gap-3"
         >
-            <span v-if="deepLink.ok">Connecting to <strong>{{ deepLink.address }}</strong>…</span>
-            <span v-else>
-                Couldn't open <code class="font-mono">{{ deepLink.url }}</code> — {{ deepLink.error }}
+            <div class="flex-1 min-w-0">
+                <div class="text-brand-300 font-semibold">Connect to <span class="font-mono">{{ pendingDeepLink.address }}</span>?</div>
+                <div v-if="connectError" class="text-xs text-red-300 mt-0.5">{{ connectError }}</div>
+            </div>
+            <button
+                class="px-3 py-1.5 rounded bg-brand-500/30 hover:bg-brand-500/40 text-brand-200 font-semibold disabled:opacity-50"
+                :disabled="connecting"
+                @click="confirmConnect"
+            >Connect</button>
+            <button
+                class="px-3 py-1.5 rounded bg-white/5 hover:bg-white/10 text-neutral-300"
+                @click="cancelConnect"
+            >Dismiss</button>
+        </div>
+
+        <div
+            v-if="deepLinkError"
+            class="px-5 py-2 border-b text-xs flex items-center gap-2 bg-red-500/10 border-red-500/20 text-red-300"
+        >
+            <span>
+                Couldn't open <code class="font-mono">{{ deepLinkError.url }}</code> — {{ deepLinkError.error }}
             </span>
-            <button class="ml-auto text-neutral-400 hover:text-neutral-200" @click="dismissDeepLink">×</button>
+            <button class="ml-auto text-neutral-400 hover:text-neutral-200" @click="dismissDeepLinkError">×</button>
         </div>
 
         <div
@@ -242,6 +387,20 @@
             Update failed: {{ updateState.message }}
         </div>
 
+        <!-- Queue summary strip — at-a-glance counts -->
+        <div
+            v-if="queue.items.length"
+            class="px-5 py-2 border-b border-white/[0.04] text-xs text-neutral-400 flex items-center gap-3 flex-wrap"
+        >
+            <span>{{ queue.items.length }} total</span>
+            <span v-if="queueSummary.uploading || queueSummary.hashing" class="text-brand-400">
+                ↑ {{ queueSummary.uploading }} uploading · # {{ queueSummary.hashing }} hashing
+            </span>
+            <span v-if="queueSummary.done" class="text-emerald-400">✓ {{ queueSummary.done }} uploaded</span>
+            <span v-if="queueSummary.duplicate" class="text-cyan-400">∾ {{ queueSummary.duplicate }} already backed up</span>
+            <span v-if="queueSummary.error" class="text-red-400">! {{ queueSummary.error }} error</span>
+        </div>
+
         <!-- body -->
         <div class="flex-1 overflow-auto">
             <div v-if="!queue.items.length" class="h-full flex items-center justify-center p-8">
@@ -260,13 +419,49 @@
             </div>
 
             <ul v-else class="divide-y divide-white/[0.04]">
-                <li v-for="item in queue.items" :key="item.path" class="px-5 py-3 flex items-center gap-3">
-                    <div class="flex-1 min-w-0">
-                        <div class="text-sm text-neutral-100 truncate">{{ item.filename }}</div>
-                        <div class="text-xs text-neutral-500 truncate">{{ item.path }}</div>
-                    </div>
-                    <div class="text-xs font-semibold" :class="statusColor(item)">
-                        {{ statusLabel(item) }}
+                <li v-for="item in queue.items" :key="item.path" class="px-5 py-3">
+                    <button
+                        class="w-full flex items-center gap-3 text-left"
+                        @click="toggleExpand(item.path)"
+                    >
+                        <div class="flex-1 min-w-0">
+                            <div class="text-sm text-neutral-100 truncate">{{ item.filename }}</div>
+                            <div class="text-xs text-neutral-500 truncate">{{ item.path }}</div>
+                        </div>
+                        <div v-if="item.size_bytes" class="text-xs text-neutral-500">{{ formatBytes(item.size_bytes) }}</div>
+                        <div class="text-xs font-semibold" :class="statusColor(item)">
+                            {{ statusLabel(item) }}
+                        </div>
+                        <div class="text-xs text-neutral-600 w-3 text-right">
+                            {{ expanded.has(item.path) ? '▾' : '▸' }}
+                        </div>
+                    </button>
+
+                    <!-- expanded detail panel -->
+                    <div v-if="expanded.has(item.path)" class="mt-3 ml-1 pl-3 border-l border-white/10 space-y-1.5 text-xs text-neutral-400">
+                        <div v-if="duplicateExplain(item)" class="text-cyan-300/80">
+                            {{ duplicateExplain(item) }}
+                        </div>
+                        <div v-if="item.error" class="text-red-300/90">
+                            {{ item.error }}
+                        </div>
+                        <div class="flex flex-wrap gap-x-5 gap-y-1">
+                            <span v-if="item.size_bytes">
+                                <span class="text-neutral-500">Size:</span> {{ formatBytes(item.size_bytes) }}
+                            </span>
+                            <span v-if="item.hash_throughput_bps">
+                                <span class="text-neutral-500">Hash:</span> {{ formatRate(item.hash_throughput_bps) }}
+                            </span>
+                            <span v-if="item.upload_throughput_bps">
+                                <span class="text-neutral-500">Upload:</span> {{ formatRate(item.upload_throughput_bps) }}
+                            </span>
+                            <span v-if="item.demo_id">
+                                <span class="text-neutral-500">Demo:</span>
+                                <button class="ml-1 text-brand-400 hover:underline" @click.stop="openDemo(item.demo_id!)">
+                                    #{{ item.demo_id }} ↗
+                                </button>
+                            </span>
+                        </div>
                     </div>
                 </li>
             </ul>

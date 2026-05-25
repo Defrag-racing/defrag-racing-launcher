@@ -16,16 +16,21 @@ use std::sync::Mutex;
 use tauri::{AppHandle, State};
 use tauri_plugin_autostart::ManagerExt;
 
-/// Shared app state — the current watcher (if running) and a cached config.
-/// Swapped out when the user changes demos path or rotates the token.
+/// Shared app state — the current watcher (if running) plus the most
+/// recently received defrag:// URL waiting for user confirmation. The
+/// pending URL is kept in backend state (not just frontend) so a cold
+/// start via defrag:// can hand off the URL to the webview once it
+/// mounts — the deep-link event fires before the frontend exists.
 pub struct AppState {
     pub watcher: Mutex<Option<WatcherHandle>>,
+    pub pending_deep_link: Mutex<Option<String>>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
         Self {
             watcher: Mutex::new(None),
+            pending_deep_link: Mutex::new(None),
         }
     }
 }
@@ -214,9 +219,41 @@ pub fn stop_auto_upload(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Pause the worker but keep the filesystem watcher running. New demos
+/// keep accumulating in the queue; the worker resumes processing on
+/// `resume_auto_upload`. Lets the user halt launcher activity (during a
+/// race, while on a metered connection, etc.) without losing demos that
+/// get recorded in the meantime — a full stop would drop the debouncer
+/// and miss them.
+#[tauri::command]
+pub fn pause_auto_upload(state: State<'_, AppState>) -> Result<(), String> {
+    if let Some(h) = state.watcher.lock().unwrap().as_ref() {
+        h.state.set_paused(true);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn resume_auto_upload(state: State<'_, AppState>) -> Result<(), String> {
+    if let Some(h) = state.watcher.lock().unwrap().as_ref() {
+        h.state.set_paused(false);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn is_auto_upload_running(state: State<'_, AppState>) -> bool {
     state.watcher.lock().unwrap().is_some()
+}
+
+#[tauri::command]
+pub fn is_auto_upload_paused(state: State<'_, AppState>) -> bool {
+    state
+        .watcher
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map_or(false, |h| h.state.is_paused())
 }
 
 #[tauri::command]
@@ -229,18 +266,55 @@ pub fn get_upload_state(state: State<'_, AppState>) -> UploadStateSnapshot {
 
 // ---- defrag:// protocol -----------------------------------------------------
 
-/// Handle a `defrag://<ip>:<port>` deep link: validate the URL, look up
-/// the configured engine, and spawn it with `+connect <ip>:<port>`.
-///
-/// Called both from the Rust deep-link plugin handler (when the link
-/// fires the launcher externally) and directly from the UI (e.g. a
-/// "Connect" button on the dashboard that takes a manually-entered ip).
-/// Returns the parsed address as a string so the UI can show a toast
-/// like "Connecting to 1.2.3.4:27960…".
+/// Connect immediately to a URL — used for manually-entered IPs from a
+/// "Quick connect" UI where the user is *typing* the address (so the
+/// click on Connect is already their confirmation). Deep-link URLs do
+/// NOT go through this; they queue via `pending_deep_link` so the user
+/// gets a confirmation button before the engine spawns.
 #[tauri::command]
 pub fn handle_protocol_url(url: String) -> Result<String, String> {
     let addr = protocol::parse_url(&url).map_err(err_to_string)?;
     let cfg = Config::load().map_err(err_to_string)?;
     protocol::launch(cfg.engine_path.as_deref(), addr).map_err(err_to_string)?;
     Ok(addr.to_string())
+}
+
+/// Read (without consuming) the URL waiting for user confirmation. Called
+/// by the frontend on mount so cold-start-via-deep-link surfaces the
+/// Connect prompt without the user needing to re-click the link.
+#[tauri::command]
+pub fn get_pending_deep_link(state: State<'_, AppState>) -> Option<String> {
+    state.pending_deep_link.lock().unwrap().clone()
+}
+
+/// User clicked Connect on the pending-URL banner: take the URL, parse,
+/// and actually launch the engine. The Mutex `take()` clears pending so
+/// the banner disappears and the URL can't be replayed.
+#[tauri::command]
+pub fn confirm_pending_deep_link(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    use tauri::Manager;
+    let url = state
+        .pending_deep_link
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or_else(|| "No pending connection".to_string())?;
+    let addr = protocol::parse_url(&url).map_err(err_to_string)?;
+    let cfg = Config::load().map_err(err_to_string)?;
+    protocol::launch(cfg.engine_path.as_deref(), addr).map_err(err_to_string)?;
+    // Engine has focus now — drop the launcher back to the tray so it
+    // isn't pointlessly floating over Quake.
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.hide();
+    }
+    Ok(addr.to_string())
+}
+
+/// User clicked Dismiss on the pending-URL banner: just drop it.
+#[tauri::command]
+pub fn cancel_pending_deep_link(state: State<'_, AppState>) {
+    *state.pending_deep_link.lock().unwrap() = None;
 }

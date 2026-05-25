@@ -175,10 +175,16 @@ pub fn run() {
             commands::guess_demos_path,
             commands::start_auto_upload,
             commands::stop_auto_upload,
+            commands::pause_auto_upload,
+            commands::resume_auto_upload,
             commands::is_auto_upload_running,
+            commands::is_auto_upload_paused,
             commands::get_upload_state,
             commands::clear_upload_cache,
             commands::handle_protocol_url,
+            commands::get_pending_deep_link,
+            commands::confirm_pending_deep_link,
+            commands::cancel_pending_deep_link,
             commands::set_autostart_enabled,
             commands::is_autostart_enabled,
         ])
@@ -246,31 +252,41 @@ fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
-/// Single source of truth for what happens when a defrag:// URL arrives
-/// — from any path (deep-link plugin event, single-instance argv
-/// forwarding, or manual invocation in tests). Validates, launches the
-/// engine, and emits a `deep-link://result` event so the frontend can
-/// show a toast about success or failure.
+/// Single source of truth for what happens when a defrag:// URL arrives —
+/// from any path (deep-link plugin event, single-instance argv forwarding,
+/// or cold start). We deliberately do **not** auto-launch the engine here;
+/// instead the URL is stashed as "pending" and the launcher window pops
+/// with a Connect button. Reasons:
+///   - prevents an accidental click on a defrag:// link in a chat / forum
+///     from instantly closing your work and yeeting you into a server
+///   - gives the user a moment to read which IP they're about to join
+///   - matches user mental model: launcher orchestrates, doesn't decide
+///
+/// Cold start: the URL is stashed in AppState too so the frontend can
+/// pick it up via `get_pending_deep_link` on mount (the event emitted
+/// below fires before the webview is ready).
 #[cfg(desktop)]
 fn handle_deep_link_url(app: &tauri::AppHandle, url: &str) {
-    use tauri::Emitter;
+    use tauri::{Emitter, Manager};
 
-    let result = (|| -> Result<String, String> {
-        let addr = protocol::parse_url(url).map_err(|e| e.to_string())?;
-        let cfg = config::Config::load().map_err(|e| e.to_string())?;
-        protocol::launch(cfg.engine_path.as_deref(), addr).map_err(|e| e.to_string())?;
-        Ok(addr.to_string())
-    })();
-
-    let payload = match &result {
-        Ok(addr) => serde_json::json!({ "ok": true, "address": addr }),
-        Err(msg) => serde_json::json!({ "ok": false, "error": msg, "url": url }),
-    };
-    let _ = app.emit("deep-link://result", payload);
-
-    // Bring the launcher to the foreground so the toast is actually
-    // visible — without this, the engine grabs focus and the toast
-    // disappears behind it.
+    match protocol::parse_url(url) {
+        Ok(addr) => {
+            let state: tauri::State<AppState> = app.state();
+            *state.pending_deep_link.lock().unwrap() = Some(url.to_string());
+            let _ = app.emit(
+                "deep-link://pending",
+                serde_json::json!({ "address": addr.to_string(), "url": url }),
+            );
+        }
+        Err(e) => {
+            let _ = app.emit(
+                "deep-link://result",
+                serde_json::json!({ "ok": false, "error": e.to_string(), "url": url }),
+            );
+        }
+    }
+    // Either way, the user needs to see the launcher window — either to
+    // press Connect or to see why the URL was rejected.
     show_main_window(app);
 }
 

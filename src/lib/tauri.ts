@@ -34,6 +34,12 @@ export interface PendingUpload {
     status: UploadStatus;
     demo_id: number | null;
     error: string | null;
+    /** "cache" = matched local cache (size+mtime); "server" = matched on
+     *  defrag.racing by MD5. Null on non-duplicate statuses. */
+    duplicate_reason: string | null;
+    size_bytes: number | null;
+    hash_throughput_bps: number | null;
+    upload_throughput_bps: number | null;
 }
 
 export interface UploadStateSnapshot {
@@ -58,10 +64,18 @@ export const tauri = {
 
     startAutoUpload: () => invoke<void>('start_auto_upload'),
     stopAutoUpload: () => invoke<void>('stop_auto_upload'),
+    pauseAutoUpload: () => invoke<void>('pause_auto_upload'),
+    resumeAutoUpload: () => invoke<void>('resume_auto_upload'),
     isAutoUploadRunning: () => invoke<boolean>('is_auto_upload_running'),
+    isAutoUploadPaused: () => invoke<boolean>('is_auto_upload_paused'),
     getUploadState: () => invoke<UploadStateSnapshot>('get_upload_state'),
     clearUploadCache: () => invoke<void>('clear_upload_cache'),
 
     isAutostartEnabled: () => invoke<boolean>('is_autostart_enabled'),
     setAutostartEnabled: (enabled: boolean) => invoke<void>('set_autostart_enabled', { enabled }),
+
+    handleProtocolUrl: (url: string) => invoke<string>('handle_protocol_url', { url }),
+    getPendingDeepLink: () => invoke<string | null>('get_pending_deep_link'),
+    confirmPendingDeepLink: () => invoke<string>('confirm_pending_deep_link'),
+    cancelPendingDeepLink: () => invoke<void>('cancel_pending_deep_link'),
 };
