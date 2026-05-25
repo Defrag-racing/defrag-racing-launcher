@@ -92,23 +92,36 @@ export const tauri = {
     getServers: () => invoke<{ servers: DefragServer[] }>('get_servers'),
 };
 
-/** Minimal shape for the columns the launcher renders. The backend
- *  payload has many more fields (besttime_*, mapdata, onlinePlayers
- *  with spectators, etc.) - add to this interface when surfacing a
- *  new one in the UI. */
+/** Minimal shape for the columns the launcher renders. Mirrors the
+ *  Laravel Server model + ServerListService enrichment. Add fields here
+ *  as new UI features need them; the Tauri side passes the JSON through
+ *  opaquely so the backend can grow without a launcher release. */
 export interface DefragServer {
     id: number;
+    /** Server name WITH Q3 color codes (^1, ^2, ^xFF, ...). Use
+     *  plain_name for display unless you're rendering colored text. */
     name: string;
     plain_name?: string;
     ip: string;
     port: number;
     map: string;
+    /** Physics string like "df.cpm.run", "mdf.vq3", etc. Used to
+     *  decide vq3 vs cpm via substring match. */
     defrag: string;
-    /** Number of currently-connected players (excludes spectators). */
-    onlinePlayers?: DefragPlayer[];
+    /** "run" / "team" / "ctf" / "freestyle" - server's primary
+     *  gametype as classified by the scraper. */
+    type?: string;
+    /** Numeric defrag_gametype as a string (Laravel varchar). 5 = mixed
+     *  (run + teamrun simultaneously, common on multi-mode servers). */
+    defrag_gametype?: string;
+    /** ISO country code for the server's host location (flag image). */
+    location?: string | null;
+    /** Currently-connected players. Snake-cased because Laravel's
+     *  default toArray() snake-cases relation names. */
+    online_players?: DefragPlayer[];
     mapdata?: { thumbnail?: string | null } | null;
     /** Per-user fields populated for the token owner; null when the
-     *  user has no PB on the current map. */
+     *  user has no PB on this server's current map. */
     mytime_time?: number | null;
     mytime_date?: string | null;
     myrank_position?: number | null;
