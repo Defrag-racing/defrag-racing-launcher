@@ -205,15 +205,20 @@
             <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
                 <div class="flex items-start justify-between gap-3">
                     <div>
-                        <div class="font-semibold">Auto-upload token</div>
+                        <div class="font-semibold">Account token</div>
                         <div class="text-xs text-neutral-500 mt-0.5">
                             Personal access token from
                             <a href="#" class="text-brand-400 hover:underline"
                                @click.prevent="openUrl('https://defrag.racing/user/settings?tab=security')">
                                 defrag.racing → Settings → Security
                             </a>.
-                            Stored in your OS keyring.
+                            Stored in your OS keyring. Unlocks:
                         </div>
+                        <ul class="text-xs text-neutral-400 mt-1 space-y-0.5 pl-1">
+                            <li>• Auto-backup of recorded demos</li>
+                            <li>• Server browser with your PB / rank per map</li>
+                            <li>• Record + system notifications from your account</li>
+                        </ul>
                     </div>
                 </div>
 
@@ -222,7 +227,9 @@
                     <button class="btn-ghost" @click="showTokenForm = !showTokenForm">Replace</button>
                     <button class="btn-danger" @click="clearToken">Clear</button>
                 </div>
-                <div v-else class="text-sm text-neutral-500">No token saved — auto-upload disabled.</div>
+                <div v-else class="text-sm text-amber-300">
+                    No token saved — all three features above are disabled. Only <code class="bg-black/40 px-1 rounded">defrag://</code> server-join links work.
+                </div>
 
                 <div v-if="!config.hasToken || showTokenForm" class="flex gap-2">
                     <input

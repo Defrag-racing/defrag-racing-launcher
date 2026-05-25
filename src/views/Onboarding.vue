@@ -305,9 +305,9 @@
                     <h2 class="text-xl font-bold">All set</h2>
                     <ul class="text-sm text-neutral-300 space-y-1">
                         <li class="flex items-center gap-2">
-                            <span class="text-brand-400">✓</span>
-                            <span v-if="tokenSkipped">Token skipped — auto-upload disabled</span>
-                            <span v-else>Token stored in your OS keyring</span>
+                            <span :class="tokenSkipped ? 'text-amber-400' : 'text-brand-400'">{{ tokenSkipped ? '!' : '✓' }}</span>
+                            <span v-if="tokenSkipped">Token skipped</span>
+                            <span v-else>Token stored</span>
                         </li>
                         <li class="flex items-center gap-2">
                             <span class="text-brand-400">✓</span>
@@ -320,6 +320,32 @@
                             <span>Demos folder: {{ demosPath }}</span>
                         </li>
                     </ul>
+
+                    <!-- Explicit warning when token was skipped. Without
+                         this the user reaches the dashboard, finds it
+                         mostly empty, and assumes the launcher is broken.
+                         Listing the disabled features by name + a one-
+                         click "go back" makes the trade-off legible. -->
+                    <div
+                        v-if="tokenSkipped"
+                        class="rounded border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-100 space-y-1.5"
+                    >
+                        <div class="font-semibold text-amber-200">Without a token, these features stay disabled:</div>
+                        <ul class="space-y-0.5 pl-1">
+                            <li>• Auto-backup of recorded demos</li>
+                            <li>• Server browser with your PB and rank per map</li>
+                            <li>• Record + system notifications from defrag.racing</li>
+                        </ul>
+                        <div class="pt-1">
+                            Only <code class="bg-black/40 px-1 rounded">defrag://</code> server-join links will work.
+                            You can add a token anytime from
+                            <strong class="text-amber-200">Settings → Auto-upload token</strong>.
+                        </div>
+                        <button class="mt-1 text-amber-200 hover:underline font-semibold" @click="step = 2">
+                            ← Go back and paste a token instead
+                        </button>
+                    </div>
+
                     <div class="flex justify-end pt-2">
                         <button class="btn-primary" :disabled="finishing" @click="finish">
                             {{ finishing ? 'Finishing…' : 'Open launcher' }}

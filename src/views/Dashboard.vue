@@ -376,6 +376,35 @@
             {{ toggleError }}
         </p>
 
+        <!-- No-token banner. Surfaces explicitly which features the user
+             is missing so they don't sit on an empty dashboard wondering
+             why nothing happens. Direct button to Settings -> token form
+             rather than making them hunt for it. -->
+        <div
+            v-if="config.loaded && !config.hasToken"
+            class="px-5 py-3 border-b border-amber-500/30 bg-amber-500/10 text-xs text-amber-100"
+        >
+            <div class="font-semibold text-amber-200 mb-1">
+                No token saved — most launcher features are disabled
+            </div>
+            <ul class="space-y-0.5 pl-1 mb-2">
+                <li>• Auto-backup of recorded demos</li>
+                <li>• Server browser with your PB and rank per map</li>
+                <li>• Record + system notifications from your account</li>
+            </ul>
+            <div class="flex items-center justify-between gap-2">
+                <span class="text-amber-100/80">
+                    Only <code class="bg-black/40 px-1 rounded">defrag://</code> server-join links work without one.
+                </span>
+                <button
+                    class="px-3 py-1 rounded bg-amber-500/30 hover:bg-amber-500/40 text-amber-100 font-semibold flex-shrink-0"
+                    @click="router.push({ name: 'settings' })"
+                >
+                    Add token →
+                </button>
+            </div>
+        </div>
+
         <!-- defrag:// pending-connection prompt: user-explicit confirm -->
         <div
             v-if="pendingDeepLink"
