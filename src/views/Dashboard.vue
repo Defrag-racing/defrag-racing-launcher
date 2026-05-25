@@ -17,12 +17,11 @@
 
     // CPU throttle - live mutable target percentage the worker is using
     // *right now*. Separate from config.cpu_throttle_pct which is the
-    // user's saved preference. The Speed-up button bumps this without
-    // touching the saved value, so "Slow down" returns to whatever the
-    // user picked in Settings (15% by default, but could be 25% or 50%).
+    // user's saved preference. The Speed-up button cycles through
+    // progressively faster tiers and then wraps back to the saved
+    // value, rather than a binary toggle - lets the user say "a bit
+    // faster" without committing to "absolutely no limit".
     const currentThrottlePct = ref(15);
-    const FAST_THROTTLE_PCT = 50;
-    const isSpedUp = computed(() => currentThrottlePct.value >= FAST_THROTTLE_PCT);
 
     const refreshThrottle = async () => {
         try {
@@ -30,10 +29,59 @@
         } catch { /* watcher not running */ }
     };
 
-    const toggleSpeedUp = async () => {
-        const target = isSpedUp.value
-            ? (config.config.cpu_throttle_pct || 15)
-            : FAST_THROTTLE_PCT;
+    // Cycle order: user's saved preference first, then any strictly-
+    // faster tier (50% Fast, then 0% No-limit). 0 is treated as the
+    // fastest because the throttle code interprets 0 as "no idle wait".
+    // If the user's saved is already No-limit there's nothing to bump
+    // to and the button hides; if it's Fast (50%), the cycle is just
+    // [50, 0]; default Background (15%) gives a full [15, 50, 0].
+    const speedCycle = computed<number[]>(() => {
+        const saved = config.config.cpu_throttle_pct ?? 15;
+        const cycle = [saved];
+        if (saved > 0 && saved < 50) cycle.push(50);
+        if (saved !== 0) cycle.push(0);
+        return cycle;
+    });
+
+    const showSpeedButton = computed(() => speedCycle.value.length > 1);
+
+    const nextSpeedTier = computed<number>(() => {
+        const cycle = speedCycle.value;
+        const idx = cycle.findIndex(t => t === currentThrottlePct.value);
+        // If current pct doesn't match any tier (unexpected; setter
+        // only ever lands on a tier value), treat as if at saved so
+        // the next click takes the user one step forward.
+        const base = idx >= 0 ? idx : 0;
+        return cycle[(base + 1) % cycle.length];
+    });
+
+    /** Is the very next click a wrap back to the saved preference?
+     *  Used to flip the button to a "slow down" look. */
+    const willWrapToSaved = computed(() => {
+        const saved = config.config.cpu_throttle_pct ?? 15;
+        return nextSpeedTier.value === saved && currentThrottlePct.value !== saved;
+    });
+
+    const speedButtonText = computed(() => {
+        const next = nextSpeedTier.value;
+        if (willWrapToSaved.value) {
+            return `Slow down (${next}%)`;
+        }
+        if (next === 0) return 'Faster (no limit)';
+        if (next === 50) return 'Faster (50%)';
+        return `Faster (${next}%)`;
+    });
+
+    const speedButtonEmoji = computed(() => willWrapToSaved.value ? '🐌' : '🚀');
+
+    const speedButtonTooltip = computed(() => {
+        const saved = config.config.cpu_throttle_pct ?? 15;
+        const curLabel = currentThrottlePct.value === 0 ? 'no limit' : `${currentThrottlePct.value}% CPU`;
+        return `Currently ${curLabel}. Click cycles to the next tier; the cycle wraps back to your saved ${saved}% preference.`;
+    });
+
+    const cycleSpeed = async () => {
+        const target = nextSpeedTier.value;
         try {
             await tauri.setCpuThrottlePctRuntime(target);
             currentThrottlePct.value = target;
@@ -361,23 +409,23 @@
                 </div>
             </div>
             <div class="flex items-center gap-2 flex-shrink-0">
-                <!-- Speed-up: visible whenever the watcher is alive. Bumps the
-                     live duty-cycle to 50% so a backlog drains faster than
-                     the user's default (typically 15%). Re-click to drop
-                     back to the saved preference - explicit, not auto. -->
+                <!-- Speed-up: cycles through progressively faster tiers
+                     and wraps back to the user's saved preference.
+                     Default cycle is 15% (saved) → 50% (Fast) → 0%
+                     (No limit) → 15%. Color flips amber when above the
+                     saved tier so the user can see at a glance they're
+                     in temporary-fast mode. -->
                 <button
-                    v-if="config.autoUploadRunning"
+                    v-if="config.autoUploadRunning && showSpeedButton"
                     class="px-3 py-1.5 rounded text-sm font-semibold flex items-center gap-1.5"
-                    :class="isSpedUp
+                    :class="willWrapToSaved
                         ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300'
                         : 'bg-white/5 hover:bg-white/10 text-neutral-200'"
-                    :title="isSpedUp
-                        ? `Currently using up to ${currentThrottlePct}% CPU - click to drop back to ${config.config.cpu_throttle_pct || 15}% (your saved preference)`
-                        : `Currently using up to ${currentThrottlePct}% CPU - click to bump to ${FAST_THROTTLE_PCT}% temporarily`"
-                    @click="toggleSpeedUp"
+                    :title="speedButtonTooltip"
+                    @click="cycleSpeed"
                 >
-                    <span>{{ isSpedUp ? '🐌' : '🚀' }}</span>
-                    <span>{{ isSpedUp ? 'Slow down' : 'Speed up' }}</span>
+                    <span>{{ speedButtonEmoji }}</span>
+                    <span>{{ speedButtonText }}</span>
                 </button>
                 <button
                     v-if="config.autoUploadRunning"
