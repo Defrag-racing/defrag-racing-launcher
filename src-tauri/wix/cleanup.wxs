@@ -16,7 +16,7 @@
 
   Why every level has a RemoveFolder
   ICE64 requires every directory we declare under a user-profile root
-  to have an entry in the RemoveFile table — otherwise the validator
+  to have an entry in the RemoveFile table - otherwise the validator
   errors with LGHT0204 (which is what killed v0.1.5). RemoveFolder
   writes to the same MSI table, so we add one per directory. The good
   part: RemoveFolder only deletes if the directory is empty at
@@ -27,11 +27,22 @@
   No shared-refcount or registry-marker dance needed.
 
   AppDataFolder is a Windows Installer system property but tauri-bundler's
-  generated main.wxs doesn't declare it, so we must — otherwise light.exe
+  generated main.wxs doesn't declare it, so we must - otherwise light.exe
   bails with LGHT0094 "Unresolved reference to symbol Directory:AppDataFolder"
   (which killed v0.1.4). We declare it under TARGETDIR here. DirectoryRef'ing
   TARGETDIR is safe: main.wxs references TARGETDIR via the same mechanism so
   WiX merges both contributions without colliding.
+
+  Why every Component has a Condition gating on UPGRADINGPRODUCTCODE
+  An MSI Major Upgrade is internally "uninstall old, install new", so
+  RemoveFile/RemoveFolder marked On="uninstall" fire as part of the
+  upgrade too. Without this condition, every upgrade from 0.1.x to
+  0.1.(x+1) wiped the user's token + config + upload cache - exactly
+  what 0.1.6 testers reported when their AppData ended up holding only
+  a startup.log after install. The condition restricts cleanup to a
+  user-initiated uninstall (REMOVE="ALL") that is NOT part of an
+  upgrade (UPGRADINGPRODUCTCODE is set only during the upgrade-uninstall
+  phase). Net effect: upgrade keeps data, real uninstall removes it.
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Fragment>
@@ -40,10 +51,12 @@
         <Directory Id="DefragOrgDir" Name="defrag">
           <!-- The defrag\ org parent. RemoveFolder runs last in MSI
                sequence (after everything below) and is a no-op unless
-               the directory ended up empty — the shared-with-future-
+               the directory ended up empty - the shared-with-future-
                products behavior described in the file header. -->
           <Component Id="CleanupDefragOrgDir"
                      Guid="A1F9C7D4-3E6B-4F1A-9D2C-5E8A0B3F1C7D">
+            <!-- Skip during Major Upgrade. See file header for rationale. -->
+            <Condition><![CDATA[(REMOVE="ALL") AND (NOT UPGRADINGPRODUCTCODE)]]></Condition>
             <RegistryValue Root="HKCU"
                            Key="Software\DefragRacing\Launcher\Cleanup"
                            Name="org_dir"
@@ -53,10 +66,11 @@
             <RemoveFolder Id="RemoveDefragOrgDir" On="uninstall" />
           </Component>
           <Directory Id="LauncherAppDir" Name="launcher">
-            <!-- launcher\ dir itself — becomes empty once config\ is
+            <!-- launcher\ dir itself - becomes empty once config\ is
                  removed below, then this Component wipes the empty dir. -->
             <Component Id="CleanupLauncherDir"
                        Guid="C4B9F2E3-5D8F-4C9B-9F4C-2B4C6D8E0F3B">
+              <Condition><![CDATA[(REMOVE="ALL") AND (NOT UPGRADINGPRODUCTCODE)]]></Condition>
               <RegistryValue Root="HKCU"
                              Key="Software\DefragRacing\Launcher\Cleanup"
                              Name="launcher_dir"
@@ -71,6 +85,7 @@
                    one under config\ we must register + remove it too. -->
               <Component Id="CleanupConfig"
                          Guid="B3A8F1D2-4C7E-4B9A-8F3B-1A3B5C7D9E2A">
+                <Condition><![CDATA[(REMOVE="ALL") AND (NOT UPGRADINGPRODUCTCODE)]]></Condition>
                 <RegistryValue Root="HKCU"
                                Key="Software\DefragRacing\Launcher\Cleanup"
                                Name="config_dir"
