@@ -1,7 +1,7 @@
 //! defrag:// deep-link parsing + engine launch.
 //!
 //! The web (defrag.racing) emits server-join links of the form
-//! `defrag://1.2.3.4:27960`. There's exactly one variant — no map links,
+//! `defrag://1.2.3.4:27960`. There's exactly one variant - no map links,
 //! no demo playback, no query string. Anything else we treat as garbage
 //! and surface a toast in the UI instead of guessing.
 //!
@@ -27,13 +27,13 @@ pub enum ProtocolError {
     #[error("URL is not a defrag:// link: {0}")]
     WrongScheme(String),
 
-    #[error("URL has no host:port — expected defrag://<ip>:<port>, got {0}")]
+    #[error("URL has no host:port - expected defrag://<ip>:<port>, got {0}")]
     MissingHost(String),
 
-    #[error("\"{0}\" is not a valid ip:port — {1}")]
+    #[error("\"{0}\" is not a valid ip:port - {1}")]
     BadSocketAddr(String, std::net::AddrParseError),
 
-    #[error("engine binary not configured — pick one in Settings first")]
+    #[error("engine binary not configured - pick one in Settings first")]
     EngineNotConfigured,
 
     #[error("engine binary {0} does not exist (it may have been moved or uninstalled)")]
@@ -73,18 +73,18 @@ pub fn parse_url(url: &str) -> Result<SocketAddr, ProtocolError> {
 }
 
 /// Spawns the configured engine with `+connect <ip>:<port>`. Returns
-/// once the process is started — we don't wait for it to exit because
+/// once the process is started - we don't wait for it to exit because
 /// the engine stays open for the entire gaming session.
 pub fn launch(engine: Option<&Path>, addr: SocketAddr) -> Result<(), ProtocolError> {
     spawn_engine(engine, |cmd| {
         // Q3-family engines parse `+connect <ip>:<port>` as a startup
-        // console command. Two args, not one — `+connect ip:port` as a
+        // console command. Two args, not one - `+connect ip:port` as a
         // single string is silently ignored by the engine.
         cmd.arg("+connect").arg(addr.to_string());
     })
 }
 
-/// Spawns the configured engine without any `+connect` — just opens
+/// Spawns the configured engine without any `+connect` - just opens
 /// Defrag at the main menu. Used by the Dashboard "Play" button so a
 /// user who keeps the launcher in their tray can jump into the game
 /// without finding the engine .exe in their filesystem.

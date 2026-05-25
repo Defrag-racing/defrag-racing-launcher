@@ -4,12 +4,12 @@
 //! Earlier revisions used the OS keyring (Credential Manager / Keychain /
 //! libsecret) but on Windows several testers hit silent write failures
 //! (corporate AV + Defender flavors blocking Credential Manager API for
-//! non-MS-signed apps) — the save would return Ok but the next read would
+//! non-MS-signed apps) - the save would return Ok but the next read would
 //! see NoEntry. File storage sidesteps the whole class of problems and
 //! the token lives in the user's own AppData\Local, no less secure than
 //! any other per-user file.
 //!
-//! The file is base64 of the raw token — purely to keep the token from
+//! The file is base64 of the raw token - purely to keep the token from
 //! appearing verbatim in a filesystem scan (security-theatre, not real
 //! encryption). Readers/writers do not try to lock the file; two
 //! simultaneous writes from launcher instances would be a user error
@@ -43,7 +43,7 @@ pub fn save(token: &str) -> Result<()> {
         let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
     }
 
-    // Immediate readback — proves the save actually landed. Catches weird
+    // Immediate readback - proves the save actually landed. Catches weird
     // FS issues (disk full, read-only mount, AV quarantine).
     match load() {
         Ok(Some(t)) if t == token => {
@@ -51,8 +51,8 @@ pub fn save(token: &str) -> Result<()> {
             Ok(())
         }
         Ok(Some(_)) => {
-            log::error!("token readback mismatch — disk corruption or race?");
-            anyhow::bail!("token file read back a different value — refusing to continue")
+            log::error!("token readback mismatch - disk corruption or race?");
+            anyhow::bail!("token file read back a different value - refusing to continue")
         }
         Ok(None) => {
             log::error!("token file vanished immediately after save");

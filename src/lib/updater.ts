@@ -2,12 +2,12 @@
 // doesn't repeat the check/download/install dance.
 //
 // Flow we implement:
-//   1. check() — hits the endpoints in tauri.conf.json (defrag.racing
+//   1. check() - hits the endpoints in tauri.conf.json (defrag.racing
 //      first, GH Releases second). Returns the Update object if a newer
 //      version exists, null otherwise.
-//   2. download() — pulls the platform-appropriate bundle and verifies
+//   2. download() - pulls the platform-appropriate bundle and verifies
 //      the signature against the embedded pubkey before storing it.
-//   3. install() + relaunch() — applies the bundle and restarts the
+//   3. install() + relaunch() - applies the bundle and restarts the
 //      launcher so users land on the new version immediately.
 //
 // We do NOT use the plugin's built-in dialog (dialog: false in config)
@@ -28,7 +28,7 @@ export type UpdateState =
 export async function checkForUpdate(): Promise<Update | null> {
     // Tauri returns null when we're already on the latest version, an
     // Update object otherwise. Errors here usually mean "no network" or
-    // "endpoint 404" — both worth surfacing as a non-blocking warning
+    // "endpoint 404" - both worth surfacing as a non-blocking warning
     // rather than swallowing.
     return await check();
 }

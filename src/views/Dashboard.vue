@@ -15,7 +15,7 @@
     const toggleError = ref<string | null>(null);
     const paused = ref(false);
 
-    // CPU throttle — live mutable target percentage the worker is using
+    // CPU throttle - live mutable target percentage the worker is using
     // *right now*. Separate from config.cpu_throttle_pct which is the
     // user's saved preference. The Speed-up button bumps this without
     // touching the saved value, so "Slow down" returns to whatever the
@@ -42,7 +42,7 @@
         }
     };
 
-    // "Play" button — launches the configured engine at the main menu
+    // "Play" button - launches the configured engine at the main menu
     // (no +connect). Disabled when no engine is set, with a tooltip
     // pointing the user at Settings rather than failing silently.
     const launchError = ref<string | null>(null);
@@ -80,7 +80,7 @@
     const connecting = ref(false);
 
     // Generic toast for connect errors / parse failures. Distinct from
-    // pendingDeepLink because errors don't have a Connect button — the
+    // pendingDeepLink because errors don't have a Connect button - the
     // URL was unusable.
     type DeepLinkError = { url: string; error: string };
     const deepLinkError = ref<DeepLinkError | null>(null);
@@ -89,7 +89,7 @@
     // Auto-update banner. Quiet on success (just shows "up to date" for
     // a beat); persistent on "Update available" until the user installs.
     //
-    // We can't store the Update object inside `ref` — its private field
+    // We can't store the Update object inside `ref` - its private field
     // doesn't survive Vue's reactive proxy and breaks the TS type. Keep
     // the class instance in a plain `let` and have the ref carry only
     // serializable data needed for the template.
@@ -103,7 +103,7 @@
 
     // Re-check for updates every 6h while the launcher is alive. The
     // interval keeps firing even when the main window is hidden in the
-    // tray — JS lifecycle is bound to the process, not the OS window —
+    // tray - JS lifecycle is bound to the process, not the OS window -
     // so the "set and forget" user who installed once and stays in
     // tray for weeks still gets caught up on security patches.
     const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -144,7 +144,7 @@
         unlistenResult = await listen<{ ok: false; url: string; error: string }>(
             'deep-link://result',
             (ev) => {
-                // Only error payloads ever land here now — success goes
+                // Only error payloads ever land here now - success goes
                 // through the user-confirmed `confirm_pending_deep_link`
                 // command instead.
                 if (!ev.payload.ok) {
@@ -161,7 +161,7 @@
             const url = await tauri.getPendingDeepLink();
             if (url && !pendingDeepLink.value) {
                 // Display the host:port portion of the URL while we
-                // don't have a parsed address — same regex shape the
+                // don't have a parsed address - same regex shape the
                 // backend uses in protocol::parse_url.
                 const m = url.match(/^defrag:\/\/([^/]+)/);
                 pendingDeepLink.value = { url, address: m ? m[1] : url };
@@ -273,9 +273,9 @@
         }
     };
 
-    /** "2.3 MB", "412 KB", "—" for null/zero. */
+    /** "2.3 MB", "412 KB", "-" for null/zero. */
     const formatBytes = (n: number | null) => {
-        if (n == null || n <= 0) return '—';
+        if (n == null || n <= 0) return '-';
         if (n < 1024) return `${n} B`;
         if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
         if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
@@ -284,7 +284,7 @@
 
     /** Bytes-per-second → human "12.4 MB/s" etc. */
     const formatRate = (bps: number | null) => {
-        if (bps == null || bps <= 0) return '—';
+        if (bps == null || bps <= 0) return '-';
         if (bps < 1024) return `${bps} B/s`;
         if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(0)} KB/s`;
         return `${(bps / (1024 * 1024)).toFixed(1)} MB/s`;
@@ -297,7 +297,7 @@
         return 'Skipped as duplicate.';
     };
 
-    // Demo URL on defrag.racing — used as a click-through from rows
+    // Demo URL on defrag.racing - used as a click-through from rows
     // that resolved to a demo_id. Open in the system browser via the
     // opener plugin so it doesn't try to render inside the webview.
     const openDemo = async (id: number) => {
@@ -351,7 +351,7 @@
             <div class="flex items-center gap-2 flex-shrink-0">
                 <!-- Play: launches the configured engine at the main menu.
                      Primary action for the "I want to actually play" use
-                     case — without it the user has to find the engine
+                     case - without it the user has to find the engine
                      binary in their filesystem every time. Disabled with
                      a hint when the engine path isn't configured yet. -->
                 <button
@@ -369,7 +369,7 @@
                 <!-- Speed-up: visible whenever the watcher is alive. Bumps the
                      live duty-cycle to 50% so a backlog drains faster than
                      the user's default (typically 15%). Re-click to drop
-                     back to the saved preference — explicit, not auto. -->
+                     back to the saved preference - explicit, not auto. -->
                 <button
                     v-if="config.autoUploadRunning"
                     class="px-3 py-1.5 rounded text-sm font-semibold flex items-center gap-1.5"
@@ -377,8 +377,8 @@
                         ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300'
                         : 'bg-white/5 hover:bg-white/10 text-neutral-200'"
                     :title="isSpedUp
-                        ? `Currently using up to ${currentThrottlePct}% CPU — click to drop back to ${config.config.cpu_throttle_pct || 15}% (your saved preference)`
-                        : `Currently using up to ${currentThrottlePct}% CPU — click to bump to ${FAST_THROTTLE_PCT}% temporarily`"
+                        ? `Currently using up to ${currentThrottlePct}% CPU - click to drop back to ${config.config.cpu_throttle_pct || 15}% (your saved preference)`
+                        : `Currently using up to ${currentThrottlePct}% CPU - click to bump to ${FAST_THROTTLE_PCT}% temporarily`"
                     @click="toggleSpeedUp"
                 >
                     <span>{{ isSpedUp ? '🐌' : '🚀' }}</span>
@@ -423,7 +423,7 @@
             class="px-5 py-3 border-b border-amber-500/30 bg-amber-500/10 text-xs text-amber-100"
         >
             <div class="font-semibold text-amber-200 mb-1">
-                No token saved — most launcher features are disabled
+                No token saved - most launcher features are disabled
             </div>
             <ul class="space-y-0.5 pl-1 mb-2">
                 <li>• Auto-backup of recorded demos</li>
@@ -468,7 +468,7 @@
             class="px-5 py-2 border-b text-xs flex items-center gap-2 bg-red-500/10 border-red-500/20 text-red-300"
         >
             <span>
-                Couldn't open <code class="font-mono">{{ deepLinkError.url }}</code> — {{ deepLinkError.error }}
+                Couldn't open <code class="font-mono">{{ deepLinkError.url }}</code> - {{ deepLinkError.error }}
             </span>
             <button class="ml-auto text-neutral-400 hover:text-neutral-200" @click="dismissDeepLinkError">×</button>
         </div>
@@ -501,7 +501,7 @@
             Update failed: {{ updateState.message }}
         </div>
 
-        <!-- Queue summary strip — at-a-glance counts -->
+        <!-- Queue summary strip - at-a-glance counts -->
         <div
             v-if="queue.items.length"
             class="px-5 py-2 border-b border-white/[0.04] text-xs text-neutral-400 flex items-center gap-3 flex-wrap"

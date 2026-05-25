@@ -71,7 +71,7 @@ pub fn detect() -> Vec<EngineCandidate> {
         }
     }
 
-    // $PATH scan — catches Flatpak shims and manual ~/.local/bin installs.
+    // $PATH scan - catches Flatpak shims and manual ~/.local/bin installs.
     // Walk each PATH entry and let `classify` decide, so build-variant
     // suffixes (oDFe.vk.x64.exe etc) work the same as directory scans.
     if let Ok(path_var) = std::env::var("PATH") {
@@ -103,7 +103,7 @@ pub fn detect() -> Vec<EngineCandidate> {
 }
 
 fn classify(filename: &str) -> Option<EngineKind> {
-    // Only executables count — skip readmes, configs, screenshot folders, etc.
+    // Only executables count - skip readmes, configs, screenshot folders, etc.
     let lower = filename.to_ascii_lowercase();
     let looks_executable = lower.ends_with(".exe")
         || lower.ends_with(".x86_64")
@@ -155,7 +155,7 @@ fn candidate_roots() -> Vec<PathBuf> {
 
     #[cfg(target_os = "windows")]
     {
-        // Standard per-user locations first — fastest and catches 90% of installs.
+        // Standard per-user locations first - fastest and catches 90% of installs.
         for var in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
             if let Ok(v) = std::env::var(var) {
                 let p = PathBuf::from(v);
@@ -170,7 +170,7 @@ fn candidate_roots() -> Vec<PathBuf> {
             roots.push(h.join("Documents").join("Games"));
         }
 
-        // Cross-drive scan — lots of people put games on a dedicated SSD
+        // Cross-drive scan - lots of people put games on a dedicated SSD
         // (D:, E:, …) using folder names like `Games`, `GamesLibraries`,
         // `SteamLibrary`. We walk every drive letter that exists and test
         // the well-known library folder names. Walkdir's max_depth caps
@@ -236,7 +236,7 @@ fn candidate_roots() -> Vec<PathBuf> {
 }
 
 /// Parse Steam's libraryfolders.vdf to find every Steam library path.
-/// The file is a small custom KV format — regex-grade parsing is fine,
+/// The file is a small custom KV format - regex-grade parsing is fine,
 /// we only need the "path" values. Lines that don't match are skipped.
 #[cfg(target_os = "windows")]
 fn parse_steam_library_folders(vdf: &Path) -> Vec<PathBuf> {
@@ -249,7 +249,7 @@ fn parse_steam_library_folders(vdf: &Path) -> Vec<PathBuf> {
             if let Some(start) = rest.find('"') {
                 let tail = &rest[start + 1..];
                 if let Some(end) = tail.find('"') {
-                    // VDF escapes backslashes — \\ → \
+                    // VDF escapes backslashes - \\ → \
                     let raw = tail[..end].replace("\\\\", "\\");
                     paths.push(PathBuf::from(raw));
                 }

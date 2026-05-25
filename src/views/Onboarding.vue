@@ -110,7 +110,7 @@
                 onboarding_completed: true,
             });
             // If the user supplied both a token and demos path, fire up the
-            // watcher right away — one fewer click for the happy path.
+            // watcher right away - one fewer click for the happy path.
             if (config.hasToken && config.config.demos_path) {
                 try {
                     await tauri.startAutoUpload();
@@ -151,19 +151,19 @@
                     <ul class="text-sm text-neutral-300 space-y-1.5 pl-1">
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
-                            <span><strong>Auto-backup demos</strong> — every new <code class="text-xs bg-black/40 px-1 rounded">.dm_*</code> file in your demos folder gets uploaded to your account.</span>
+                            <span><strong>Auto-backup demos</strong> - every new <code class="text-xs bg-black/40 px-1 rounded">.dm_*</code> file in your demos folder gets uploaded to your account.</span>
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
-                            <span><strong>Server browser</strong> — live list of Defrag servers with your PB and rank on each map.</span>
+                            <span><strong>Server browser</strong> - live list of Defrag servers with your PB and rank on each map.</span>
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
-                            <span><strong>Notifications</strong> — record-related and account alerts from the website, in the launcher.</span>
+                            <span><strong>Notifications</strong> - record-related and account alerts from the website, in the launcher.</span>
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
-                            <span><strong><code class="text-xs bg-black/40 px-1 rounded">defrag://</code> links</strong> — click "Join" on the website, the launcher asks you to confirm, your engine launches.</span>
+                            <span><strong><code class="text-xs bg-black/40 px-1 rounded">defrag://</code> links</strong> - click "Join" on the website, the launcher asks you to confirm, your engine launches.</span>
                         </li>
                     </ul>
                     <p class="text-xs text-neutral-500 leading-relaxed pt-1">
@@ -181,9 +181,15 @@
                         A token links the launcher to your defrag.racing account. It unlocks:
                     </p>
                     <ul class="text-sm text-neutral-300 space-y-1 pl-1">
-                        <li class="flex gap-2"><span class="text-brand-400 mt-0.5">✓</span><span>Auto-upload of new demos</span></li>
                         <li class="flex gap-2"><span class="text-brand-400 mt-0.5">✓</span><span>Server browser with your personal best / rank per map</span></li>
-                        <li class="flex gap-2"><span class="text-brand-400 mt-0.5">✓</span><span>Notifications — record + system alerts for your account</span></li>
+                        <li class="flex gap-2"><span class="text-brand-400 mt-0.5">✓</span><span>Notifications - record + system alerts for your account</span></li>
+                        <li class="flex gap-2">
+                            <span class="text-brand-400 mt-0.5">✓</span>
+                            <span>
+                                Optional auto-upload of new demos
+                                <span class="text-neutral-500">(off by default - you turn it on later with the Start button)</span>
+                            </span>
+                        </li>
                     </ul>
                     <p class="text-xs text-neutral-500 leading-relaxed">
                         Without a token, only <code class="bg-black/40 px-1 rounded">defrag://</code> server-join links work. You can paste a token later from Settings.
@@ -200,18 +206,20 @@
                         >
                             <div class="text-left">
                                 <div class="text-sm font-semibold text-brand-200">
-                                    Step 1 — Open token page in your browser
+                                    Step 1 - Open token page in your browser
                                 </div>
                                 <div class="text-xs text-brand-300/70 mt-0.5 font-mono">
-                                    defrag.racing → Settings → Security
+                                    defrag.racing &gt; Settings &gt; Security
                                 </div>
                             </div>
                             <span class="text-brand-300 text-lg flex-shrink-0">↗</span>
                         </button>
                     </div>
 
-                    <ol class="text-sm text-neutral-300 list-decimal list-inside space-y-1 pt-1 pl-1">
-                        <li class="text-neutral-500"><span class="text-neutral-300">(step 1 done above ↑)</span></li>
+                    <!-- Ordered list starts at 2 because step 1 is the
+                         big CTA button above. Custom marker color keeps
+                         the numbers from going default-black on dark bg. -->
+                    <ol start="2" class="text-sm text-neutral-300 list-decimal list-inside space-y-1 pt-1 pl-1 marker:text-brand-400">
                         <li>Under <em>Launcher tokens</em>, click <em>New token</em> and label it (e.g. "Home PC")</li>
                         <li>Copy the generated token and paste it below</li>
                     </ol>
@@ -226,7 +234,7 @@
                     <p v-if="tokenError" class="text-xs text-red-400">{{ tokenError }}</p>
 
                     <div class="flex justify-between pt-2">
-                        <button class="btn-ghost" @click="skipToken">Skip — defrag:// only</button>
+                        <button class="btn-ghost" @click="skipToken">Skip - defrag:// only</button>
                         <button class="btn-primary" :disabled="!token.trim() || tokenSaving" @click="saveToken">
                             {{ tokenSaving ? 'Saving…' : 'Save & continue' }}
                         </button>
@@ -238,7 +246,7 @@
                     <h2 class="text-xl font-bold">Defrag installation</h2>
                     <p class="text-sm text-neutral-400 leading-relaxed">
                         Pick the engine you want <code class="text-xs bg-black/40 px-1 rounded">defrag://</code> links to open, and confirm the demos folder the launcher will watch.
-                        Both are optional — skip if you only want the token for manual use.
+                        Both are optional - skip if you only want the token for manual use.
                     </p>
 
                     <div class="space-y-2">
@@ -288,7 +296,7 @@
                         <div class="text-xs uppercase tracking-wider text-neutral-500">Demos folder</div>
                         <div class="flex items-center gap-2 bg-black/30 border border-white/10 rounded p-3">
                             <div class="flex-1 text-sm text-neutral-200 break-all min-w-0">
-                                {{ demosPath || '(not detected — click Change)' }}
+                                {{ demosPath || '(not detected - click Change)' }}
                             </div>
                             <button class="btn-ghost" @click="pickDemosFolder">Change</button>
                         </div>

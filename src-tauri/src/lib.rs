@@ -16,12 +16,12 @@ use tauri_plugin_autostart::MacosLauncher;
 
 /// CLI flag passed by the autostart plugin when the OS launches us at
 /// login. Lets us start with the window hidden (tray-only) so the user
-/// isn't ambushed by a popup every boot — they explicitly clicked
+/// isn't ambushed by a popup every boot - they explicitly clicked
 /// "Show" from the tray to see the dashboard.
 const HIDDEN_FLAG: &str = "--hidden";
 
 /// Append a line to %APPDATA%\defrag\launcher\startup.log. Used by the
-/// init code paths to leave breadcrumbs about how far we got — when
+/// init code paths to leave breadcrumbs about how far we got - when
 /// the launcher exits silently on first run there's no Event Viewer
 /// entry and no CMD output (GUI subsystem swallows stderr), so a file
 /// is the only diagnostic surface that survives.
@@ -44,7 +44,7 @@ pub fn log_startup(msg: &str) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Panic hook BEFORE anything else — catches panics during plugin
+    // Panic hook BEFORE anything else - catches panics during plugin
     // init, tray construction, etc. and writes them to startup.log so
     // we have something to look at when the process disappears with
     // no Event Viewer trace.
@@ -68,7 +68,7 @@ pub fn run() {
     let builder = tauri::Builder::default();
     log_startup("Builder::default ok");
 
-    // single-instance MUST be the first plugin registered — when a second
+    // single-instance MUST be the first plugin registered - when a second
     // launcher process is spawned (e.g. by a defrag:// click while the
     // launcher is already open) this plugin hands the new process's argv
     // to the existing one and exits the new one. Anything later would
@@ -76,7 +76,7 @@ pub fn run() {
     // so macOS (where the cfg block is dead code) doesn't trip an
     // unused_mut warning.
     //
-    // We deliberately do NOT process the argv URL ourselves here —
+    // We deliberately do NOT process the argv URL ourselves here -
     // `tauri-plugin-deep-link` integrates with single-instance and will
     // fire `on_open_url` for the forwarded URL. Doing it manually as
     // well caused the engine to launch twice for one defrag:// click.
@@ -112,7 +112,7 @@ pub fn run() {
         .setup(move |app| {
             log_startup("setup() entered");
 
-            // Hide on launch if we were started by the OS at login —
+            // Hide on launch if we were started by the OS at login -
             // user explicitly opted into autostart and expects a quiet
             // background process, not a pop-up.
             if started_hidden {
@@ -122,7 +122,7 @@ pub fn run() {
                 }
             }
 
-            // Tray icon — keeps the launcher alive after the user
+            // Tray icon - keeps the launcher alive after the user
             // closes the window so the demo watcher + defrag:// handler
             // keep doing their job. Without this the process would exit
             // on last-window-close (default Tauri behavior).
@@ -130,7 +130,7 @@ pub fn run() {
             build_tray(app)?;
             log_startup("build_tray ok");
 
-            // Register defrag:// scheme at runtime — needed in dev where
+            // Register defrag:// scheme at runtime - needed in dev where
             // the bundled installer hasn't registered it with the OS,
             // and as a fallback on Linux distros that don't honour the
             // .desktop file's MimeType immediately.
@@ -205,7 +205,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &quit])?;
 
-    // Prefer the bundle's window icon — Windows packs that into the .exe
+    // Prefer the bundle's window icon - Windows packs that into the .exe
     // and Tauri exposes it via default_window_icon(). On a fresh MSI
     // install the icon resource has been observed as not-yet-loaded
     // when setup() runs (0.1.6 crashed with 0xc0000409 on first launch
@@ -246,7 +246,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
 
 /// Bring the main window from hidden / minimized into the foreground.
 /// Used by tray clicks, single-instance forwarding, and the deep-link
-/// handler — anywhere we want the user to actually see the UI.
+/// handler - anywhere we want the user to actually see the UI.
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -255,7 +255,7 @@ fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
-/// Single source of truth for what happens when a defrag:// URL arrives —
+/// Single source of truth for what happens when a defrag:// URL arrives -
 /// from any path (deep-link plugin event, single-instance argv forwarding,
 /// or cold start). We deliberately do **not** auto-launch the engine here;
 /// instead the URL is stashed as "pending" and the launcher window pops
@@ -288,7 +288,7 @@ fn handle_deep_link_url(app: &tauri::AppHandle, url: &str) {
             );
         }
     }
-    // Either way, the user needs to see the launcher window — either to
+    // Either way, the user needs to see the launcher window - either to
     // press Connect or to see why the URL was rejected.
     show_main_window(app);
 }

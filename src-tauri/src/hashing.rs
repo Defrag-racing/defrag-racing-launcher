@@ -1,7 +1,7 @@
 //! Streaming MD5 of a demo file.
 //!
 //! Separate from `api.rs` because we also hash locally during filesystem
-//! watcher debounce (before calling lookup-by-hash) — keeping it pure
+//! watcher debounce (before calling lookup-by-hash) - keeping it pure
 //! makes it trivial to unit-test.
 
 use anyhow::{Context, Result};

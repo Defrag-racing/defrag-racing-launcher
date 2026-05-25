@@ -2,7 +2,7 @@
 //!
 //! Each command is a thin wrapper around one of the core modules. Errors
 //! collapse to `String` because Tauri's IPC has no structured-error
-//! support — the frontend gets a human-readable message and shows it in a
+//! support - the frontend gets a human-readable message and shows it in a
 //! toast.
 
 use crate::cache::UploadCache;
@@ -16,11 +16,11 @@ use std::sync::Mutex;
 use tauri::{AppHandle, State};
 use tauri_plugin_autostart::ManagerExt;
 
-/// Shared app state — the current watcher (if running) plus the most
+/// Shared app state - the current watcher (if running) plus the most
 /// recently received defrag:// URL waiting for user confirmation. The
 /// pending URL is kept in backend state (not just frontend) so a cold
 /// start via defrag:// can hand off the URL to the webview once it
-/// mounts — the deep-link event fires before the frontend exists.
+/// mounts - the deep-link event fires before the frontend exists.
 pub struct AppState {
     pub watcher: Mutex<Option<WatcherHandle>>,
     pub pending_deep_link: Mutex<Option<String>>,
@@ -61,7 +61,7 @@ pub fn complete_onboarding() -> Result<(), String> {
 
 /// Returns the launcher version the persisted config was last written by,
 /// but only when it's different from the current running version. Used by
-/// the UI to show a one-time "Previous install detected — start fresh or
+/// the UI to show a one-time "Previous install detected - start fresh or
 /// keep settings?" screen on boot.
 #[tauri::command]
 pub fn previous_version() -> Result<Option<String>, String> {
@@ -79,7 +79,7 @@ pub fn acknowledge_version() -> Result<(), String> {
     Ok(())
 }
 
-/// Version string of the running launcher — frontend uses it to render
+/// Version string of the running launcher - frontend uses it to render
 /// "v0.1.3" consistently without hard-coding in Vue files.
 #[tauri::command]
 pub fn app_version() -> &'static str {
@@ -114,7 +114,7 @@ pub fn reset_launcher(state: State<'_, AppState>) -> Result<(), String> {
     if let Ok(path) = Config::path() {
         let _ = std::fs::remove_file(path);
     }
-    // Cache is owned by us — wipe it too so a reset really does start
+    // Cache is owned by us - wipe it too so a reset really does start
     // from zero (otherwise re-onboarded user with new token would skip
     // re-uploading demos the prior token already covered).
     let _ = UploadCache::clear();
@@ -133,7 +133,7 @@ pub fn clear_upload_cache() -> Result<(), String> {
 // ---- Autostart -------------------------------------------------------------
 
 /// Returns whether the OS has the launcher registered to autostart on
-/// login. Reflects current OS state, not just our Settings UI — if the
+/// login. Reflects current OS state, not just our Settings UI - if the
 /// user removed it manually (e.g. via Task Manager → Startup) we'll
 /// pick that up next time the toggle is read.
 #[tauri::command]
@@ -193,7 +193,7 @@ pub fn start_auto_upload(
     crate::log_startup("start_auto_upload: demos dir ok, loading token");
     let token = token::load()
         .map_err(err_to_string)?
-        .ok_or_else(|| "No token saved — generate one at defrag.racing and paste it in settings".to_string())?;
+        .ok_or_else(|| "No token saved - generate one at defrag.racing and paste it in settings".to_string())?;
     crate::log_startup(&format!("start_auto_upload: token loaded ({} bytes)", token.len()));
 
     crate::log_startup("start_auto_upload: calling watcher::start");
@@ -224,7 +224,7 @@ pub fn stop_auto_upload(state: State<'_, AppState>) -> Result<(), String> {
 /// keep accumulating in the queue; the worker resumes processing on
 /// `resume_auto_upload`. Lets the user halt launcher activity (during a
 /// race, while on a metered connection, etc.) without losing demos that
-/// get recorded in the meantime — a full stop would drop the debouncer
+/// get recorded in the meantime - a full stop would drop the debouncer
 /// and miss them.
 #[tauri::command]
 pub fn pause_auto_upload(state: State<'_, AppState>) -> Result<(), String> {
@@ -238,7 +238,7 @@ pub fn pause_auto_upload(state: State<'_, AppState>) -> Result<(), String> {
 pub fn resume_auto_upload(state: State<'_, AppState>) -> Result<(), String> {
     if let Some(h) = state.watcher.lock().unwrap().as_ref() {
         h.state.set_paused(false);
-        // Kick the worker to re-process anything stuck in Pending —
+        // Kick the worker to re-process anything stuck in Pending -
         // most commonly, a file whose hashing pass was aborted by the
         // pause. Without this, those rows would sit there waiting for
         // an unrelated filesystem event to wake the queue.
@@ -263,7 +263,7 @@ pub fn is_auto_upload_paused(state: State<'_, AppState>) -> bool {
 }
 
 /// Current CPU-throttle target the running watcher is using. Falls back
-/// to the persisted config value when no watcher is up — UI uses this
+/// to the persisted config value when no watcher is up - UI uses this
 /// to show the live percentage on the Speed-up button.
 #[tauri::command]
 pub fn get_cpu_throttle_pct(state: State<'_, AppState>) -> Result<u8, String> {
@@ -275,7 +275,7 @@ pub fn get_cpu_throttle_pct(state: State<'_, AppState>) -> Result<u8, String> {
 }
 
 /// Live-update the throttle target. Takes effect on the very next
-/// post-hash sleep — no watcher restart needed. Does NOT persist to
+/// post-hash sleep - no watcher restart needed. Does NOT persist to
 /// config; the Speed-up button on Dashboard uses this to temporarily
 /// override the user's saved preference while a big rescan drains,
 /// without rewriting their preferred-default setting on disk.
@@ -296,7 +296,7 @@ pub fn get_upload_state(state: State<'_, AppState>) -> UploadStateSnapshot {
 
 // ---- defrag:// protocol -----------------------------------------------------
 
-/// Connect immediately to a URL — used for manually-entered IPs from a
+/// Connect immediately to a URL - used for manually-entered IPs from a
 /// "Quick connect" UI where the user is *typing* the address (so the
 /// click on Connect is already their confirmation). Deep-link URLs do
 /// NOT go through this; they queue via `pending_deep_link` so the user
@@ -344,7 +344,7 @@ pub fn confirm_pending_deep_link(
     let addr = protocol::parse_url(&url).map_err(err_to_string)?;
     let cfg = Config::load().map_err(err_to_string)?;
     protocol::launch(cfg.engine_path.as_deref(), addr).map_err(err_to_string)?;
-    // Engine has focus now — drop the launcher back to the tray so it
+    // Engine has focus now - drop the launcher back to the tray so it
     // isn't pointlessly floating over Quake.
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.hide();

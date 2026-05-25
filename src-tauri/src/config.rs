@@ -1,11 +1,11 @@
-//! Persistent launcher config — engine + demos path + auto-upload flag.
+//! Persistent launcher config - engine + demos path + auto-upload flag.
 //!
 //! Written to JSON in the OS's standard app-config directory so it survives
 //! upgrades and doesn't pollute the user's home folder. The auth token is
 //! **not** stored here; it lives in the OS keyring (see `keyring.rs`).
 //!
 //! Backend URL defaults to production. A `DEFRAG_API_URL` env var at launch
-//! time overrides it — used during local development to point at the Docker
+//! time overrides it - used during local development to point at the Docker
 //! Laravel instance.
 
 use anyhow::{Context, Result};
@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 pub const DEFAULT_API_URL: &str = "https://defrag.racing";
 
 /// Default CPU target for the hashing throttle. 15% keeps the launcher
-/// invisible during gameplay even on weaker hardware — the user can
+/// invisible during gameplay even on weaker hardware - the user can
 /// crank it up via the Speed-up button or Settings when they want a
 /// big rescan done quickly.
 pub const DEFAULT_CPU_THROTTLE_PCT: u8 = 15;
@@ -47,7 +47,7 @@ pub struct Config {
     #[serde(default)]
     pub include_subfolders: bool,
 
-    /// Auto-update opt-in. On by default — security fixes need to reach
+    /// Auto-update opt-in. On by default - security fixes need to reach
     /// users without them having to remember to check Releases. Users
     /// can flip it off in Settings if they want manual control over
     /// when binaries change.
@@ -58,7 +58,7 @@ pub struct Config {
     /// duty-cycle. 0 = no throttle (full speed). Value flows into
     /// UploadState at watcher::start; the Speed-up button on Dashboard
     /// temporarily overrides it without touching this saved value.
-    /// 15% by default — see DEFAULT_CPU_THROTTLE_PCT.
+    /// 15% by default - see DEFAULT_CPU_THROTTLE_PCT.
     #[serde(default = "default_cpu_throttle_pct")]
     pub cpu_throttle_pct: u8,
 
@@ -77,7 +77,7 @@ pub struct Config {
 impl Default for Config {
     // Manual impl rather than #[derive(Default)] because auto_update_enabled
     // needs to default to true. Everything else uses Default::default() for
-    // its type — Option/bool/etc — which the field declarations document.
+    // its type - Option/bool/etc - which the field declarations document.
     fn default() -> Self {
         Self {
             engine_path: None,
@@ -115,7 +115,7 @@ impl Config {
         let path = Self::path()?;
         // Stamp the current launcher version so the next boot can tell
         // whether the config was last touched by this version or an older
-        // one — drives the "Previous install detected" dialog.
+        // one - drives the "Previous install detected" dialog.
         let mut to_write = self.clone();
         to_write.config_version = Some(env!("CARGO_PKG_VERSION").to_string());
         let raw = serde_json::to_string_pretty(&to_write)?;
@@ -150,7 +150,7 @@ pub fn api_base_url() -> String {
 
 /// Guess the demos folder that lives next to a given engine binary. The
 /// defrag convention is `<engine_dir>/defrag/demos/`. Returns None if the
-/// path doesn't resolve to something that exists — we don't want to pre-fill
+/// path doesn't resolve to something that exists - we don't want to pre-fill
 /// the field with a made-up path.
 pub fn guess_demos_path_from_engine(engine: &Path) -> Option<PathBuf> {
     let candidate = engine.parent()?.join("defrag").join("demos");

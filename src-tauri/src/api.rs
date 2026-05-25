@@ -1,8 +1,8 @@
 //! HTTP client for the defrag.racing launcher API.
 //!
 //! Two endpoints only:
-//!   - POST /api/launcher/lookup-by-hash — pre-upload dedupe check
-//!   - POST /api/launcher/upload-demo    — actual multipart upload
+//!   - POST /api/launcher/lookup-by-hash - pre-upload dedupe check
+//!   - POST /api/launcher/upload-demo    - actual multipart upload
 //!
 //! The token is injected at call time (keyring → memory → header) so a
 //! token rotation takes effect on the next upload without restart.
@@ -29,11 +29,11 @@ pub struct UploadResponse {
 /// collapses into `Other`.
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
-    #[error("authentication failed — token invalid or revoked")]
+    #[error("authentication failed - token invalid or revoked")]
     Unauthorized,
     #[error("account is restricted from uploading demos")]
     Forbidden,
-    #[error("rate limit exceeded — backing off")]
+    #[error("rate limit exceeded - backing off")]
     RateLimited,
     #[error("duplicate (demo_id = {demo_id})")]
     Duplicate { demo_id: u64 },
@@ -89,7 +89,7 @@ impl Client {
         Ok(body)
     }
 
-    /// Upload a single demo file. `md5_hex` is the precomputed hash — we
+    /// Upload a single demo file. `md5_hex` is the precomputed hash - we
     /// send it so the server can skip hashing again. If the server already
     /// has this hash (race with another device) we get 409 which surfaces
     /// as `ApiError::Duplicate`.
@@ -119,7 +119,7 @@ impl Client {
             .send()
             .await?;
 
-        // 409 duplicate — parse the body so we can report the existing id back.
+        // 409 duplicate - parse the body so we can report the existing id back.
         if resp.status() == reqwest::StatusCode::CONFLICT {
             #[derive(Deserialize)]
             struct Dup {
@@ -135,7 +135,7 @@ impl Client {
     }
 
     async fn check_status(&self, resp: &reqwest::Response) -> ApiResult<()> {
-        // `Response::json()` consumes the body — we only read it here when
+        // `Response::json()` consumes the body - we only read it here when
         // the status is already known to be an error, so the success path
         // stays efficient.
         match resp.status().as_u16() {

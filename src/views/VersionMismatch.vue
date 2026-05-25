@@ -1,7 +1,7 @@
 <script setup lang="ts">
     // Shown once, on first launch after a version change. Gives the user
     // the choice to wipe the old settings + token (clean slate) or keep
-    // them (the default — most users will want this after a normal
+    // them (the default - most users will want this after a normal
     // upgrade). Either path bumps the stored config_version so this
     // screen won't show again until the next upgrade.
 

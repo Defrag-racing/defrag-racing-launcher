@@ -22,7 +22,7 @@
     onMounted(async () => {
         engines.value = await tauri.detectEngines();
         appVersion.value = await tauri.appVersion();
-        // Read the OS-level autostart state, not just our config —
+        // Read the OS-level autostart state, not just our config -
         // catches the case where the user removed the registration
         // manually (Task Manager → Startup) outside the launcher.
         autostart.value = await tauri.isAutostartEnabled();
@@ -47,7 +47,7 @@
         await config.save({ cpu_throttle_pct: pct });
         try {
             await tauri.setCpuThrottlePctRuntime(pct);
-        } catch { /* watcher not running — config save is enough */ }
+        } catch { /* watcher not running - config save is enough */ }
     };
 
     const pickEngine = async () => {
@@ -228,7 +228,7 @@
                     <button class="btn-danger" @click="clearToken">Clear</button>
                 </div>
                 <div v-else class="text-sm text-amber-300">
-                    No token saved — all three features above are disabled. Only <code class="bg-black/40 px-1 rounded">defrag://</code> server-join links work.
+                    No token saved - all three features above are disabled. Only <code class="bg-black/40 px-1 rounded">defrag://</code> server-join links work.
                 </div>
 
                 <div v-if="!config.hasToken || showTokenForm" class="flex gap-2">
@@ -251,7 +251,7 @@
                     <div class="font-semibold">Re-check uploaded demos</div>
                     <div class="text-xs text-neutral-500 mt-0.5">
                         Forget the local "already uploaded" cache. Next Start re-asks the server
-                        for every demo — useful if a demo was deleted on defrag.racing and you want
+                        for every demo - useful if a demo was deleted on defrag.racing and you want
                         to re-upload it.
                     </div>
                 </div>
@@ -312,7 +312,7 @@
                 <button class="btn-ghost" @click="runOnboarding">Run</button>
             </section>
 
-            <!-- Reset — wipes every setting and token so the user can start
+            <!-- Reset - wipes every setting and token so the user can start
                  fresh without uninstalling. Lives in a red-tinted card so
                  it reads as destructive at a glance. -->
             <section class="bg-red-500/5 border border-red-500/30 rounded-lg p-4 flex items-center justify-between">

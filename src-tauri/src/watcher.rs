@@ -7,7 +7,7 @@
 //! `get_upload_state` command and listens for `upload_state_changed` events
 //! emitted whenever the vector mutates.
 //!
-//! Not persisted to disk — restart = empty queue. Failed uploads surface in
+//! Not persisted to disk - restart = empty queue. Failed uploads surface in
 //! the UI and the user can hit "Retry all" to re-scan the demos folder; the
 //! lookup-by-hash call catches demos that actually made it up before the
 //! error, so retries are cheap.
@@ -35,7 +35,7 @@ pub struct PendingUpload {
     /// "cache" when we skipped the network because our local cache already
     /// said this file was uploaded (matched size+mtime); "server" when the
     /// server's lookup-by-hash confirmed it. Lets the UI explain "Already
-    /// backed up — why?" rather than leaving the user guessing.
+    /// backed up - why?" rather than leaving the user guessing.
     pub duplicate_reason: Option<String>,
     pub size_bytes: Option<u64>,
     /// Bytes/sec on the hashing pass, populated once hashing finishes.
@@ -101,7 +101,7 @@ const HASH_MIN_FLOOR_MS: u64 = 5;
 
 /// Upper bound on a single post-hash idle period. With low throttle
 /// settings (5%) and a slow hash (5s) the math would otherwise demand
-/// a 95s wait — gives the user a hard responsiveness ceiling: if you
+/// a 95s wait - gives the user a hard responsiveness ceiling: if you
 /// hit Pause / Speed-up, you wait at most this long before the next
 /// file gets picked up.
 const HASH_MAX_WAIT_MS: u64 = 30_000;
@@ -116,7 +116,7 @@ pub struct UploadState {
     paused: Arc<AtomicBool>,
     notify: Notify,
     /// Last time we emitted an upload_state_changed event. Used to
-    /// rate-limit emits — see `EMIT_MIN_GAP_MS`.
+    /// rate-limit emits - see `EMIT_MIN_GAP_MS`.
     last_emit_at: Mutex<Option<Instant>>,
     /// Target CPU duty-cycle for the hashing worker, in percent (0-100).
     /// 0 disables the throttle entirely (no idle wait between hashes).
@@ -183,7 +183,7 @@ impl UploadState {
 
     /// Find-or-insert by path, apply `f` to the entry, emit a change event.
     /// Insertion goes at the head so the newest activity is visible without
-    /// scrolling — matches user expectation of an "activity feed". The
+    /// scrolling - matches user expectation of an "activity feed". The
     /// emit is rate-limited (see EMIT_MIN_GAP_MS) and the queue is capped
     /// (QUEUE_CAP) so a burst of updates from a multi-thousand-file
     /// rescan can't crash the webview.
@@ -208,7 +208,7 @@ impl UploadState {
         });
 
         // Throttle: only emit if EMIT_MIN_GAP_MS has elapsed since the
-        // last one. We don't queue a trailing emit when we skip — when
+        // last one. We don't queue a trailing emit when we skip - when
         // the burst eventually stops, the *next* update will emit the
         // settled snapshot. Worst case the UI is up to 50ms stale
         // (imperceptible).
@@ -254,7 +254,7 @@ pub struct WatcherHandle {
 }
 
 /// Start watching `demos_path` and return a handle whose drop stops the
-/// watcher + worker. The token is captured up front — if the user rotates
+/// watcher + worker. The token is captured up front - if the user rotates
 /// it later, stop/start the watcher to pick up the new one.
 pub fn start(
     app: AppHandle,
@@ -314,7 +314,7 @@ pub fn start(
 
     let state_worker = state.clone();
     let app_worker = app.clone();
-    // tauri::async_runtime::spawn instead of tokio::spawn — this is called
+    // tauri::async_runtime::spawn instead of tokio::spawn - this is called
     // from a sync Tauri command, which on Windows has no Tokio runtime
     // entered, so a bare tokio::spawn panics with "there is no reactor
     // running". Tauri's wrapper drives an internal runtime that's always
@@ -343,7 +343,7 @@ fn is_demo_file(p: &Path) -> bool {
 /// Quake writes the active recording to `<demos_folder>/temp/<file>` and
 /// atomically renames into `<demos_folder>/<file>` on stop-record. So
 /// anything under a `temp` subdirectory is an in-progress demo we must
-/// never upload — it'd be truncated + the server would reject it.
+/// never upload - it'd be truncated + the server would reject it.
 fn is_in_temp_subfolder(p: &Path) -> bool {
     p.components().any(|c| {
         c.as_os_str()
@@ -426,7 +426,7 @@ async fn worker_loop(
                 // file in the folder back-to-back: each handle_file
                 // notices the pause and aborts hashing within ms, but
                 // the for-loop instantly moves to the next file and
-                // does the same dance — so the user sees a flood of
+                // does the same dance - so the user sees a flood of
                 // Hashing→Pending status flips even though they hit
                 // Pause. Parking between files actually halts the work.
                 if recursive {
@@ -493,7 +493,7 @@ async fn handle_file(
         .unwrap_or("")
         .to_string();
 
-    // Skip files that already made it up in a previous session — identified
+    // Skip files that already made it up in a previous session - identified
     // by presence in state with Done/Duplicate status.
     let already_present = state.with_mut(|items| {
         items
@@ -634,7 +634,7 @@ async fn handle_file(
             let _ = cache.save();
         }
         Err(e) => {
-            // Don't cache errors — we want a retry on next start to either
+            // Don't cache errors - we want a retry on next start to either
             // succeed or surface the same error again.
             state.update(app, &path, &filename, |u| {
                 u.status = UploadStatus::Error;

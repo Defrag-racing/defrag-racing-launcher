@@ -9,12 +9,12 @@
 //! Invalidation: cache hit requires the file's current (size, mtime) to
 //! match the cached values. Either differs and we fall through to the
 //! full hash + lookup path. This is intentionally a best-effort speed-
-//! up — the server-side dedup logic is still authoritative, so a stale
+//! up - the server-side dedup logic is still authoritative, so a stale
 //! cache entry can only cause an extra round-trip, never a wrong upload.
 //!
 //! Atomicity: writes go through a .tmp file + rename so a crash mid-save
 //! can't leave a corrupted JSON behind. Load tolerates missing or
-//! unparseable files by returning Default::default() — we never want a
+//! unparseable files by returning Default::default() - we never want a
 //! flaky cache file to break the watcher.
 
 use anyhow::{Context, Result};
@@ -32,7 +32,7 @@ pub struct CachedEntry {
     pub mtime: u64,
     pub size: u64,
     pub hash: String,
-    /// "done" | "duplicate" — both mean "the server has it", which is
+    /// "done" | "duplicate" - both mean "the server has it", which is
     /// all we care about for skip-on-rescan.
     pub status: String,
     pub demo_id: Option<u64>,

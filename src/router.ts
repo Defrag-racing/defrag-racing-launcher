@@ -1,6 +1,6 @@
 import { createRouter, createMemoryHistory } from 'vue-router';
 
-// Memory history — we're a desktop app, not a webpage. No browser back
+// Memory history - we're a desktop app, not a webpage. No browser back
 // button to reconcile with.
 const router = createRouter({
     history: createMemoryHistory(),
