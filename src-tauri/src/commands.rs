@@ -10,9 +10,9 @@ use crate::config::{self, Config};
 use crate::engine::{self, EngineCandidate};
 use crate::protocol;
 use crate::token;
-use crate::watcher::{self, Message, UploadStateSnapshot, WatcherHandle};
+use crate::watcher::{self, Message, UploadState, UploadStateSnapshot, WatcherHandle};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, State};
 use tauri_plugin_autostart::ManagerExt;
 
@@ -21,15 +21,27 @@ use tauri_plugin_autostart::ManagerExt;
 /// pending URL is kept in backend state (not just frontend) so a cold
 /// start via defrag:// can hand off the URL to the webview once it
 /// mounts - the deep-link event fires before the frontend exists.
+///
+/// `upload_state` lives independently of the watcher so the activity
+/// feed survives Stop+Start (and full app restart - it's loaded from
+/// queue.json at boot). The watcher borrows the same Arc while running
+/// and saves it to disk on its way out.
 pub struct AppState {
     pub watcher: Mutex<Option<WatcherHandle>>,
+    pub upload_state: Arc<UploadState>,
     pub pending_deep_link: Mutex<Option<String>>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
+        let upload_state = Arc::new(UploadState::default());
+        // Pull persisted queue items into memory before the webview
+        // mounts so the Dashboard's first get_upload_state poll shows
+        // history instead of an empty list.
+        upload_state.load_persisted();
         Self {
             watcher: Mutex::new(None),
+            upload_state,
             pending_deep_link: Mutex::new(None),
         }
     }
@@ -118,6 +130,12 @@ pub fn reset_launcher(state: State<'_, AppState>) -> Result<(), String> {
     // from zero (otherwise re-onboarded user with new token would skip
     // re-uploading demos the prior token already covered).
     let _ = UploadCache::clear();
+    // Persisted queue history - blank the Dashboard so a re-onboarded
+    // user doesn't see stale rows from the previous account.
+    let _ = UploadState::clear_persisted();
+    // Wipe the in-memory queue too so the UI updates immediately
+    // without waiting for a restart.
+    state.upload_state.clear_items();
     Ok(())
 }
 
@@ -199,6 +217,7 @@ pub fn start_auto_upload(
     crate::log_startup("start_auto_upload: calling watcher::start");
     let handle = watcher::start(
         app,
+        state.upload_state.clone(),
         demos,
         cfg.include_subfolders,
         config::api_base_url(),
@@ -301,10 +320,12 @@ pub fn set_cpu_throttle_pct_runtime(state: State<'_, AppState>, pct: u8) {
 
 #[tauri::command]
 pub fn get_upload_state(state: State<'_, AppState>) -> UploadStateSnapshot {
-    match state.watcher.lock().unwrap().as_ref() {
-        Some(h) => h.state.snapshot(),
-        None => UploadStateSnapshot::default(),
-    }
+    // Read straight off AppState's shared UploadState - the watcher
+    // (when running) writes to this same Arc, and on cold start it's
+    // populated from queue.json by AppState::default(). Means the
+    // Dashboard sees its history on first mount even before Start is
+    // pressed.
+    state.upload_state.snapshot()
 }
 
 // ---- defrag:// protocol -----------------------------------------------------

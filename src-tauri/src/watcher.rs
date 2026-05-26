@@ -7,14 +7,18 @@
 //! `get_upload_state` command and listens for `upload_state_changed` events
 //! emitted whenever the vector mutates.
 //!
-//! Not persisted to disk - restart = empty queue. Failed uploads surface in
-//! the UI and the user can hit "Retry all" to re-scan the demos folder; the
-//! lookup-by-hash call catches demos that actually made it up before the
-//! error, so retries are cheap.
+//! Queue items are persisted to queue.json (next to uploaded.json) so the
+//! activity feed survives an app restart. The hash cache (uploaded.json) is
+//! still the source of truth for "is this on the server"; the queue file is
+//! only the UI history, so any corruption / mismatch just costs an extra
+//! lookup. Failed uploads surface in the UI and the user can hit "Retry
+//! all" to re-scan the demos folder; the lookup-by-hash call catches demos
+//! that actually made it up before the error, so retries are cheap.
 
 use crate::api::{ApiError, Client};
 use crate::cache::UploadCache;
 use crate::hashing;
+use anyhow::{Context, Result};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, FileIdMap};
 use serde::{Deserialize, Serialize};
@@ -106,6 +110,14 @@ const HASH_MIN_FLOOR_MS: u64 = 5;
 /// file gets picked up.
 const HASH_MAX_WAIT_MS: u64 = 30_000;
 
+/// Lower bound between two writes of queue.json. The emit pump checks
+/// dirty every EMIT_MIN_GAP_MS (50ms) and would otherwise burn through
+/// hundreds of writes per second during a rescan. 1s keeps the file
+/// fresh enough that an unclean kill loses at most a second of UI
+/// history, while a Stop or graceful exit triggers a final save via
+/// WatcherHandle::drop so nothing within the window is lost.
+const QUEUE_SAVE_INTERVAL_SECS: u64 = 1;
+
 #[derive(Default)]
 pub struct UploadState {
     inner: Mutex<Vec<PendingUpload>>,
@@ -182,6 +194,73 @@ impl UploadState {
         // Mark state dirty so the emit pump pushes a fresh snapshot
         // and the frontend can update its banner immediately rather
         // than waiting for an unrelated update to fire.
+        self.dirty.store(true, Ordering::Release);
+    }
+
+    /// Co-located with config.json / uploaded.json so a single config
+    /// wipe clears everything. Errors here mean the platform config
+    /// dir is unresolvable - exotic enough to surface up.
+    fn queue_path() -> Result<PathBuf> {
+        let dirs = directories::ProjectDirs::from("racing", "defrag", "launcher")
+            .context("could not resolve platform config directory")?;
+        let dir = dirs.config_dir().to_path_buf();
+        std::fs::create_dir_all(&dir).with_context(|| format!("create {:?}", dir))?;
+        Ok(dir.join("queue.json"))
+    }
+
+    /// Pull the persisted queue from disk into this state, replacing
+    /// any current contents. Best-effort: missing file or unparseable
+    /// JSON yields an empty queue, the safe default. Called once at
+    /// AppState::default() so the Dashboard sees its history on first
+    /// mount, before Start has been pressed.
+    ///
+    /// Hashing / Uploading statuses lose meaning across an app restart
+    /// (no worker is actually doing that work right now), so we
+    /// normalise them down to Pending - the row stays visible with the
+    /// right size/filename, and the next Start press will re-process it.
+    pub fn load_persisted(&self) {
+        let Ok(path) = Self::queue_path() else { return };
+        let Ok(raw) = std::fs::read_to_string(&path) else { return };
+        let Ok(snap) = serde_json::from_str::<UploadStateSnapshot>(&raw) else { return };
+        let mut items = snap.items;
+        for item in &mut items {
+            if matches!(item.status, UploadStatus::Hashing | UploadStatus::Uploading) {
+                item.status = UploadStatus::Pending;
+                item.error = None;
+            }
+        }
+        *self.inner.lock().unwrap() = items;
+    }
+
+    /// Snapshot the current queue and atomically write it to disk via
+    /// .tmp + rename so a crash mid-save can't corrupt the file. Called
+    /// by the emit pump (rate-limited to ~1s) and on WatcherHandle drop
+    /// so the Stop button doesn't lose the last few hundred ms of state.
+    pub fn save_persisted(&self) -> Result<()> {
+        let path = Self::queue_path()?;
+        let snap = self.snapshot();
+        let raw = serde_json::to_string(&snap)?;
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, raw).with_context(|| format!("write {:?}", tmp))?;
+        std::fs::rename(&tmp, &path).with_context(|| format!("rename to {:?}", path))?;
+        Ok(())
+    }
+
+    /// Wipe the persisted queue from disk. Called by `reset_launcher`
+    /// so a full reset really does start with a blank Dashboard.
+    pub fn clear_persisted() -> Result<()> {
+        let path = Self::queue_path()?;
+        if path.exists() {
+            std::fs::remove_file(&path).with_context(|| format!("remove {:?}", path))?;
+        }
+        Ok(())
+    }
+
+    /// Drop every row from the in-memory queue and emit an update.
+    /// Used by reset_launcher so the Dashboard clears instantly without
+    /// waiting for a restart to re-read the (now empty) queue.json.
+    pub fn clear_items(&self) {
+        self.with_mut(|items| items.clear());
         self.dirty.store(true, Ordering::Release);
     }
 
@@ -275,14 +354,24 @@ impl Drop for WatcherHandle {
         // running forever and each Stop+Start leaks a new pair.
         self.worker.abort();
         self.emit_pump.abort();
+        // Final save so the Stop button doesn't lose the last <1s of
+        // state mutations (emit_pump's save is rate-limited and the
+        // very last burst may have been dropped). The Arc lives on
+        // in AppState so this only persists - it does not free state.
+        let _ = self.state.save_persisted();
     }
 }
 
 /// Start watching `demos_path` and return a handle whose drop stops the
 /// watcher + worker. The token is captured up front - if the user rotates
 /// it later, stop/start the watcher to pick up the new one.
+///
+/// `state` is shared with `AppState`, so the upload queue (and any items
+/// loaded from queue.json at app boot) survives a Stop+Start cycle. The
+/// handle keeps its own clone for the worker / emit pump / Drop save.
 pub fn start(
     app: AppHandle,
+    state: Arc<UploadState>,
     demos_path: PathBuf,
     include_subfolders: bool,
     api_base_url: String,
@@ -293,7 +382,12 @@ pub fn start(
         "watcher::start: demos_path={:?} include_subfolders={} throttle={}%",
         demos_path, include_subfolders, cpu_throttle_pct
     ));
-    let state = Arc::new(UploadState::default());
+    // The Arc is shared with AppState so its non-queue runtime flags
+    // would otherwise carry over from the previous watcher: a Pause +
+    // Stop + Start cycle would re-enter with paused=true and look
+    // frozen. Reset the transient ones at the top of every start.
+    state.set_paused(false);
+    state.set_rate_limit_resume_at_ms(0);
     state.set_cpu_throttle_pct(cpu_throttle_pct);
     let (tx, rx) = mpsc::unbounded_channel::<Message>();
     crate::log_startup("watcher::start: channel created");
@@ -361,10 +455,20 @@ pub fn start(
         // Skip the immediate-fire of the first tick - there's nothing
         // to emit before the worker has had a chance to mutate state.
         tick.tick().await;
+        // Save-to-disk runs off the same dirty flag as the emit but
+        // capped to once per QUEUE_SAVE_INTERVAL so a busy rescan doesn't
+        // turn into a write storm. The Drop impl does a final flush, so
+        // anything inside the throttle window still lands on disk before
+        // a Stop or app exit.
+        let mut last_saved = Instant::now() - Duration::from_secs(QUEUE_SAVE_INTERVAL_SECS);
         loop {
             tick.tick().await;
             if state_pump.dirty.swap(false, Ordering::AcqRel) {
                 let _ = app_pump.emit("upload_state_changed", state_pump.snapshot());
+                if last_saved.elapsed() >= Duration::from_secs(QUEUE_SAVE_INTERVAL_SECS) {
+                    let _ = state_pump.save_persisted();
+                    last_saved = Instant::now();
+                }
             }
         }
     });

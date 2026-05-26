@@ -12,6 +12,7 @@
 
     import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
     import { tauri, type DefragServer } from '../lib/tauri';
+    import { q3ToHtml } from '../lib/q3color';
     import { useConfigStore } from '../stores/config';
     import { openUrl } from '@tauri-apps/plugin-opener';
 
@@ -428,9 +429,11 @@
                                     class="w-4 h-3 rounded flex-shrink-0"
                                     @error="($event.target as HTMLImageElement).style.display='none'"
                                 />
-                                <div class="text-sm text-neutral-100 truncate font-semibold">
-                                    {{ s.plain_name || stripColors(s.name) }}
-                                </div>
+                                <div
+                                    class="text-sm text-neutral-100 truncate font-semibold"
+                                    :title="s.plain_name || stripColors(s.name)"
+                                    v-html="q3ToHtml(s.name || s.plain_name)"
+                                ></div>
                                 <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-brand-500/15 text-brand-300 flex-shrink-0">
                                     {{ gametypeTag(s) }}
                                 </span>
@@ -466,7 +469,11 @@
                                     class="w-3 h-2 rounded flex-shrink-0"
                                     @error="($event.target as HTMLImageElement).style.display='none'"
                                 />
-                                <span class="truncate">{{ stripColors(s.besttime_name) }}</span>
+                                <span
+                                    class="truncate"
+                                    :title="stripColors(s.besttime_name || '')"
+                                    v-html="q3ToHtml(s.besttime_name)"
+                                ></span>
                             </div>
                         </div>
 
