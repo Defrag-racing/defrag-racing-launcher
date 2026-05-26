@@ -3,7 +3,8 @@
     import { useRouter } from 'vue-router';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import type { Update } from '@tauri-apps/plugin-updater';
-    import { tauri, type UploadStateSnapshot, type PendingUpload } from '../lib/tauri';
+    import { tauri, type UploadStateSnapshot, type PendingUpload, type DefragServer } from '../lib/tauri';
+    import { q3ToHtml } from '../lib/q3color';
     import { checkForUpdate, runUpdate, type UpdateState } from '../lib/updater';
     import { useConfigStore } from '../stores/config';
 
@@ -137,6 +138,59 @@
     // webview mounts after the event already fired).
     type PendingDeepLink = { address: string; url: string };
     const pendingDeepLink = ref<PendingDeepLink | null>(null);
+
+    // Server detail looked up by ip:port when a pending connection
+    // appears, so the banner can show "what am I about to join" instead
+    // of just an IP. Fetch is best-effort: a private/off-list server,
+    // no token, or a network blip all gracefully fall back to the
+    // plain IP banner.
+    const pendingServer = ref<DefragServer | null>(null);
+    const pendingServerLoading = ref(false);
+
+    const lookupPendingServer = async (address: string) => {
+        pendingServer.value = null;
+        if (!config.hasToken) return; // server list endpoint is token-locked
+        pendingServerLoading.value = true;
+        try {
+            const resp = await tauri.getServers();
+            const [ip, portStr] = address.split(':');
+            const port = Number(portStr);
+            pendingServer.value = (resp.servers ?? []).find(
+                (s) => s.ip === ip && s.port === port,
+            ) ?? null;
+        } catch {
+            pendingServer.value = null;
+        } finally {
+            pendingServerLoading.value = false;
+        }
+    };
+
+    // -- Display helpers for the pending-connection banner -----------
+    const physicsOfServer = (s: DefragServer): 'vq3' | 'cpm' =>
+        s.defrag?.toLowerCase().includes('cpm') ? 'cpm' : 'vq3';
+
+    const playerCountOf = (s: DefragServer): number => s.online_players?.length ?? 0;
+
+    const thumbnailUrlOf = (s: DefragServer): string | null => {
+        const t = s.mapdata?.thumbnail;
+        if (!t) return null;
+        if (t.startsWith('http://') || t.startsWith('https://')) return t;
+        return `https://defrag.racing/storage/${t}`;
+    };
+
+    const flagUrlOf = (country: string | null | undefined): string | null => {
+        if (!country) return null;
+        if (country === '_404' || country === 'XX') return null;
+        return `https://defrag.racing/images/flags/${country.toLowerCase()}.png`;
+    };
+
+    const openServerMap = (mapname: string | undefined) => {
+        if (!mapname) return;
+        import('@tauri-apps/plugin-opener').then(({ openUrl }) => {
+            openUrl(`https://defrag.racing/maps/${encodeURIComponent(mapname)}`)
+                .catch(() => { /* best effort */ });
+        });
+    };
     const connectError = ref<string | null>(null);
     const connecting = ref(false);
 
@@ -214,6 +268,7 @@
         unlistenPending = await listen<PendingDeepLink>('deep-link://pending', (ev) => {
             pendingDeepLink.value = ev.payload;
             connectError.value = null;
+            void lookupPendingServer(ev.payload.address);
         });
         unlistenResult = await listen<{ ok: false; url: string; error: string }>(
             'deep-link://result',
@@ -239,6 +294,7 @@
                 // backend uses in protocol::parse_url.
                 const m = url.match(/^defrag:\/\/([^/]+)/);
                 pendingDeepLink.value = { url, address: m ? m[1] : url };
+                void lookupPendingServer(pendingDeepLink.value.address);
             }
         } catch { /* no-op */ }
 
@@ -280,6 +336,7 @@
         try {
             await tauri.confirmPendingDeepLink();
             pendingDeepLink.value = null;
+            pendingServer.value = null;
         } catch (e: any) {
             connectError.value = e?.toString?.() ?? 'Connect failed';
         } finally {
@@ -290,6 +347,7 @@
     const cancelConnect = async () => {
         await tauri.cancelPendingDeepLink();
         pendingDeepLink.value = null;
+        pendingServer.value = null;
         connectError.value = null;
     };
 
@@ -546,13 +604,70 @@
             </div>
         </div>
 
-        <!-- defrag:// pending-connection prompt: user-explicit confirm. -->
+        <!-- defrag:// pending-connection prompt: user-explicit confirm.
+             Layout mirrors a Servers list row when we have server data
+             (thumbnail + Q3-colored name + map + physics + IP + player
+             count); falls back to a plain "Connect to IP?" line when
+             the address isn't in the live server list (private server,
+             no token, off-list, or lookup still in flight). -->
         <div
             v-if="pendingDeepLink"
-            class="px-5 py-3 border-b border-brand-500/20 bg-brand-500/10 text-sm flex items-center gap-3"
+            class="px-5 py-3 border-b border-brand-500/20 bg-brand-500/10 text-sm flex items-start gap-3"
         >
+            <!-- Map thumbnail. Click opens the map page on defrag.racing. -->
+            <button
+                v-if="pendingServer"
+                class="w-20 h-14 rounded bg-black/40 border border-white/10 overflow-hidden flex-shrink-0 hover:border-brand-500/40"
+                :title="`Open ${pendingServer.map} on defrag.racing`"
+                @click="openServerMap(pendingServer.map)"
+            >
+                <img
+                    v-if="thumbnailUrlOf(pendingServer)"
+                    :src="thumbnailUrlOf(pendingServer)!"
+                    :alt="pendingServer.map"
+                    class="w-full h-full object-cover"
+                    loading="lazy"
+                />
+                <div v-else class="w-full h-full flex items-center justify-center text-[10px] text-neutral-600 uppercase">
+                    no map
+                </div>
+            </button>
+
             <div class="flex-1 min-w-0">
-                <div class="text-brand-300 font-semibold">Connect to <span class="font-mono">{{ pendingDeepLink.address }}</span>?</div>
+                <!-- Header line: country flag + colored name + physics pill.
+                     Falls back to "Connect to IP?" when we couldn't match
+                     the address to a known server. -->
+                <div v-if="pendingServer" class="flex items-center gap-2 min-w-0">
+                    <img
+                        v-if="flagUrlOf(pendingServer.location)"
+                        :src="flagUrlOf(pendingServer.location)!"
+                        :alt="pendingServer.location || ''"
+                        class="w-4 h-3 rounded flex-shrink-0"
+                        @error="($event.target as HTMLImageElement).style.display='none'"
+                    />
+                    <div
+                        class="text-sm text-neutral-100 truncate font-semibold"
+                        v-html="q3ToHtml(pendingServer.name || pendingServer.plain_name)"
+                    ></div>
+                    <span class="uppercase text-[10px] px-1 py-0.5 rounded bg-white/5 text-neutral-300 flex-shrink-0">
+                        {{ physicsOfServer(pendingServer) }}
+                    </span>
+                </div>
+                <div v-else class="text-brand-300 font-semibold">
+                    Connect to <span class="font-mono">{{ pendingDeepLink.address }}</span>?
+                </div>
+
+                <!-- Map + ip + player count -->
+                <div v-if="pendingServer" class="text-xs text-neutral-400 flex items-center gap-2 mt-0.5">
+                    <button class="text-brand-400 hover:underline" @click="openServerMap(pendingServer.map)">
+                        {{ pendingServer.map }}
+                    </button>
+                    <span class="text-neutral-600">·</span>
+                    <span class="font-mono">{{ pendingServer.ip }}:{{ pendingServer.port }}</span>
+                    <span class="text-neutral-600">·</span>
+                    <span>{{ playerCountOf(pendingServer) }} player{{ playerCountOf(pendingServer) === 1 ? '' : 's' }}</span>
+                </div>
+
                 <div class="text-xs text-neutral-400 mt-0.5">
                     <button
                         class="hover:underline text-neutral-400 hover:text-neutral-200"
@@ -561,15 +676,18 @@
                 </div>
                 <div v-if="connectError" class="text-xs text-red-300 mt-0.5">{{ connectError }}</div>
             </div>
-            <button
-                class="px-3 py-1.5 rounded bg-brand-500/30 hover:bg-brand-500/40 text-brand-200 font-semibold disabled:opacity-50"
-                :disabled="connecting"
-                @click="confirmConnect"
-            >Connect</button>
-            <button
-                class="px-3 py-1.5 rounded bg-white/5 hover:bg-white/10 text-neutral-300"
-                @click="cancelConnect"
-            >Dismiss</button>
+
+            <div class="flex flex-col gap-1 flex-shrink-0">
+                <button
+                    class="px-3 py-1.5 rounded bg-brand-500/30 hover:bg-brand-500/40 text-brand-200 font-semibold disabled:opacity-50"
+                    :disabled="connecting"
+                    @click="confirmConnect"
+                >Connect</button>
+                <button
+                    class="px-3 py-1.5 rounded bg-white/5 hover:bg-white/10 text-neutral-300"
+                    @click="cancelConnect"
+                >Dismiss</button>
+            </div>
         </div>
 
         <div
