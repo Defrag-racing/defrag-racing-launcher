@@ -95,14 +95,19 @@ pub struct UploadStateSnapshot {
 }
 
 /// Cap on the number of rows kept in the visible queue. Anything older
-/// than this gets dropped when a new row is inserted at the head. The
-/// motivation is webview survival: each emit ships a copy of the full
-/// snapshot and Vue runs a list-diff on it, so an unbounded queue plus
-/// a rescan of a several-thousand-file folder can crash the webview
-/// with the white-screen-of-death we saw in 0.1.6 testing. 500 is
-/// generous enough for a normal session (the user can still scroll
-/// through their recent activity) while keeping the IPC payload small.
-const QUEUE_CAP: usize = 500;
+/// than this gets dropped when a new row is inserted at the head.
+///
+/// Originally 500 - a defensive limit set when the launcher emitted on
+/// every state.update and a cache-hit rescan fired thousands of emits
+/// per second, killing the webview with a flood of full-snapshot IPC.
+/// The emit-pump (EMIT_MIN_GAP_MS) capped that at 20 emits/sec since
+/// 0.1.6's rate-limit hardening, so the IPC bound is now snapshot_size
+/// * 20Hz, not mutation_rate * snapshot_size. 5000 items at ~350 bytes
+/// of JSON each = ~1.75MB per emit, ~35MB/sec sustained during a busy
+/// rescan - well within modern webview capacity. Sized to comfortably
+/// hold a 5000+ demo collection so a returning power user sees their
+/// full history rather than the last 500 entries.
+const QUEUE_CAP: usize = 5000;
 
 /// Minimum gap between two `upload_state_changed` emits. During a tight
 /// inner loop (rescan with pause-aborted hashing) the per-update emit
