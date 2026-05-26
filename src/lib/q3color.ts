@@ -63,10 +63,18 @@ export function q3ToHtml(name: string | null | undefined): string {
     let result = '';
     let color = '7';
     let buffer = '';
+    // Thin white outline via 4-direction text-shadow so the darkest
+    // Q3 colors (^0 black, ^9/^z gray) stay legible against the
+    // launcher's neutral-900 background. Web ignores this and pure-
+    // black nicks vanish there too; here we give every span the same
+    // outline so all colors look consistent rather than only patching
+    // black, and the effect doubles as a subtle Q3-HUD glow on
+    // brighter hues.
+    const SHADOW = '-1px -1px 0 rgba(255,255,255,0.35),1px -1px 0 rgba(255,255,255,0.35),-1px 1px 0 rgba(255,255,255,0.35),1px 1px 0 rgba(255,255,255,0.35)';
     const flush = () => {
         if (buffer) {
             const c = Q3_PALETTE[color] ?? Q3_PALETTE['7'];
-            result += `<span style="color:${c}">${escapeHtml(buffer)}</span>`;
+            result += `<span style="color:${c};text-shadow:${SHADOW}">${escapeHtml(buffer)}</span>`;
             buffer = '';
         }
     };

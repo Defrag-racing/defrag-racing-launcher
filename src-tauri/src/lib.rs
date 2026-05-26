@@ -379,7 +379,7 @@ fn handle_deep_link_url(app: &tauri::AppHandle, url: &str) {
                 .unwrap_or(false);
             if auto_connect_ok {
                 let engine = cfg.as_ref().and_then(|c| c.engine_path.as_deref());
-                match protocol::launch(engine, addr) {
+                match protocol::launch(engine, &addr) {
                     Ok(()) => {
                         // Log the connection to history with whatever
                         // we have (just IP:port at this point -
@@ -387,7 +387,7 @@ fn handle_deep_link_url(app: &tauri::AppHandle, url: &str) {
                         // lookup which auto-connect skips by design).
                         let state: tauri::State<AppState> = app.state();
                         state.history.log(
-                            addr.ip().to_string(),
+                            addr.host().to_string(),
                             addr.port(),
                             None,
                             None,

@@ -523,10 +523,10 @@ pub fn handle_protocol_url(
 ) -> Result<String, String> {
     let addr = protocol::parse_url(&url).map_err(err_to_string)?;
     let cfg = Config::load().map_err(err_to_string)?;
-    protocol::launch(cfg.engine_path.as_deref(), addr).map_err(err_to_string)?;
+    protocol::launch(cfg.engine_path.as_deref(), &addr).map_err(err_to_string)?;
     let enrich = enrichment.unwrap_or_default();
     state.history.log(
-        addr.ip().to_string(),
+        addr.host().to_string(),
         addr.port(),
         enrich.map,
         enrich.server_name,
@@ -737,10 +737,10 @@ pub fn confirm_pending_deep_link(
         .ok_or_else(|| "No pending connection".to_string())?;
     let addr = protocol::parse_url(&url).map_err(err_to_string)?;
     let cfg = Config::load().map_err(err_to_string)?;
-    protocol::launch(cfg.engine_path.as_deref(), addr).map_err(err_to_string)?;
+    protocol::launch(cfg.engine_path.as_deref(), &addr).map_err(err_to_string)?;
     let enrich = enrichment.unwrap_or_default();
     state.history.log(
-        addr.ip().to_string(),
+        addr.host().to_string(),
         addr.port(),
         enrich.map,
         enrich.server_name,
