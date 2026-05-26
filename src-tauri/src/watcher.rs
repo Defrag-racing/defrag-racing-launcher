@@ -502,14 +502,17 @@ pub fn start(
     let (tx, rx) = mpsc::unbounded_channel::<Message>();
     crate::log_startup("watcher::start: channel created");
 
-    // Debounce bursts while Defrag is still writing the file. The debounce
-    // window is deliberately generous (5s) to absorb Windows Defender post-
-    // scan + any weird FS buffering after Quake's temp→demos rename, while
-    // still feeling near-instant to the user. The rename itself is atomic,
-    // so this is more about defensive coding than correctness.
+    // Debounce window absorbs the temp/ → demos/ atomic rename + any
+    // Defender post-scan latching, then fires Message::FileAdded.
+    // Atomic rename is instant in practice, so this is defensive
+    // coding rather than a correctness requirement - generous values
+    // are safe. 30s trades "demo appears in queue ~instantly" for a
+    // calmer UX where the row doesn't pop up the moment you stop
+    // recording. Periodic rescan (PERIODIC_RESCAN_SECS) is the
+    // upper bound on "where is my demo?" anyway.
     let tx_fs = tx.clone();
     let mut debouncer = new_debouncer(
-        Duration::from_secs(5),
+        Duration::from_secs(30),
         None,
         move |res: DebounceEventResult| {
             if let Ok(events) = res {

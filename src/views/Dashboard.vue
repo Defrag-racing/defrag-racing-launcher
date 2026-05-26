@@ -526,7 +526,7 @@
                             Watching
                             <code class="bg-black/40 px-1 rounded">{{ config.config.demos_path || '(folder not set)' }}</code>
                             live - new <code class="bg-black/40 px-1 rounded">.dm_*</code> files
-                            appear within ~5s of recording stop. Every 30 min the
+                            appear within ~30s of recording stop. Every 30 min the
                             folder is re-scanned as a safety net in case the OS
                             drops an event. The scan just lists filenames; hashing
                             is paced by your CPU throttle so it doesn't lag the disk.
