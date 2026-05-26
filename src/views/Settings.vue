@@ -120,7 +120,7 @@
 
         <div class="flex-1 overflow-auto p-5 space-y-4 max-w-2xl w-full">
             <!-- Engine -->
-            <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-2">
+            <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
                 <div class="flex items-start justify-between gap-3">
                     <div>
                         <div class="font-semibold">Defrag engine</div>
@@ -130,6 +130,33 @@
                 </div>
                 <div class="text-sm text-neutral-300 break-all">
                     {{ config.config.engine_path || '(not set)' }}
+                </div>
+
+                <!-- Auto-connect bypass. Off by default so an accidental
+                     forum-link click can't yeet you into a random server.
+                     Power users who already trust their sources flip this
+                     on to skip the confirmation banner. -->
+                <div
+                    id="deep-link-auto-connect"
+                    class="flex items-center justify-between gap-3 pt-3 border-t border-white/[0.05]"
+                >
+                    <div>
+                        <div class="text-sm font-medium">Skip <code class="bg-black/40 px-1 rounded">defrag://</code> confirmation</div>
+                        <div class="text-xs text-neutral-500 mt-0.5">
+                            Launch the engine immediately without asking. Useful if you
+                            join often and trust the links you click. Engine must be set.
+                        </div>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                        <input
+                            type="checkbox"
+                            class="sr-only peer"
+                            :checked="config.config.deep_link_auto_connect"
+                            @change="config.save({ deep_link_auto_connect: ($event.target as HTMLInputElement).checked })"
+                        />
+                        <div class="w-10 h-5 bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors"></div>
+                        <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+                    </label>
                 </div>
             </section>
 

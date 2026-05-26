@@ -1,5 +1,5 @@
 <script setup lang="ts">
-    import { computed, onMounted, onUnmounted, ref } from 'vue';
+    import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
     import { useRouter } from 'vue-router';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import type { Update } from '@tauri-apps/plugin-updater';
@@ -293,6 +293,22 @@
         connectError.value = null;
     };
 
+    /// Open Settings and scroll to the deep-link-auto-connect row so the
+    /// user lands directly on the toggle they came to flip. The "Skip
+    /// this confirmation next time" hint inside the pending banner is
+    /// the only call site - keeping the deep-link out of a real URL
+    /// means it works the same whether or not we ever ship route guards
+    /// for the Settings view.
+    const openAutoConnectSetting = async () => {
+        await router.push('/settings');
+        // Wait one tick so the Settings view has mounted before we try
+        // to scroll to its anchor.
+        await nextTick();
+        document
+            .getElementById('deep-link-auto-connect')
+            ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+
     const installUpdate = async () => {
         if (!pendingUpdate) return;
         await runUpdate(pendingUpdate, (s) => { updateState.value = s; });
@@ -530,13 +546,19 @@
             </div>
         </div>
 
-        <!-- defrag:// pending-connection prompt: user-explicit confirm -->
+        <!-- defrag:// pending-connection prompt: user-explicit confirm. -->
         <div
             v-if="pendingDeepLink"
             class="px-5 py-3 border-b border-brand-500/20 bg-brand-500/10 text-sm flex items-center gap-3"
         >
             <div class="flex-1 min-w-0">
                 <div class="text-brand-300 font-semibold">Connect to <span class="font-mono">{{ pendingDeepLink.address }}</span>?</div>
+                <div class="text-xs text-neutral-400 mt-0.5">
+                    <button
+                        class="hover:underline text-neutral-400 hover:text-neutral-200"
+                        @click="openAutoConnectSetting"
+                    >Skip this confirmation next time →</button>
+                </div>
                 <div v-if="connectError" class="text-xs text-red-300 mt-0.5">{{ connectError }}</div>
             </div>
             <button

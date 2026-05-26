@@ -62,6 +62,16 @@ pub struct Config {
     #[serde(default = "default_cpu_throttle_pct")]
     pub cpu_throttle_pct: u8,
 
+    /// Skip the "Connect to X.X.X.X?" confirmation banner and launch
+    /// the engine immediately when a defrag:// URL arrives. Off by
+    /// default because an accidental click on a defrag link in a chat
+    /// or forum would otherwise yeet the user straight into a random
+    /// server - users who join often and trust their sources can opt
+    /// in via Settings. Has no effect when no engine is configured;
+    /// the banner still appears so the user can see what failed.
+    #[serde(default)]
+    pub deep_link_auto_connect: bool,
+
     /// First-run flag so we show onboarding exactly once and skip it
     /// afterwards, even if every individual field is still empty.
     pub onboarding_completed: bool,
@@ -86,6 +96,7 @@ impl Default for Config {
             include_subfolders: false,
             auto_update_enabled: true,
             cpu_throttle_pct: DEFAULT_CPU_THROTTLE_PCT,
+            deep_link_auto_connect: false,
             onboarding_completed: false,
             config_version: None,
         }

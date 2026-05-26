@@ -276,22 +276,57 @@ fn handle_deep_link_url(app: &tauri::AppHandle, url: &str) {
 
     match protocol::parse_url(url) {
         Ok(addr) => {
+            // Auto-connect path: user opted into "skip confirmation" in
+            // Settings AND has an engine configured. We launch directly
+            // and stay in the tray, no window pop, no banner. If the
+            // launch fails (missing/invalid engine path) we fall back
+            // to the normal banner so the user can see what's wrong
+            // instead of silently doing nothing.
+            let cfg = config::Config::load().ok();
+            let auto_connect_ok = cfg
+                .as_ref()
+                .map(|c| c.deep_link_auto_connect && c.engine_path.is_some())
+                .unwrap_or(false);
+            if auto_connect_ok {
+                let engine = cfg.as_ref().and_then(|c| c.engine_path.as_deref());
+                match protocol::launch(engine, addr) {
+                    Ok(()) => {
+                        let _ = app.emit(
+                            "deep-link://result",
+                            serde_json::json!({
+                                "ok": true,
+                                "address": addr.to_string(),
+                                "url": url,
+                                "auto_connect": true,
+                            }),
+                        );
+                        return;
+                    }
+                    Err(_) => {
+                        // Fall through to the pending banner so the
+                        // user can see the failure rather than nothing
+                        // happening at all.
+                    }
+                }
+            }
+
             let state: tauri::State<AppState> = app.state();
             *state.pending_deep_link.lock().unwrap() = Some(url.to_string());
             let _ = app.emit(
                 "deep-link://pending",
                 serde_json::json!({ "address": addr.to_string(), "url": url }),
             );
+            // User needs to see the window so they can press Connect.
+            show_main_window(app);
         }
         Err(e) => {
             let _ = app.emit(
                 "deep-link://result",
                 serde_json::json!({ "ok": false, "error": e.to_string(), "url": url }),
             );
+            // Surface the window so the error toast is visible.
+            show_main_window(app);
         }
     }
-    // Either way, the user needs to see the launcher window - either to
-    // press Connect or to see why the URL was rejected.
-    show_main_window(app);
 }
 

@@ -15,6 +15,7 @@ export const useConfigStore = defineStore('config', () => {
         include_subfolders: false,
         auto_update_enabled: true,
         cpu_throttle_pct: 15,
+        deep_link_auto_connect: false,
         onboarding_completed: false,
         config_version: null,
     });

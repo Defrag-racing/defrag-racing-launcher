@@ -12,6 +12,10 @@ export interface LauncherConfig {
     auto_update_enabled: boolean;
     /** Target CPU% for the hashing worker. 0 = no throttle. */
     cpu_throttle_pct: number;
+    /** Skip the defrag:// confirmation banner and launch the engine
+     *  directly. Off by default to prevent accidental forum-link clicks
+     *  from yeeting the user into a random server. */
+    deep_link_auto_connect: boolean;
     onboarding_completed: boolean;
     config_version: string | null;
 }
