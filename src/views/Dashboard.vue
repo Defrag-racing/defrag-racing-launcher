@@ -132,6 +132,25 @@
         expanded.value = new Set(expanded.value);
     };
 
+    // Status filter for the queue list. Purely client-side - the
+    // backend always sends the full snapshot and the user picks a
+    // slice. "All" is the default so existing behaviour is unchanged
+    // for anyone who doesn't notice the tabs.
+    type QueueFilter = 'all' | 'in_progress' | 'done' | 'duplicate' | 'error';
+    const queueFilter = ref<QueueFilter>('all');
+    const filteredQueueItems = computed(() => {
+        switch (queueFilter.value) {
+            case 'in_progress':
+                return queue.value.items.filter((i) =>
+                    i.status === 'pending' || i.status === 'hashing' || i.status === 'uploading',
+                );
+            case 'done':       return queue.value.items.filter((i) => i.status === 'done');
+            case 'duplicate':  return queue.value.items.filter((i) => i.status === 'duplicate');
+            case 'error':      return queue.value.items.filter((i) => i.status === 'error');
+            default:           return queue.value.items;
+        }
+    });
+
     // defrag:// pending-connection prompt. Backend stashes the URL when
     // a deep link arrives and emits `deep-link://pending`; we read both
     // the live event AND the stashed value (cold-start case where the
@@ -504,12 +523,13 @@
                     </div>
                     <div class="text-xs text-neutral-500 mt-0.5 leading-snug">
                         <template v-if="config.autoUploadRunning && !paused">
-                            Watching your demos folder live (new
-                            <code class="bg-black/40 px-1 rounded">.dm_*</code> files
-                            appear within ~5s of recording stop) and re-scanning every
-                            minute as a safety net so nothing slips through. The
-                            scan only lists filenames - hashing is paced by your CPU
-                            throttle so it doesn't lag your disk.
+                            Watching
+                            <code class="bg-black/40 px-1 rounded">{{ config.config.demos_path || '(folder not set)' }}</code>
+                            live - new <code class="bg-black/40 px-1 rounded">.dm_*</code> files
+                            appear within ~5s of recording stop. Every 30 min the
+                            folder is re-scanned as a safety net in case the OS
+                            drops an event. The scan just lists filenames; hashing
+                            is paced by your CPU throttle so it doesn't lag the disk.
                         </template>
                         <template v-else-if="config.autoUploadRunning && paused">
                             Watcher is still picking up new demos, but uploads are paused. Click Resume to drain the queue.
@@ -758,8 +778,33 @@
             <span v-if="queue.error_count" class="text-red-400">! {{ queue.error_count }} error</span>
         </div>
 
-        <!-- body -->
-        <div class="flex-1 overflow-auto">
+        <!-- Status filter tabs. Client-side only; lets the user
+             scope the activity feed to "what's running right now"
+             vs. "what I uploaded today" vs. "what failed" without
+             scrolling through thousands of cache-hit rows. -->
+        <div
+            v-if="queue.items.length"
+            class="px-5 py-1.5 border-b border-white/[0.04] flex items-center gap-1 text-xs overflow-x-auto"
+        >
+            <button
+                v-for="opt in ([
+                    { v: 'all',          label: 'All' },
+                    { v: 'in_progress',  label: 'In progress' },
+                    { v: 'done',         label: 'Newly uploaded' },
+                    { v: 'duplicate',    label: 'Already backed up' },
+                    { v: 'error',        label: 'Errors' },
+                ] as const)"
+                :key="opt.v"
+                class="px-2.5 py-1 rounded transition-colors whitespace-nowrap"
+                :class="queueFilter === opt.v ? 'bg-brand-500/25 text-brand-200 font-semibold' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
+                @click="queueFilter = opt.v"
+            >{{ opt.label }}</button>
+        </div>
+
+        <!-- body. queue-scroll class widens the webkit scrollbar so
+             it's grabbable with the mouse on Windows (default Tauri
+             webview gives ~6px which is too thin). -->
+        <div class="flex-1 overflow-auto queue-scroll">
             <div v-if="!queue.items.length" class="h-full flex items-center justify-center p-8">
                 <div class="text-center space-y-2 max-w-sm">
                     <div class="text-5xl">🎬</div>
@@ -774,9 +819,20 @@
                     </p>
                 </div>
             </div>
+            <div
+                v-else-if="!filteredQueueItems.length"
+                class="h-full flex items-center justify-center p-8"
+            >
+                <div class="text-center space-y-2 max-w-sm">
+                    <div class="text-neutral-300 font-semibold">Nothing matches this filter</div>
+                    <p class="text-sm text-neutral-500">
+                        Try switching to <button class="text-brand-400 hover:underline" @click="queueFilter = 'all'">All</button>.
+                    </p>
+                </div>
+            </div>
 
             <ul v-else class="divide-y divide-white/[0.04]">
-                <li v-for="item in queue.items" :key="item.path" class="px-5 py-3">
+                <li v-for="item in filteredQueueItems" :key="item.path" class="px-5 py-3">
                     <button
                         class="w-full flex items-center gap-3 text-left"
                         @click="toggleExpand(item.path)"
@@ -843,3 +899,23 @@
         </div>
     </div>
 </template>
+
+<style scoped>
+/* Wider scrollbar for the queue. Tauri's Edge WebView2 defaults to a
+ * ~6px overlay scrollbar that's hard to grab with the mouse - 12px is
+ * the Windows Explorer default and feels right next to the row
+ * density of the activity feed. Only applies to .queue-scroll so
+ * other scrollable areas in the view keep the system default. */
+.queue-scroll::-webkit-scrollbar { width: 12px; height: 12px; }
+.queue-scroll::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.02); }
+.queue-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+.queue-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.22);
+    background-clip: content-box;
+}
+</style>

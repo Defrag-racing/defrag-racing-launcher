@@ -156,14 +156,12 @@ const QUEUE_SAVE_INTERVAL_SECS: u64 = 1;
 ///   2. Edge cases like the engine crashing mid-record and writing the
 ///      .dm_68 file in a non-standard way that doesn't fire a normal
 ///      "create/rename" event.
-/// 60 seconds is the "I recorded a run, where is it?" threshold - the
-/// user shouldn't notice anything missing. The scan itself is just
-/// directory enumeration + a cache (size+mtime) check per file;
-/// already-processed demos take a microsecond each, only genuinely new
-/// files cost a hash, and even that is paced by the CPU throttle. So
-/// a 1-minute interval doesn't measurably touch the disk on a normal
-/// SSD - cheaper than the live notify subscription itself.
-const PERIODIC_RESCAN_SECS: u64 = 60;
+/// 30 minutes is the user-picked floor - the live notify watcher
+/// catches new demos within 5s in the normal case, so the periodic
+/// sweep is purely a safety net for the rare event the OS swallowed.
+/// Scan cost is just directory enumeration + cache (size+mtime) check
+/// per file; the disk impact is negligible even on HDDs.
+const PERIODIC_RESCAN_SECS: u64 = 1800;
 
 #[derive(Default)]
 pub struct UploadState {
