@@ -88,26 +88,35 @@ pub struct UploadStateSnapshot {
     /// Cumulative number of demos that have reached a terminal status
     /// (Done / Duplicate / Error) since the current watcher session
     /// started. NOT capped by QUEUE_CAP, so the UI can show real
-    /// progress even when `items` is at the 500-row visual ceiling.
+    /// progress even when `items` is at the visual ceiling.
     /// Resets to 0 on every watcher::start.
     #[serde(default)]
     pub processed_count: u64,
+    /// Per-terminal-status session counters. Unbounded - reflect every
+    /// transition into the matching status this session, regardless of
+    /// whether the row is still in the visible queue.
+    #[serde(default)]
+    pub done_count: u64,
+    #[serde(default)]
+    pub duplicate_count: u64,
+    #[serde(default)]
+    pub error_count: u64,
 }
 
 /// Cap on the number of rows kept in the visible queue. Anything older
 /// than this gets dropped when a new row is inserted at the head.
+/// Files that fall out of the queue are STILL fully processed - the
+/// cache (uploaded.json) and the session counters below are
+/// independent of this number, so QUEUE_CAP only affects what the
+/// activity list shows, never what the worker actually does.
 ///
-/// Originally 500 - a defensive limit set when the launcher emitted on
-/// every state.update and a cache-hit rescan fired thousands of emits
-/// per second, killing the webview with a flood of full-snapshot IPC.
-/// The emit-pump (EMIT_MIN_GAP_MS) capped that at 20 emits/sec since
-/// 0.1.6's rate-limit hardening, so the IPC bound is now snapshot_size
-/// * 20Hz, not mutation_rate * snapshot_size. 5000 items at ~350 bytes
-/// of JSON each = ~1.75MB per emit, ~35MB/sec sustained during a busy
-/// rescan - well within modern webview capacity. Sized to comfortably
-/// hold a 5000+ demo collection so a returning power user sees their
-/// full history rather than the last 500 entries.
-const QUEUE_CAP: usize = 5000;
+/// Originally 500, defensive against the pre-emit-pump flood that
+/// killed the webview. With EMIT_MIN_GAP_MS capping emits at 20/sec
+/// the IPC bound is snapshot_size * 20Hz; at ~350 bytes per row that
+/// gives plenty of headroom up to mid-five-figure rows. 10000 covers
+/// huge demo collections (the largest single-user folder we've seen
+/// is ~5400) without forcing virtual-scroll yet.
+const QUEUE_CAP: usize = 10000;
 
 /// Minimum gap between two `upload_state_changed` emits. During a tight
 /// inner loop (rescan with pause-aborted hashing) the per-update emit
@@ -172,6 +181,15 @@ pub struct UploadState {
     /// total / 499 already backed up" forever and users assumed the
     /// worker had stalled when it was actually deep into row 1200+.
     processed_count: AtomicU64,
+    /// Per-terminal-status session counters. Same role as
+    /// `processed_count` but split so the UI can render an honest
+    /// "X uploaded / Y already backed up / Z errors" instead of the
+    /// queue-derived numbers, which max out at QUEUE_CAP and made big
+    /// rescans look stalled at exactly the cap. Reset on
+    /// watcher::start alongside processed_count.
+    done_count: AtomicU64,
+    duplicate_count: AtomicU64,
+    error_count: AtomicU64,
 }
 
 impl UploadState {
@@ -179,15 +197,21 @@ impl UploadState {
         UploadStateSnapshot {
             items: self.inner.lock().unwrap().clone(),
             processed_count: self.processed_count.load(Ordering::Acquire),
+            done_count: self.done_count.load(Ordering::Acquire),
+            duplicate_count: self.duplicate_count.load(Ordering::Acquire),
+            error_count: self.error_count.load(Ordering::Acquire),
         }
     }
 
-    /// Zero the per-session processed counter. Called at the top of
-    /// every watcher::start so the Dashboard counter reflects what the
-    /// CURRENT run has done, not stale numbers from the previous
+    /// Zero all per-session counters. Called at the top of every
+    /// watcher::start so the Dashboard summary reflects what the
+    /// CURRENT run has done, not stale numbers from a previous
     /// Start+Stop cycle.
     pub fn reset_processed_count(&self) {
         self.processed_count.store(0, Ordering::Release);
+        self.done_count.store(0, Ordering::Release);
+        self.duplicate_count.store(0, Ordering::Release);
+        self.error_count.store(0, Ordering::Release);
     }
 
     pub fn is_paused(&self) -> bool {
@@ -342,24 +366,43 @@ impl UploadState {
         filename: &str,
         f: impl FnOnce(&mut PendingUpload),
     ) {
+        // Returns Some(new_status) when the item just transitioned from
+        // a non-terminal status into a terminal one - the caller then
+        // bumps the matching session counter. None means either the
+        // status didn't change kind (still non-terminal, or was already
+        // terminal) or it was already counted before.
         let became_terminal = self.with_mut(|items| {
             if let Some(existing) = items.iter_mut().find(|i| i.path == path) {
                 let was_terminal = is_terminal(existing.status);
                 f(existing);
-                !was_terminal && is_terminal(existing.status)
+                if !was_terminal && is_terminal(existing.status) {
+                    Some(existing.status)
+                } else {
+                    None
+                }
             } else {
                 let mut new = PendingUpload::new(path.to_path_buf(), filename.to_string());
                 f(&mut new);
-                let now_terminal = is_terminal(new.status);
+                let final_status = new.status;
                 items.insert(0, new);
                 if items.len() > QUEUE_CAP {
                     items.truncate(QUEUE_CAP);
                 }
-                now_terminal
+                if is_terminal(final_status) {
+                    Some(final_status)
+                } else {
+                    None
+                }
             }
         });
-        if became_terminal {
+        if let Some(status) = became_terminal {
             self.processed_count.fetch_add(1, Ordering::AcqRel);
+            match status {
+                UploadStatus::Done => { self.done_count.fetch_add(1, Ordering::AcqRel); }
+                UploadStatus::Duplicate => { self.duplicate_count.fetch_add(1, Ordering::AcqRel); }
+                UploadStatus::Error => { self.error_count.fetch_add(1, Ordering::AcqRel); }
+                _ => {}
+            }
         }
         self.dirty.store(true, Ordering::Release);
     }

@@ -10,7 +10,13 @@
     const router = useRouter();
     const config = useConfigStore();
 
-    const queue = ref<UploadStateSnapshot>({ items: [], processed_count: 0 });
+    const queue = ref<UploadStateSnapshot>({
+        items: [],
+        processed_count: 0,
+        done_count: 0,
+        duplicate_count: 0,
+        error_count: 0,
+    });
     const toggling = ref(false);
     const toggleError = ref<string | null>(null);
     const paused = ref(false);
@@ -582,11 +588,14 @@
             Update failed: {{ updateState.message }}
         </div>
 
-        <!-- Queue summary strip - at-a-glance counts. processed_count
-             is the only honest progress number during a big rescan
-             (queue.items is capped at 500 for webview survival, so
-             without it the user sees "500 total / 499 already backed
-             up" forever and assumes the worker stalled). -->
+        <!-- Queue summary strip. The "uploaded / backed up / errors"
+             numbers come from the UNBOUNDED session counters on the
+             backend, not from counting queue.items by status - the
+             queue is capped at QUEUE_CAP rows for DOM perf, and the
+             queue-derived numbers would clamp at that ceiling and make
+             a 5000+ rescan look frozen. "hashing / uploading" stay
+             queue-derived because they represent current in-flight
+             work, which by definition is in the visible queue. -->
         <div
             v-if="queue.items.length || queue.processed_count"
             class="px-5 py-2 border-b border-white/[0.04] text-xs text-neutral-400 flex items-center gap-3 flex-wrap"
@@ -600,9 +609,9 @@
             <span v-if="queueSummary.uploading || queueSummary.hashing" class="text-brand-400">
                 ↑ {{ queueSummary.uploading }} uploading · # {{ queueSummary.hashing }} hashing
             </span>
-            <span v-if="queueSummary.done" class="text-emerald-400">✓ {{ queueSummary.done }} uploaded</span>
-            <span v-if="queueSummary.duplicate" class="text-cyan-400">∾ {{ queueSummary.duplicate }} already backed up</span>
-            <span v-if="queueSummary.error" class="text-red-400">! {{ queueSummary.error }} error</span>
+            <span v-if="queue.done_count" class="text-emerald-400">✓ {{ queue.done_count }} uploaded</span>
+            <span v-if="queue.duplicate_count" class="text-cyan-400">∾ {{ queue.duplicate_count }} already backed up</span>
+            <span v-if="queue.error_count" class="text-red-400">! {{ queue.error_count }} error</span>
         </div>
 
         <!-- body -->
