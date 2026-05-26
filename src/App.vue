@@ -1,12 +1,16 @@
 <script setup lang="ts">
-    import { computed, onMounted, onUnmounted, ref } from 'vue';
+    import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
     import { useRouter, useRoute } from 'vue-router';
-    import { tauri } from './lib/tauri';
+    import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+    import { tauri, type DefragServer } from './lib/tauri';
+    import { q3ToHtml } from './lib/q3color';
     import { useConfigStore } from './stores/config';
+    import { useNotificationsStore } from './stores/notifications';
 
     const router = useRouter();
     const route = useRoute();
     const config = useConfigStore();
+    const notifStore = useNotificationsStore();
 
     // Top nav is hidden during the bootstrap flows (onboarding,
     // version-mismatch screen) - those are full-screen forms that
@@ -24,25 +28,12 @@
             || r === 'settings';
     });
 
-    // Unread notification count polled into the bell badge. Lives at
-    // the App level so the badge is consistent across all tabs - the
-    // Notifications view itself maintains its own copy of the full
-    // feed; this one is just the count. Polled every 90s while the
-    // launcher is alive (cheap single-SELECT request).
-    const unreadNotifications = ref(0);
+    // Bell badge counts live in a pinia store so the Notifications view
+    // can mutate them optimistically on toggle (no flash of stale "5
+    // unread" while the API round-trip is in flight). App-level poll
+    // every 90s keeps them honest against the server's view in case the
+    // user marks something read on the web in another tab.
     let notifPollTimer: number | undefined;
-    const refreshUnread = async () => {
-        if (!config.hasToken) {
-            unreadNotifications.value = 0;
-            return;
-        }
-        try {
-            const feed = await tauri.getNotifications();
-            unreadNotifications.value = feed.unread.total;
-        } catch {
-            // ignore - retry next tick
-        }
-    };
 
     /// Open the token owner's profile page on defrag.racing. Disabled
     /// when we don't have an mdd_id - either the user hasn't linked
@@ -73,14 +64,135 @@
 
     const dismissLaunchError = () => { launchError.value = null; };
 
+    // defrag:// pending-connection modal. Lives at the App level so it
+    // floats above whichever tab the user happens to be on - the
+    // previous version rendered it inside Dashboard, which meant a
+    // forum click while you were on Servers/Records/etc silently
+    // dropped a banner in a tab you couldn't see.
+    type PendingDeepLink = { address: string; url: string };
+    const pendingDeepLink = ref<PendingDeepLink | null>(null);
+    const pendingServer = ref<DefragServer | null>(null);
+    const connecting = ref(false);
+    const connectError = ref<string | null>(null);
+
+    type DeepLinkError = { url: string; error: string };
+    const deepLinkError = ref<DeepLinkError | null>(null);
+    let deepLinkErrorTimer: number | undefined;
+
+    const physicsOfServer = (s: DefragServer): 'vq3' | 'cpm' =>
+        s.defrag?.toLowerCase().includes('cpm') ? 'cpm' : 'vq3';
+    const playerCountOf = (s: DefragServer): number => s.online_players?.length ?? 0;
+    const thumbnailUrlOf = (s: DefragServer): string | null => {
+        const t = s.mapdata?.thumbnail;
+        if (!t) return null;
+        if (t.startsWith('http://') || t.startsWith('https://')) return t;
+        return `https://defrag.racing/storage/${t}`;
+    };
+    const flagUrlOf = (country: string | null | undefined): string | null => {
+        if (!country) return null;
+        if (country === '_404' || country === 'XX') return null;
+        return `https://defrag.racing/images/flags/${country.toLowerCase()}.png`;
+    };
+    const openServerMap = async (mapname: string | undefined) => {
+        if (!mapname) return;
+        const { openUrl } = await import('@tauri-apps/plugin-opener');
+        openUrl(`https://defrag.racing/maps/${encodeURIComponent(mapname)}`).catch(() => {});
+    };
+
+    const lookupPendingServer = async (address: string) => {
+        pendingServer.value = null;
+        if (!config.hasToken) return;
+        try {
+            const resp = await tauri.getServers();
+            const [ip, portStr] = address.split(':');
+            const port = Number(portStr);
+            pendingServer.value = (resp.servers ?? []).find(
+                (s) => s.ip === ip && s.port === port,
+            ) ?? null;
+        } catch {
+            pendingServer.value = null;
+        }
+    };
+
+    const confirmConnect = async () => {
+        connectError.value = null;
+        connecting.value = true;
+        try {
+            const enrichment = pendingServer.value
+                ? {
+                      map: pendingServer.value.map,
+                      server_name: pendingServer.value.name || pendingServer.value.plain_name || null,
+                      physics: physicsOfServer(pendingServer.value),
+                  }
+                : undefined;
+            await tauri.confirmPendingDeepLink(enrichment);
+            pendingDeepLink.value = null;
+            pendingServer.value = null;
+        } catch (e: any) {
+            connectError.value = e?.toString?.() ?? 'Connect failed';
+        } finally {
+            connecting.value = false;
+        }
+    };
+
+    const cancelConnect = async () => {
+        await tauri.cancelPendingDeepLink();
+        pendingDeepLink.value = null;
+        pendingServer.value = null;
+        connectError.value = null;
+    };
+
+    const dismissDeepLinkError = () => {
+        deepLinkError.value = null;
+        window.clearTimeout(deepLinkErrorTimer);
+    };
+
+    const openAutoConnectSetting = async () => {
+        await router.push('/settings');
+        await nextTick();
+        document
+            .getElementById('deep-link-auto-connect')
+            ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+
+    let unlistenPending: UnlistenFn | null = null;
+    let unlistenResult: UnlistenFn | null = null;
+
     onMounted(async () => {
         await config.refresh();
 
         // Bell badge poll. First call goes through immediately so the
         // badge isn't blank on first render; subsequent ticks every
         // 90s keep it warm without hammering the browse bucket.
-        await refreshUnread();
-        notifPollTimer = window.setInterval(refreshUnread, 90_000);
+        await notifStore.refresh();
+        notifPollTimer = window.setInterval(() => notifStore.refresh(), 90_000);
+
+        // Pending defrag:// listeners. Live event for "user clicked a
+        // forum link while launcher is open"; cold-start path for "the
+        // launcher just spawned because of that click".
+        unlistenPending = await listen<PendingDeepLink>('deep-link://pending', (ev) => {
+            pendingDeepLink.value = ev.payload;
+            connectError.value = null;
+            void lookupPendingServer(ev.payload.address);
+        });
+        unlistenResult = await listen<{ ok: false; url: string; error: string }>(
+            'deep-link://result',
+            (ev) => {
+                if (!ev.payload.ok) {
+                    deepLinkError.value = { url: ev.payload.url, error: ev.payload.error };
+                    window.clearTimeout(deepLinkErrorTimer);
+                    deepLinkErrorTimer = window.setTimeout(() => { deepLinkError.value = null; }, 6000);
+                }
+            },
+        );
+        try {
+            const url = await tauri.getPendingDeepLink();
+            if (url && !pendingDeepLink.value) {
+                const m = url.match(/^defrag:\/\/([^/]+)/);
+                pendingDeepLink.value = { url, address: m ? m[1] : url };
+                void lookupPendingServer(pendingDeepLink.value.address);
+            }
+        } catch { /* no-op */ }
 
         // Upgrade-aware boot flow:
         //  1. Fresh install (no onboarding) → onboarding wizard
@@ -104,6 +216,9 @@
 
     onUnmounted(() => {
         if (notifPollTimer !== undefined) window.clearInterval(notifPollTimer);
+        if (unlistenPending) unlistenPending();
+        if (unlistenResult) unlistenResult();
+        window.clearTimeout(deepLinkErrorTimer);
     });
 </script>
 
@@ -191,9 +306,9 @@
                 >
                     <span>🔔</span>
                     <span
-                        v-if="unreadNotifications > 0"
+                        v-if="notifStore.total > 0"
                         class="absolute -top-1 -right-1 text-[10px] font-bold px-1 min-w-[16px] h-[16px] flex items-center justify-center rounded-full bg-brand-500 text-white"
-                    >{{ unreadNotifications > 99 ? '99+' : unreadNotifications }}</span>
+                    >{{ notifStore.total > 99 ? '99+' : notifStore.total }}</span>
                 </RouterLink>
 
                 <!-- Profile: opens the token owner's defrag.racing
@@ -238,6 +353,113 @@
         </RouterView>
         <div v-else class="flex-1 flex items-center justify-center text-sm text-neutral-500">
             Loading…
+        </div>
+
+        <!-- defrag:// pending-connection modal. Floats above the whole
+             launcher so the user sees it regardless of which tab is
+             active. Backdrop darkens everything else and acts as a
+             dismiss target. -->
+        <div
+            v-if="pendingDeepLink"
+            class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            @click.self="cancelConnect"
+        >
+            <div class="w-full max-w-md bg-neutral-900 border border-brand-500/30 rounded-lg shadow-2xl overflow-hidden">
+                <div class="px-5 py-3 border-b border-white/10 flex items-center gap-2">
+                    <span class="text-brand-400">🎮</span>
+                    <div class="font-semibold text-neutral-100">Join server?</div>
+                </div>
+
+                <div class="p-5 space-y-3">
+                    <div v-if="pendingServer" class="flex items-start gap-3">
+                        <button
+                            class="w-24 h-16 rounded bg-black/40 border border-white/10 overflow-hidden flex-shrink-0 hover:border-brand-500/40"
+                            :title="`Open ${pendingServer.map} on defrag.racing`"
+                            @click="openServerMap(pendingServer.map)"
+                        >
+                            <img
+                                v-if="thumbnailUrlOf(pendingServer)"
+                                :src="thumbnailUrlOf(pendingServer)!"
+                                :alt="pendingServer.map"
+                                class="w-full h-full object-cover"
+                                loading="lazy"
+                            />
+                            <div v-else class="w-full h-full flex items-center justify-center text-[10px] text-neutral-600 uppercase">
+                                no map
+                            </div>
+                        </button>
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <img
+                                    v-if="flagUrlOf(pendingServer.location)"
+                                    :src="flagUrlOf(pendingServer.location)!"
+                                    :alt="pendingServer.location || ''"
+                                    class="w-4 h-3 rounded flex-shrink-0"
+                                    @error="($event.target as HTMLImageElement).style.display='none'"
+                                />
+                                <div
+                                    class="text-sm text-neutral-100 truncate font-semibold"
+                                    v-html="q3ToHtml(pendingServer.name || pendingServer.plain_name)"
+                                ></div>
+                                <span class="uppercase text-[10px] px-1 py-0.5 rounded bg-white/5 text-neutral-300 flex-shrink-0">
+                                    {{ physicsOfServer(pendingServer) }}
+                                </span>
+                            </div>
+                            <div class="text-xs text-neutral-400 flex items-center gap-2 mt-1">
+                                <button class="text-brand-400 hover:underline" @click="openServerMap(pendingServer.map)">
+                                    {{ pendingServer.map }}
+                                </button>
+                                <span class="text-neutral-600">·</span>
+                                <span class="font-mono">{{ pendingServer.ip }}:{{ pendingServer.port }}</span>
+                            </div>
+                            <div class="text-xs text-neutral-500 mt-0.5">
+                                {{ playerCountOf(pendingServer) }} player{{ playerCountOf(pendingServer) === 1 ? '' : 's' }} online
+                            </div>
+                        </div>
+                    </div>
+                    <div v-else class="text-sm">
+                        <div class="text-neutral-300 mb-1">Connect to</div>
+                        <div class="font-mono text-brand-300 text-base">{{ pendingDeepLink.address }}</div>
+                        <div class="text-xs text-neutral-500 mt-1">
+                            Server isn't in the live list - private, off-list, or your token can't reach the server browser.
+                        </div>
+                    </div>
+
+                    <div class="text-xs">
+                        <button
+                            class="hover:underline text-neutral-400 hover:text-neutral-200"
+                            @click="openAutoConnectSetting"
+                        >Skip this confirmation next time →</button>
+                    </div>
+
+                    <p v-if="connectError" class="text-xs text-red-300">{{ connectError }}</p>
+                </div>
+
+                <div class="px-5 py-3 border-t border-white/10 flex items-center justify-end gap-2 bg-black/30">
+                    <button
+                        class="px-3 py-1.5 rounded bg-white/5 hover:bg-white/10 text-neutral-300 text-sm"
+                        @click="cancelConnect"
+                    >Dismiss</button>
+                    <button
+                        class="px-4 py-1.5 rounded bg-brand-500/30 hover:bg-brand-500/40 text-brand-200 font-semibold text-sm disabled:opacity-50"
+                        :disabled="connecting"
+                        @click="confirmConnect"
+                    >{{ connecting ? 'Launching…' : 'Connect' }}</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Deep-link error toast: surfaces malformed URLs / engine
+             launch failures. Auto-dismisses after 6s; lives at App
+             level so it's visible from any tab. -->
+        <div
+            v-if="deepLinkError"
+            class="fixed bottom-4 left-1/2 -translate-x-1/2 z-[90] max-w-md w-[calc(100%-2rem)] px-4 py-3 rounded-lg bg-red-500/15 border border-red-500/30 text-xs text-red-200 flex items-center gap-2 shadow-xl backdrop-blur"
+        >
+            <span class="flex-1">
+                Couldn't open <code class="font-mono">{{ deepLinkError.url }}</code> - {{ deepLinkError.error }}
+            </span>
+            <button class="text-neutral-300 hover:text-neutral-100" @click="dismissDeepLinkError">×</button>
         </div>
     </div>
 </template>

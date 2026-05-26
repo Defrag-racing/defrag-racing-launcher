@@ -100,7 +100,16 @@ export const tauri = {
     isAutostartEnabled: () => invoke<boolean>('is_autostart_enabled'),
     setAutostartEnabled: (enabled: boolean) => invoke<void>('set_autostart_enabled', { enabled }),
 
-    handleProtocolUrl: (url: string) => invoke<string>('handle_protocol_url', { url }),
+    /** In-launcher join (Servers / History). Logs to history.json
+     *  with the supplied enrichment + source so the History tab can
+     *  show "joined ^1EU CPM I on bug22_slick" instead of just an
+     *  IP. `source` defaults to "servers" on the backend. */
+    handleProtocolUrl: (url: string, enrichment?: ConnectEnrichment | null, source?: string) =>
+        invoke<string>('handle_protocol_url', {
+            url,
+            enrichment: enrichment ?? null,
+            source: source ?? null,
+        }),
     launchEngine: () => invoke<void>('launch_engine'),
     getPendingDeepLink: () => invoke<string | null>('get_pending_deep_link'),
     /** Optional enrichment is logged into history.json so the History
@@ -136,6 +145,23 @@ export const tauri = {
      *  Records (PB beats / WR takes) + system (render done, etc.)
      *  plus unread counts. */
     getNotifications: () => invoke<NotificationsFeed>('get_notifications'),
+
+    /** Per-row toggle / bulk mark-read mutations. Each returns the
+     *  fresh `unread` block so the bell badge stays in sync with what
+     *  the server just changed - the frontend uses that to avoid an
+     *  immediate getNotifications() reload after every click. */
+    notificationRecordToggle: (id: number) =>
+        invoke<NotificationActionResponse>('notification_record_toggle', { id }),
+    notificationRecordsMarkRead: () =>
+        invoke<NotificationActionResponse>('notification_records_mark_read'),
+    notificationRecordsMarkUnread: () =>
+        invoke<NotificationActionResponse>('notification_records_mark_unread'),
+    notificationSystemToggle: (id: number) =>
+        invoke<NotificationActionResponse>('notification_system_toggle', { id }),
+    notificationSystemMarkRead: () =>
+        invoke<NotificationActionResponse>('notification_system_mark_read'),
+    notificationSystemMarkUnread: () =>
+        invoke<NotificationActionResponse>('notification_system_mark_unread'),
 
     /** Queue a YouTube render for a local demo by hash. Server
      *  short-circuits if already queued. Response includes
@@ -363,6 +389,16 @@ export interface SystemNotificationRow {
 export interface NotificationsFeed {
     records: RecordNotificationRow[];
     system: SystemNotificationRow[];
+    unread: { records: number; system: number; total: number };
+}
+
+/** Shape returned by the six mark-read mutations. Per-row toggle
+ *  carries id + new read state; bulk variants omit both (every row
+ *  changed). All variants include the fresh unread block so the bell
+ *  badge can update without a separate /notifications fetch. */
+export interface NotificationActionResponse {
+    id?: number;
+    read?: boolean;
     unread: { records: number; system: number; total: number };
 }
 

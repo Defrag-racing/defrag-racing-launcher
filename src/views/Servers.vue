@@ -227,7 +227,15 @@
 
     const connect = async (s: DefragServer) => {
         try {
-            await tauri.handleProtocolUrl(`defrag://${s.ip}:${s.port}`);
+            await tauri.handleProtocolUrl(
+                `defrag://${s.ip}:${s.port}`,
+                {
+                    map: s.map ?? null,
+                    server_name: s.name || s.plain_name || null,
+                    physics: physicsOf(s),
+                },
+                'servers',
+            );
         } catch (e: any) {
             error.value = e?.toString?.() ?? 'Connect failed';
         }

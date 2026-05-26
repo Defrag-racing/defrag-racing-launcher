@@ -501,16 +501,38 @@ pub fn get_upload_state(state: State<'_, AppState>) -> UploadStateSnapshot {
 
 // ---- defrag:// protocol -----------------------------------------------------
 
-/// Connect immediately to a URL - used for manually-entered IPs from a
-/// "Quick connect" UI where the user is *typing* the address (so the
-/// click on Connect is already their confirmation). Deep-link URLs do
-/// NOT go through this; they queue via `pending_deep_link` so the user
-/// gets a confirmation button before the engine spawns.
+/// Connect immediately to a URL - used by the Servers tab Connect
+/// button, the History tab Reconnect button, and any other in-launcher
+/// "join this server" path. The user already saw what they're joining
+/// in the UI that called this, so no confirmation banner. Deep-link
+/// URLs (forum links etc.) do NOT go through this; they queue via
+/// `pending_deep_link` so the user gets a confirmation modal before
+/// the engine spawns.
+///
+/// `enrichment` and `source` get logged to history.json so the History
+/// tab can show map + server name alongside the IP, and tell apart
+/// "joined from Servers tab" vs "reconnected from History" vs "auto-
+/// connected from a defrag:// link". Source defaults to "servers" so
+/// the common Servers-tab call site doesn't have to pass anything.
 #[tauri::command]
-pub fn handle_protocol_url(url: String) -> Result<String, String> {
+pub fn handle_protocol_url(
+    state: State<'_, AppState>,
+    url: String,
+    enrichment: Option<ConnectEnrichment>,
+    source: Option<String>,
+) -> Result<String, String> {
     let addr = protocol::parse_url(&url).map_err(err_to_string)?;
     let cfg = Config::load().map_err(err_to_string)?;
     protocol::launch(cfg.engine_path.as_deref(), addr).map_err(err_to_string)?;
+    let enrich = enrichment.unwrap_or_default();
+    state.history.log(
+        addr.ip().to_string(),
+        addr.port(),
+        enrich.map,
+        enrich.server_name,
+        enrich.physics,
+        source.as_deref().unwrap_or("servers"),
+    );
     Ok(addr.to_string())
 }
 
@@ -577,6 +599,52 @@ pub async fn request_render(file_hash: String) -> Result<serde_json::Value, Stri
         obj.insert("_http_status".into(), serde_json::Value::from(status));
     }
     Ok(body)
+}
+
+/// Per-row toggle / bulk mark-as-read mutations for the Notifications
+/// tab. Each returns the server's response unchanged (always carries
+/// fresh `unread` counts) so the frontend can update the bell badge
+/// without a separate /notifications round-trip.
+#[tauri::command]
+pub async fn notification_record_toggle(id: u64) -> Result<serde_json::Value, String> {
+    let token = token::load().map_err(err_to_string)?.ok_or_else(|| "No token saved".to_string())?;
+    let client = crate::api::Client::new(config::api_base_url(), token).map_err(err_to_string)?;
+    client.notification_record_toggle(id).await.map_err(err_to_string)
+}
+
+#[tauri::command]
+pub async fn notification_records_mark_read() -> Result<serde_json::Value, String> {
+    let token = token::load().map_err(err_to_string)?.ok_or_else(|| "No token saved".to_string())?;
+    let client = crate::api::Client::new(config::api_base_url(), token).map_err(err_to_string)?;
+    client.notification_records_mark_read().await.map_err(err_to_string)
+}
+
+#[tauri::command]
+pub async fn notification_records_mark_unread() -> Result<serde_json::Value, String> {
+    let token = token::load().map_err(err_to_string)?.ok_or_else(|| "No token saved".to_string())?;
+    let client = crate::api::Client::new(config::api_base_url(), token).map_err(err_to_string)?;
+    client.notification_records_mark_unread().await.map_err(err_to_string)
+}
+
+#[tauri::command]
+pub async fn notification_system_toggle(id: u64) -> Result<serde_json::Value, String> {
+    let token = token::load().map_err(err_to_string)?.ok_or_else(|| "No token saved".to_string())?;
+    let client = crate::api::Client::new(config::api_base_url(), token).map_err(err_to_string)?;
+    client.notification_system_toggle(id).await.map_err(err_to_string)
+}
+
+#[tauri::command]
+pub async fn notification_system_mark_read() -> Result<serde_json::Value, String> {
+    let token = token::load().map_err(err_to_string)?.ok_or_else(|| "No token saved".to_string())?;
+    let client = crate::api::Client::new(config::api_base_url(), token).map_err(err_to_string)?;
+    client.notification_system_mark_read().await.map_err(err_to_string)
+}
+
+#[tauri::command]
+pub async fn notification_system_mark_unread() -> Result<serde_json::Value, String> {
+    let token = token::load().map_err(err_to_string)?.ok_or_else(|| "No token saved".to_string())?;
+    let client = crate::api::Client::new(config::api_base_url(), token).map_err(err_to_string)?;
+    client.notification_system_mark_unread().await.map_err(err_to_string)
 }
 
 /// Cheap polling endpoint for a single demo's current render state.

@@ -1,10 +1,9 @@
 <script setup lang="ts">
-    import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
+    import { computed, onMounted, onUnmounted, ref } from 'vue';
     import { useRouter } from 'vue-router';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import type { Update } from '@tauri-apps/plugin-updater';
-    import { tauri, type UploadStateSnapshot, type PendingUpload, type DefragServer } from '../lib/tauri';
-    import { q3ToHtml } from '../lib/q3color';
+    import { tauri, type UploadStateSnapshot, type PendingUpload } from '../lib/tauri';
     import { checkForUpdate, runUpdate, type UpdateState } from '../lib/updater';
     import { useConfigStore } from '../stores/config';
 
@@ -151,74 +150,8 @@
         }
     });
 
-    // defrag:// pending-connection prompt. Backend stashes the URL when
-    // a deep link arrives and emits `deep-link://pending`; we read both
-    // the live event AND the stashed value (cold-start case where the
-    // webview mounts after the event already fired).
-    type PendingDeepLink = { address: string; url: string };
-    const pendingDeepLink = ref<PendingDeepLink | null>(null);
-
-    // Server detail looked up by ip:port when a pending connection
-    // appears, so the banner can show "what am I about to join" instead
-    // of just an IP. Fetch is best-effort: a private/off-list server,
-    // no token, or a network blip all gracefully fall back to the
-    // plain IP banner.
-    const pendingServer = ref<DefragServer | null>(null);
-    const pendingServerLoading = ref(false);
-
-    const lookupPendingServer = async (address: string) => {
-        pendingServer.value = null;
-        if (!config.hasToken) return; // server list endpoint is token-locked
-        pendingServerLoading.value = true;
-        try {
-            const resp = await tauri.getServers();
-            const [ip, portStr] = address.split(':');
-            const port = Number(portStr);
-            pendingServer.value = (resp.servers ?? []).find(
-                (s) => s.ip === ip && s.port === port,
-            ) ?? null;
-        } catch {
-            pendingServer.value = null;
-        } finally {
-            pendingServerLoading.value = false;
-        }
-    };
-
-    // -- Display helpers for the pending-connection banner -----------
-    const physicsOfServer = (s: DefragServer): 'vq3' | 'cpm' =>
-        s.defrag?.toLowerCase().includes('cpm') ? 'cpm' : 'vq3';
-
-    const playerCountOf = (s: DefragServer): number => s.online_players?.length ?? 0;
-
-    const thumbnailUrlOf = (s: DefragServer): string | null => {
-        const t = s.mapdata?.thumbnail;
-        if (!t) return null;
-        if (t.startsWith('http://') || t.startsWith('https://')) return t;
-        return `https://defrag.racing/storage/${t}`;
-    };
-
-    const flagUrlOf = (country: string | null | undefined): string | null => {
-        if (!country) return null;
-        if (country === '_404' || country === 'XX') return null;
-        return `https://defrag.racing/images/flags/${country.toLowerCase()}.png`;
-    };
-
-    const openServerMap = (mapname: string | undefined) => {
-        if (!mapname) return;
-        import('@tauri-apps/plugin-opener').then(({ openUrl }) => {
-            openUrl(`https://defrag.racing/maps/${encodeURIComponent(mapname)}`)
-                .catch(() => { /* best effort */ });
-        });
-    };
-    const connectError = ref<string | null>(null);
-    const connecting = ref(false);
-
-    // Generic toast for connect errors / parse failures. Distinct from
-    // pendingDeepLink because errors don't have a Connect button - the
-    // URL was unusable.
-    type DeepLinkError = { url: string; error: string };
-    const deepLinkError = ref<DeepLinkError | null>(null);
-    let deepLinkErrorTimer: number | undefined;
+    // defrag:// pending modal lives in App.vue so it floats above
+    // every tab. Dashboard no longer owns that state.
 
     // Auto-update banner. Quiet on success (just shows "up to date" for
     // a beat); persistent on "Update available" until the user installs.
@@ -231,8 +164,6 @@
     let pendingUpdate: Update | null = null;
 
     let unlisten: UnlistenFn | null = null;
-    let unlistenPending: UnlistenFn | null = null;
-    let unlistenResult: UnlistenFn | null = null;
     let updateCheckTimer: number | undefined;
 
     // Re-check for updates every 6h while the launcher is alive. The
@@ -284,38 +215,6 @@
         unlisten = await listen<UploadStateSnapshot>('upload_state_changed', (ev) => {
             queue.value = ev.payload;
         });
-        unlistenPending = await listen<PendingDeepLink>('deep-link://pending', (ev) => {
-            pendingDeepLink.value = ev.payload;
-            connectError.value = null;
-            void lookupPendingServer(ev.payload.address);
-        });
-        unlistenResult = await listen<{ ok: false; url: string; error: string }>(
-            'deep-link://result',
-            (ev) => {
-                // Only error payloads ever land here now - success goes
-                // through the user-confirmed `confirm_pending_deep_link`
-                // command instead.
-                if (!ev.payload.ok) {
-                    deepLinkError.value = { url: ev.payload.url, error: ev.payload.error };
-                    window.clearTimeout(deepLinkErrorTimer);
-                    deepLinkErrorTimer = window.setTimeout(() => { deepLinkError.value = null; }, 6000);
-                }
-            },
-        );
-
-        // Cold-start case: deep-link plugin may have fired its event
-        // before this component mounted. Pull the stashed value.
-        try {
-            const url = await tauri.getPendingDeepLink();
-            if (url && !pendingDeepLink.value) {
-                // Display the host:port portion of the URL while we
-                // don't have a parsed address - same regex shape the
-                // backend uses in protocol::parse_url.
-                const m = url.match(/^defrag:\/\/([^/]+)/);
-                pendingDeepLink.value = { url, address: m ? m[1] : url };
-                void lookupPendingServer(pendingDeepLink.value.address);
-            }
-        } catch { /* no-op */ }
 
         if (config.config.auto_update_enabled) {
             try {
@@ -336,65 +235,10 @@
 
     onUnmounted(() => {
         if (unlisten) unlisten();
-        if (unlistenPending) unlistenPending();
-        if (unlistenResult) unlistenResult();
-        window.clearTimeout(deepLinkErrorTimer);
         if (updateCheckTimer !== undefined) window.clearInterval(updateCheckTimer);
         if (rateLimitPollTimer !== undefined) window.clearInterval(rateLimitPollTimer);
         if (nowTickTimer !== undefined) window.clearInterval(nowTickTimer);
     });
-
-    const dismissDeepLinkError = () => {
-        deepLinkError.value = null;
-        window.clearTimeout(deepLinkErrorTimer);
-    };
-
-    const confirmConnect = async () => {
-        connectError.value = null;
-        connecting.value = true;
-        try {
-            // Pass server enrichment (looked up while the banner was
-            // visible) so the History tab can show map/name alongside
-            // the IP. Backend silently drops nulls.
-            const enrichment = pendingServer.value
-                ? {
-                      map: pendingServer.value.map,
-                      server_name: pendingServer.value.name || pendingServer.value.plain_name || null,
-                      physics: physicsOfServer(pendingServer.value),
-                  }
-                : undefined;
-            await tauri.confirmPendingDeepLink(enrichment);
-            pendingDeepLink.value = null;
-            pendingServer.value = null;
-        } catch (e: any) {
-            connectError.value = e?.toString?.() ?? 'Connect failed';
-        } finally {
-            connecting.value = false;
-        }
-    };
-
-    const cancelConnect = async () => {
-        await tauri.cancelPendingDeepLink();
-        pendingDeepLink.value = null;
-        pendingServer.value = null;
-        connectError.value = null;
-    };
-
-    /// Open Settings and scroll to the deep-link-auto-connect row so the
-    /// user lands directly on the toggle they came to flip. The "Skip
-    /// this confirmation next time" hint inside the pending banner is
-    /// the only call site - keeping the deep-link out of a real URL
-    /// means it works the same whether or not we ever ship route guards
-    /// for the Settings view.
-    const openAutoConnectSetting = async () => {
-        await router.push('/settings');
-        // Wait one tick so the Settings view has mounted before we try
-        // to scroll to its anchor.
-        await nextTick();
-        document
-            .getElementById('deep-link-auto-connect')
-            ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    };
 
     const installUpdate = async () => {
         if (!pendingUpdate) return;
@@ -712,102 +556,6 @@
                     Add token →
                 </button>
             </div>
-        </div>
-
-        <!-- defrag:// pending-connection prompt: user-explicit confirm.
-             Layout mirrors a Servers list row when we have server data
-             (thumbnail + Q3-colored name + map + physics + IP + player
-             count); falls back to a plain "Connect to IP?" line when
-             the address isn't in the live server list (private server,
-             no token, off-list, or lookup still in flight). -->
-        <div
-            v-if="pendingDeepLink"
-            class="px-5 py-3 border-b border-brand-500/20 bg-brand-500/10 text-sm flex items-start gap-3"
-        >
-            <!-- Map thumbnail. Click opens the map page on defrag.racing. -->
-            <button
-                v-if="pendingServer"
-                class="w-20 h-14 rounded bg-black/40 border border-white/10 overflow-hidden flex-shrink-0 hover:border-brand-500/40"
-                :title="`Open ${pendingServer.map} on defrag.racing`"
-                @click="openServerMap(pendingServer.map)"
-            >
-                <img
-                    v-if="thumbnailUrlOf(pendingServer)"
-                    :src="thumbnailUrlOf(pendingServer)!"
-                    :alt="pendingServer.map"
-                    class="w-full h-full object-cover"
-                    loading="lazy"
-                />
-                <div v-else class="w-full h-full flex items-center justify-center text-[10px] text-neutral-600 uppercase">
-                    no map
-                </div>
-            </button>
-
-            <div class="flex-1 min-w-0">
-                <!-- Header line: country flag + colored name + physics pill.
-                     Falls back to "Connect to IP?" when we couldn't match
-                     the address to a known server. -->
-                <div v-if="pendingServer" class="flex items-center gap-2 min-w-0">
-                    <img
-                        v-if="flagUrlOf(pendingServer.location)"
-                        :src="flagUrlOf(pendingServer.location)!"
-                        :alt="pendingServer.location || ''"
-                        class="w-4 h-3 rounded flex-shrink-0"
-                        @error="($event.target as HTMLImageElement).style.display='none'"
-                    />
-                    <div
-                        class="text-sm text-neutral-100 truncate font-semibold"
-                        v-html="q3ToHtml(pendingServer.name || pendingServer.plain_name)"
-                    ></div>
-                    <span class="uppercase text-[10px] px-1 py-0.5 rounded bg-white/5 text-neutral-300 flex-shrink-0">
-                        {{ physicsOfServer(pendingServer) }}
-                    </span>
-                </div>
-                <div v-else class="text-brand-300 font-semibold">
-                    Connect to <span class="font-mono">{{ pendingDeepLink.address }}</span>?
-                </div>
-
-                <!-- Map + ip + player count -->
-                <div v-if="pendingServer" class="text-xs text-neutral-400 flex items-center gap-2 mt-0.5">
-                    <button class="text-brand-400 hover:underline" @click="openServerMap(pendingServer.map)">
-                        {{ pendingServer.map }}
-                    </button>
-                    <span class="text-neutral-600">·</span>
-                    <span class="font-mono">{{ pendingServer.ip }}:{{ pendingServer.port }}</span>
-                    <span class="text-neutral-600">·</span>
-                    <span>{{ playerCountOf(pendingServer) }} player{{ playerCountOf(pendingServer) === 1 ? '' : 's' }}</span>
-                </div>
-
-                <div class="text-xs text-neutral-400 mt-0.5">
-                    <button
-                        class="hover:underline text-neutral-400 hover:text-neutral-200"
-                        @click="openAutoConnectSetting"
-                    >Skip this confirmation next time →</button>
-                </div>
-                <div v-if="connectError" class="text-xs text-red-300 mt-0.5">{{ connectError }}</div>
-            </div>
-
-            <div class="flex flex-col gap-1 flex-shrink-0">
-                <button
-                    class="px-3 py-1.5 rounded bg-brand-500/30 hover:bg-brand-500/40 text-brand-200 font-semibold disabled:opacity-50"
-                    :disabled="connecting"
-                    @click="confirmConnect"
-                >Connect</button>
-                <button
-                    class="px-3 py-1.5 rounded bg-white/5 hover:bg-white/10 text-neutral-300"
-                    @click="cancelConnect"
-                >Dismiss</button>
-            </div>
-        </div>
-
-        <div
-            v-if="deepLinkError"
-            class="px-5 py-2 border-b text-xs flex items-center gap-2 bg-red-500/10 border-red-500/20 text-red-300"
-        >
-            <span>
-                Couldn't open <code class="font-mono">{{ deepLinkError.url }}</code> - {{ deepLinkError.error }}
-            </span>
-            <button class="ml-auto text-neutral-400 hover:text-neutral-200" @click="dismissDeepLinkError">×</button>
         </div>
 
         <div

@@ -2,10 +2,12 @@
     import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
     import { tauri, type NotificationsFeed, type SystemNotificationRow, type RecordNotificationRow } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
+    import { useNotificationsStore } from '../stores/notifications';
     import { q3ToHtml } from '../lib/q3color';
     import { openUrl } from '@tauri-apps/plugin-opener';
 
     const config = useConfigStore();
+    const notifStore = useNotificationsStore();
 
     const feed = ref<NotificationsFeed | null>(null);
     const loading = ref(true);
@@ -24,10 +26,119 @@
         error.value = null;
         try {
             feed.value = await tauri.getNotifications();
+            // Keep the App bell badge honest against what we just
+            // pulled - the store may be slightly stale from optimistic
+            // edits since the last 90s poll.
+            if (feed.value) {
+                notifStore.set(feed.value.unread.records, feed.value.unread.system);
+            }
         } catch (e: any) {
             error.value = e?.toString?.() ?? 'Failed to load notifications';
         } finally {
             loading.value = false;
+        }
+    };
+
+    // -- Mark-as-read mutations ---------------------------------------
+    // All toggles are optimistic: flip the local row + bump store
+    // counts immediately, then fire the API. On failure we roll back
+    // both. The server's response carries fresh `unread` counts which
+    // we trust over our optimistic estimate to absorb edge cases like
+    // a parallel "Mark all read" from the web.
+    const busyRows = ref<Set<string>>(new Set());
+    const rowKey = (kind: 'record' | 'system', id: number) => `${kind}#${id}`;
+
+    const adjustUnread = (kind: 'record' | 'system', delta: number) => {
+        if (kind === 'record') {
+            notifStore.set(Math.max(0, notifStore.records + delta), notifStore.system);
+        } else {
+            notifStore.set(notifStore.records, Math.max(0, notifStore.system + delta));
+        }
+    };
+
+    const toggleRecord = async (n: RecordNotificationRow) => {
+        const key = rowKey('record', n.id);
+        if (busyRows.value.has(key)) return;
+        busyRows.value.add(key);
+        busyRows.value = new Set(busyRows.value);
+        const wasRead = n.read;
+        n.read = !wasRead;
+        adjustUnread('record', wasRead ? +1 : -1);
+        try {
+            const resp = await tauri.notificationRecordToggle(n.id);
+            n.read = resp.read ?? n.read;
+            notifStore.set(resp.unread.records, resp.unread.system);
+        } catch (e: any) {
+            n.read = wasRead;
+            adjustUnread('record', wasRead ? -1 : +1);
+            error.value = e?.toString?.() ?? 'Toggle failed';
+        } finally {
+            busyRows.value.delete(key);
+            busyRows.value = new Set(busyRows.value);
+        }
+    };
+
+    const toggleSystem = async (n: SystemNotificationRow) => {
+        const key = rowKey('system', n.id);
+        if (busyRows.value.has(key)) return;
+        busyRows.value.add(key);
+        busyRows.value = new Set(busyRows.value);
+        const wasRead = n.read;
+        n.read = !wasRead;
+        adjustUnread('system', wasRead ? +1 : -1);
+        try {
+            const resp = await tauri.notificationSystemToggle(n.id);
+            n.read = resp.read ?? n.read;
+            notifStore.set(resp.unread.records, resp.unread.system);
+        } catch (e: any) {
+            n.read = wasRead;
+            adjustUnread('system', wasRead ? -1 : +1);
+            error.value = e?.toString?.() ?? 'Toggle failed';
+        } finally {
+            busyRows.value.delete(key);
+            busyRows.value = new Set(busyRows.value);
+        }
+    };
+
+    const bulkBusy = ref(false);
+    const markAllRecords = async (read: boolean) => {
+        if (bulkBusy.value || !feed.value) return;
+        bulkBusy.value = true;
+        const previous = feed.value.records.map((r) => r.read);
+        for (const r of feed.value.records) r.read = read;
+        notifStore.set(read ? 0 : feed.value.records.length, notifStore.system);
+        try {
+            const resp = read
+                ? await tauri.notificationRecordsMarkRead()
+                : await tauri.notificationRecordsMarkUnread();
+            notifStore.set(resp.unread.records, resp.unread.system);
+        } catch (e: any) {
+            // Roll back: restore each row's prior read state.
+            feed.value.records.forEach((r, i) => { r.read = previous[i]; });
+            error.value = e?.toString?.() ?? 'Bulk mark failed';
+            await refresh();
+        } finally {
+            bulkBusy.value = false;
+        }
+    };
+
+    const markAllSystem = async (read: boolean) => {
+        if (bulkBusy.value || !feed.value) return;
+        bulkBusy.value = true;
+        const previous = feed.value.system.map((r) => r.read);
+        for (const r of feed.value.system) r.read = read;
+        notifStore.set(notifStore.records, read ? 0 : feed.value.system.length);
+        try {
+            const resp = read
+                ? await tauri.notificationSystemMarkRead()
+                : await tauri.notificationSystemMarkUnread();
+            notifStore.set(resp.unread.records, resp.unread.system);
+        } catch (e: any) {
+            feed.value.system.forEach((r, i) => { r.read = previous[i]; });
+            error.value = e?.toString?.() ?? 'Bulk mark failed';
+            await refresh();
+        } finally {
+            bulkBusy.value = false;
         }
     };
 
@@ -289,6 +400,35 @@
                 {{ error }}
             </p>
 
+            <!-- Bulk action toolbar. Compact strip so it doesn't fight
+                 the sub-tabs visually; left empty when feed not ready. -->
+            <div class="px-3 py-1.5 border-b border-white/[0.04] bg-black/30 flex items-center justify-end gap-2 text-xs">
+                <template v-if="mainTab === 'records' && feed">
+                    <button
+                        class="px-2 py-0.5 rounded bg-yellow-500/15 hover:bg-yellow-500/25 text-yellow-300 font-semibold disabled:opacity-50"
+                        :disabled="bulkBusy || !feed.records.some(r => !r.read)"
+                        @click="markAllRecords(true)"
+                    >Mark all read</button>
+                    <button
+                        class="px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 font-semibold disabled:opacity-50"
+                        :disabled="bulkBusy || !feed.records.some(r => r.read)"
+                        @click="markAllRecords(false)"
+                    >Mark all unread</button>
+                </template>
+                <template v-if="mainTab === 'system' && feed">
+                    <button
+                        class="px-2 py-0.5 rounded bg-yellow-500/15 hover:bg-yellow-500/25 text-yellow-300 font-semibold disabled:opacity-50"
+                        :disabled="bulkBusy || !feed.system.some(r => !r.read)"
+                        @click="markAllSystem(true)"
+                    >Mark all read</button>
+                    <button
+                        class="px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 font-semibold disabled:opacity-50"
+                        :disabled="bulkBusy || !feed.system.some(r => r.read)"
+                        @click="markAllSystem(false)"
+                    >Mark all unread</button>
+                </template>
+            </div>
+
             <!-- Records tab -->
             <template v-if="mainTab === 'records'">
                 <!-- Records sub-tabs -->
@@ -383,9 +523,20 @@
                                 >(-{{ formatMs(n.my_time - n.time) }})</span>
                             </div>
 
-                            <!-- Timestamp -->
-                            <div class="text-[11px] text-neutral-500 flex-shrink-0 whitespace-nowrap">
-                                {{ formatRelative(parseSqlAt(n.date_set ?? n.created_at)) }}
+                            <!-- Timestamp + read toggle -->
+                            <div class="flex flex-col items-end gap-1 flex-shrink-0">
+                                <div class="text-[11px] text-neutral-500 whitespace-nowrap">
+                                    {{ formatRelative(parseSqlAt(n.date_set ?? n.created_at)) }}
+                                </div>
+                                <button
+                                    class="p-1 rounded hover:bg-white/5 disabled:opacity-50 leading-none"
+                                    :disabled="busyRows.has('record#' + n.id)"
+                                    :title="n.read ? 'Mark as unread' : 'Mark as read'"
+                                    @click.stop="toggleRecord(n)"
+                                >
+                                    <span v-if="!n.read" class="text-emerald-400 text-sm">●</span>
+                                    <span v-else class="text-neutral-500 text-sm">○</span>
+                                </button>
                             </div>
                         </li>
                     </ul>
@@ -492,9 +643,20 @@
                                 </div>
                             </div>
 
-                            <!-- Timestamp -->
-                            <div class="text-[11px] text-neutral-500 flex-shrink-0 whitespace-nowrap">
-                                {{ formatRelative(parseSqlAt(n.created_at)) }}
+                            <!-- Timestamp + read toggle -->
+                            <div class="flex flex-col items-end gap-1 flex-shrink-0">
+                                <div class="text-[11px] text-neutral-500 whitespace-nowrap">
+                                    {{ formatRelative(parseSqlAt(n.created_at)) }}
+                                </div>
+                                <button
+                                    class="p-1 rounded hover:bg-white/5 disabled:opacity-50 leading-none"
+                                    :disabled="busyRows.has('system#' + n.id)"
+                                    :title="n.read ? 'Mark as unread' : 'Mark as read'"
+                                    @click.stop="toggleSystem(n)"
+                                >
+                                    <span v-if="!n.read" class="text-blue-400 text-sm">●</span>
+                                    <span v-else class="text-neutral-500 text-sm">○</span>
+                                </button>
                             </div>
                         </li>
                     </ul>

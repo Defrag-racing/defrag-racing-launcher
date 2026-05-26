@@ -284,6 +284,42 @@ impl Client {
         Ok(resp.json::<serde_json::Value>().await?)
     }
 
+    /// Tiny POST helper for the mark-read/unread mutations. They all
+    /// share the same shape (no body, JSON response with fresh
+    /// `unread` counts) so a single function keeps the six command
+    /// wrappers from drifting.
+    async fn post_notification_action(&self, path: &str) -> ApiResult<serde_json::Value> {
+        let resp = self
+            .http
+            .post(self.url(path))
+            .bearer_auth(&self.token)
+            .header("Accept", "application/json")
+            .header("Content-Length", "0")
+            .send()
+            .await?;
+        self.check_status(&resp).await?;
+        Ok(resp.json::<serde_json::Value>().await?)
+    }
+
+    pub async fn notification_record_toggle(&self, id: u64) -> ApiResult<serde_json::Value> {
+        self.post_notification_action(&format!("/api/launcher/notifications/records/{}/toggle", id)).await
+    }
+    pub async fn notification_records_mark_read(&self) -> ApiResult<serde_json::Value> {
+        self.post_notification_action("/api/launcher/notifications/records/mark-read").await
+    }
+    pub async fn notification_records_mark_unread(&self) -> ApiResult<serde_json::Value> {
+        self.post_notification_action("/api/launcher/notifications/records/mark-unread").await
+    }
+    pub async fn notification_system_toggle(&self, id: u64) -> ApiResult<serde_json::Value> {
+        self.post_notification_action(&format!("/api/launcher/notifications/system/{}/toggle", id)).await
+    }
+    pub async fn notification_system_mark_read(&self) -> ApiResult<serde_json::Value> {
+        self.post_notification_action("/api/launcher/notifications/system/mark-read").await
+    }
+    pub async fn notification_system_mark_unread(&self) -> ApiResult<serde_json::Value> {
+        self.post_notification_action("/api/launcher/notifications/system/mark-unread").await
+    }
+
     /// One-shot "who am I" call for the Profile button. Returns minimal
     /// fields (id / mdd_id / name / plain_name / country); launcher
     /// caches the result so the button works offline thereafter.

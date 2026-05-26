@@ -47,13 +47,16 @@
         const key = `${e.ip}:${e.port}#${e.timestamp_ms}`;
         reconnecting.value = key;
         try {
-            await tauri.handleProtocolUrl(`defrag://${e.ip}:${e.port}`);
-            // No history.log call here - handleProtocolUrl reaches the
-            // engine directly and doesn't go through the
-            // confirm_pending_deep_link command that logs. If we
-            // wanted these "reconnect" events in history we'd add a
-            // dedicated command; skipping for now to avoid log spam
-            // from accidental double-clicks.
+            await tauri.handleProtocolUrl(
+                `defrag://${e.ip}:${e.port}`,
+                {
+                    map: e.map ?? null,
+                    server_name: e.server_name ?? null,
+                    physics: e.physics ?? null,
+                },
+                'reconnect',
+            );
+            await refresh();
         } catch (err: any) {
             error.value = err?.toString?.() ?? 'Connect failed';
         } finally {
