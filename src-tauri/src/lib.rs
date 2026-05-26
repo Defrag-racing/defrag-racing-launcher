@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod engine;
 mod hashing;
+mod history;
 mod protocol;
 mod token;
 mod watcher;
@@ -202,6 +203,8 @@ pub fn run() {
             commands::get_pending_deep_link,
             commands::confirm_pending_deep_link,
             commands::cancel_pending_deep_link,
+            commands::get_connection_history,
+            commands::clear_connection_history,
             commands::set_autostart_enabled,
             commands::is_autostart_enabled,
         ])
@@ -363,6 +366,19 @@ fn handle_deep_link_url(app: &tauri::AppHandle, url: &str) {
                 let engine = cfg.as_ref().and_then(|c| c.engine_path.as_deref());
                 match protocol::launch(engine, addr) {
                     Ok(()) => {
+                        // Log the connection to history with whatever
+                        // we have (just IP:port at this point -
+                        // enrichment requires the frontend's server
+                        // lookup which auto-connect skips by design).
+                        let state: tauri::State<AppState> = app.state();
+                        state.history.log(
+                            addr.ip().to_string(),
+                            addr.port(),
+                            None,
+                            None,
+                            None,
+                            "auto",
+                        );
                         let _ = app.emit(
                             "deep-link://result",
                             serde_json::json!({

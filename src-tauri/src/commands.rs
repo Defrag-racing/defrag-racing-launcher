@@ -8,6 +8,7 @@
 use crate::cache::UploadCache;
 use crate::config::{self, Config};
 use crate::engine::{self, EngineCandidate};
+use crate::history::{ConnectionEntry, ConnectionHistory};
 use crate::protocol;
 use crate::token;
 use crate::watcher::{self, Message, UploadState, UploadStateSnapshot, WatcherHandle};
@@ -30,6 +31,10 @@ pub struct AppState {
     pub watcher: Mutex<Option<WatcherHandle>>,
     pub upload_state: Arc<UploadState>,
     pub pending_deep_link: Mutex<Option<String>>,
+    /// Connection history (defrag:// log). Lives in AppState so a
+    /// single load happens at boot and subsequent log() calls touch
+    /// the same in-memory copy.
+    pub history: Arc<ConnectionHistory>,
 }
 
 impl Default for AppState {
@@ -43,6 +48,7 @@ impl Default for AppState {
             watcher: Mutex::new(None),
             upload_state,
             pending_deep_link: Mutex::new(None),
+            history: Arc::new(ConnectionHistory::default()),
         }
     }
 }
@@ -432,10 +438,25 @@ pub fn get_pending_deep_link(state: State<'_, AppState>) -> Option<String> {
 /// User clicked Connect on the pending-URL banner: take the URL, parse,
 /// and actually launch the engine. The Mutex `take()` clears pending so
 /// the banner disappears and the URL can't be replayed.
+///
+/// `enrichment` carries the optional server detail (map / name /
+/// physics) that the frontend looked up while the banner was visible -
+/// we log it to history.json so the History tab can show "joined
+/// ^1EU CPM I on bug22_slick" instead of just an IP. Auto-connect
+/// paths log via a separate code path with whatever they have, which
+/// for now is just IP:port.
+#[derive(Debug, serde::Deserialize, Default)]
+pub struct ConnectEnrichment {
+    pub map: Option<String>,
+    pub server_name: Option<String>,
+    pub physics: Option<String>,
+}
+
 #[tauri::command]
 pub fn confirm_pending_deep_link(
     app: AppHandle,
     state: State<'_, AppState>,
+    enrichment: Option<ConnectEnrichment>,
 ) -> Result<String, String> {
     use tauri::Manager;
     let url = state
@@ -447,6 +468,15 @@ pub fn confirm_pending_deep_link(
     let addr = protocol::parse_url(&url).map_err(err_to_string)?;
     let cfg = Config::load().map_err(err_to_string)?;
     protocol::launch(cfg.engine_path.as_deref(), addr).map_err(err_to_string)?;
+    let enrich = enrichment.unwrap_or_default();
+    state.history.log(
+        addr.ip().to_string(),
+        addr.port(),
+        enrich.map,
+        enrich.server_name,
+        enrich.physics,
+        "confirmed",
+    );
     // Engine has focus now - drop the launcher back to the tray so it
     // isn't pointlessly floating over Quake.
     if let Some(w) = app.get_webview_window("main") {
@@ -459,4 +489,20 @@ pub fn confirm_pending_deep_link(
 #[tauri::command]
 pub fn cancel_pending_deep_link(state: State<'_, AppState>) {
     *state.pending_deep_link.lock().unwrap() = None;
+}
+
+// ---- Connection history ----------------------------------------------------
+
+/// Snapshot of the defrag:// connection log for the History tab.
+/// Returns at most HISTORY_CAP entries, newest first.
+#[tauri::command]
+pub fn get_connection_history(state: State<'_, AppState>) -> Vec<ConnectionEntry> {
+    state.history.list()
+}
+
+/// Wipe history from memory and disk. Surfaced via the "Clear" button
+/// in the History tab.
+#[tauri::command]
+pub fn clear_connection_history(state: State<'_, AppState>) {
+    state.history.clear();
 }

@@ -81,6 +81,13 @@
                         ? 'bg-white/10 text-neutral-100 font-semibold'
                         : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
                 >Servers</RouterLink>
+                <RouterLink
+                    :to="{ name: 'history' }"
+                    class="px-3 py-1.5 text-sm rounded transition-colors"
+                    :class="route.name === 'history'
+                        ? 'bg-white/10 text-neutral-100 font-semibold'
+                        : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
+                >History</RouterLink>
             </div>
 
             <div class="flex items-center gap-2">

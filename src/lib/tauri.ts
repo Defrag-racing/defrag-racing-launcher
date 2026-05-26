@@ -103,8 +103,15 @@ export const tauri = {
     handleProtocolUrl: (url: string) => invoke<string>('handle_protocol_url', { url }),
     launchEngine: () => invoke<void>('launch_engine'),
     getPendingDeepLink: () => invoke<string | null>('get_pending_deep_link'),
-    confirmPendingDeepLink: () => invoke<string>('confirm_pending_deep_link'),
+    /** Optional enrichment is logged into history.json so the History
+     *  tab can show map/server name alongside the IP. Pass whatever
+     *  the live server lookup found at click time. */
+    confirmPendingDeepLink: (enrichment?: ConnectEnrichment) =>
+        invoke<string>('confirm_pending_deep_link', { enrichment: enrichment ?? null }),
     cancelPendingDeepLink: () => invoke<void>('cancel_pending_deep_link'),
+
+    getConnectionHistory: () => invoke<ConnectionEntry[]>('get_connection_history'),
+    clearConnectionHistory: () => invoke<void>('clear_connection_history'),
 
     // Untyped on purpose: the JSON shape is owned by the Laravel
     // ServerListService and will grow new fields over time. Frontend
@@ -160,4 +167,28 @@ export interface DefragPlayer {
     country?: string | null;
     nospec?: boolean;
     spectators?: DefragPlayer[];
+}
+
+/** Optional enrichment passed to confirmPendingDeepLink so the History
+ *  tab can show "joined ^1EU CPM I on bug22_slick" instead of just an
+ *  IP. The frontend fills this from its live server lookup; auto-
+ *  connect entries log without enrichment via the Rust path. */
+export interface ConnectEnrichment {
+    map?: string | null;
+    server_name?: string | null;
+    physics?: string | null;
+}
+
+/** One row from history.json. `source` is "auto" when the user opted
+ *  into auto-connect Settings and the launcher launched the engine
+ *  without a banner, "confirmed" when they pressed Connect on the
+ *  pending banner. */
+export interface ConnectionEntry {
+    timestamp_ms: number;
+    ip: string;
+    port: number;
+    map: string | null;
+    server_name: string | null;
+    physics: string | null;
+    source: string;
 }

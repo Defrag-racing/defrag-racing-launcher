@@ -9,6 +9,7 @@ const router = createRouter({
         { path: '/onboarding', name: 'onboarding', component: () => import('./views/Onboarding.vue') },
         { path: '/dashboard', name: 'dashboard', component: () => import('./views/Dashboard.vue') },
         { path: '/servers', name: 'servers', component: () => import('./views/Servers.vue') },
+        { path: '/history', name: 'history', component: () => import('./views/History.vue') },
         { path: '/settings', name: 'settings', component: () => import('./views/Settings.vue') },
         { path: '/version-mismatch', name: 'version-mismatch', component: () => import('./views/VersionMismatch.vue') },
     ],

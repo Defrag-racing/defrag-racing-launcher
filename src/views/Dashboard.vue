@@ -353,7 +353,17 @@
         connectError.value = null;
         connecting.value = true;
         try {
-            await tauri.confirmPendingDeepLink();
+            // Pass server enrichment (looked up while the banner was
+            // visible) so the History tab can show map/name alongside
+            // the IP. Backend silently drops nulls.
+            const enrichment = pendingServer.value
+                ? {
+                      map: pendingServer.value.map,
+                      server_name: pendingServer.value.name || pendingServer.value.plain_name || null,
+                      physics: physicsOfServer(pendingServer.value),
+                  }
+                : undefined;
+            await tauri.confirmPendingDeepLink(enrichment);
             pendingDeepLink.value = null;
             pendingServer.value = null;
         } catch (e: any) {
