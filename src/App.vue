@@ -1,5 +1,5 @@
 <script setup lang="ts">
-    import { computed, onMounted, ref } from 'vue';
+    import { computed, onMounted, onUnmounted, ref } from 'vue';
     import { useRouter, useRoute } from 'vue-router';
     import { tauri } from './lib/tauri';
     import { useConfigStore } from './stores/config';
@@ -18,9 +18,31 @@
             || r === 'servers'
             || r === 'records'
             || r === 'maps'
+            || r === 'library'
+            || r === 'notifications'
             || r === 'history'
             || r === 'settings';
     });
+
+    // Unread notification count polled into the bell badge. Lives at
+    // the App level so the badge is consistent across all tabs - the
+    // Notifications view itself maintains its own copy of the full
+    // feed; this one is just the count. Polled every 90s while the
+    // launcher is alive (cheap single-SELECT request).
+    const unreadNotifications = ref(0);
+    let notifPollTimer: number | undefined;
+    const refreshUnread = async () => {
+        if (!config.hasToken) {
+            unreadNotifications.value = 0;
+            return;
+        }
+        try {
+            const feed = await tauri.getNotifications();
+            unreadNotifications.value = feed.unread.total;
+        } catch {
+            // ignore - retry next tick
+        }
+    };
 
     /// Open the token owner's profile page on defrag.racing. Disabled
     /// when we don't have an mdd_id - either the user hasn't linked
@@ -54,6 +76,12 @@
     onMounted(async () => {
         await config.refresh();
 
+        // Bell badge poll. First call goes through immediately so the
+        // badge isn't blank on first render; subsequent ticks every
+        // 90s keep it warm without hammering the browse bucket.
+        await refreshUnread();
+        notifPollTimer = window.setInterval(refreshUnread, 90_000);
+
         // Upgrade-aware boot flow:
         //  1. Fresh install (no onboarding) → onboarding wizard
         //  2. Config left behind by an older launcher → mismatch screen
@@ -72,6 +100,10 @@
                 query: { previous, current },
             });
         }
+    });
+
+    onUnmounted(() => {
+        if (notifPollTimer !== undefined) window.clearInterval(notifPollTimer);
     });
 </script>
 
@@ -92,6 +124,13 @@
                         ? 'bg-white/10 text-neutral-100 font-semibold'
                         : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
                 >Demos</RouterLink>
+                <RouterLink
+                    :to="{ name: 'library' }"
+                    class="px-3 py-1.5 text-sm rounded transition-colors"
+                    :class="route.name === 'library'
+                        ? 'bg-white/10 text-neutral-100 font-semibold'
+                        : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
+                >Library</RouterLink>
                 <RouterLink
                     :to="{ name: 'servers' }"
                     class="px-3 py-1.5 text-sm rounded transition-colors"
@@ -138,6 +177,24 @@
                     <span>▶</span>
                     <span>{{ launching ? 'Launching…' : 'Quick launch' }}</span>
                 </button>
+
+                <!-- Notifications bell. Badge shows unread total
+                     across record + system feeds; refreshed every
+                     90s by the App-level poll. -->
+                <RouterLink
+                    :to="{ name: 'notifications' }"
+                    class="relative px-3 py-1.5 rounded text-sm transition-colors"
+                    :class="route.name === 'notifications'
+                        ? 'bg-white/10 text-neutral-100 font-semibold'
+                        : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
+                    title="Notifications"
+                >
+                    <span>🔔</span>
+                    <span
+                        v-if="unreadNotifications > 0"
+                        class="absolute -top-1 -right-1 text-[10px] font-bold px-1 min-w-[16px] h-[16px] flex items-center justify-center rounded-full bg-brand-500 text-white"
+                    >{{ unreadNotifications > 99 ? '99+' : unreadNotifications }}</span>
+                </RouterLink>
 
                 <!-- Profile: opens the token owner's defrag.racing
                      profile page in the default browser. Disabled

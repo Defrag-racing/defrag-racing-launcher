@@ -377,6 +377,118 @@ pub fn set_cpu_throttle_pct_runtime(state: State<'_, AppState>, pct: u8) {
     }
 }
 
+/// One row in the demo-library view. Mix of filesystem-derived
+/// (filename, size, mtime) and cache-derived (hash, demo_id) data so
+/// the frontend can show "this one is uploaded as demo #123" without
+/// hitting the server. Demos that have never been processed return
+/// hash=None and demo_id=None.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DemoLibraryEntry {
+    pub path: String,
+    pub filename: String,
+    pub size_bytes: u64,
+    /// Unix-epoch seconds of mtime - frontend renders this with the
+    /// user's locale; backend doesn't care about formatting.
+    pub mtime: u64,
+    pub hash: Option<String>,
+    pub demo_id: Option<u64>,
+    /// Status from uploaded.json - "done" / "duplicate" - so the
+    /// frontend can show "already on defrag.racing" without
+    /// re-fetching. None when the file isn't in the cache yet.
+    pub upload_status: Option<String>,
+}
+
+/// List every .dm_* file in the configured demos folder with the
+/// metadata the Library view needs. Reads the FS directly (cheap
+/// stat() per file) and joins with uploaded.json for known hashes.
+/// Used by the Library tab on mount; not polled - the user can hit
+/// a Refresh button to pick up new demos that landed while the tab
+/// was open.
+#[tauri::command]
+pub fn list_demos() -> Result<Vec<DemoLibraryEntry>, String> {
+    use std::time::UNIX_EPOCH;
+    let cfg = Config::load().map_err(err_to_string)?;
+    let demos = cfg
+        .demos_path
+        .clone()
+        .ok_or_else(|| "Demos path is not set".to_string())?;
+    if !demos.is_dir() {
+        return Err(format!("Demos path {:?} does not exist", demos));
+    }
+    let cache = UploadCache::load();
+
+    let mut entries = Vec::new();
+    let walker: Box<dyn Iterator<Item = PathBuf>> = if cfg.include_subfolders {
+        Box::new(
+            walkdir::WalkDir::new(&demos)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().is_file())
+                .map(|e| e.path().to_path_buf()),
+        )
+    } else {
+        Box::new(
+            std::fs::read_dir(&demos)
+                .map_err(err_to_string)?
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.is_file()),
+        )
+    };
+
+    for p in walker {
+        // Match the same demo-file rule the watcher uses.
+        let ext_ok = p
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_ascii_lowercase().starts_with("dm_"))
+            .unwrap_or(false);
+        if !ext_ok {
+            continue;
+        }
+        // Skip Quake's temp/ subfolder where in-progress recordings live.
+        let in_temp = p.components().any(|c| {
+            c.as_os_str()
+                .to_str()
+                .map(|s| s.eq_ignore_ascii_case("temp"))
+                .unwrap_or(false)
+        });
+        if in_temp {
+            continue;
+        }
+        let meta = match std::fs::metadata(&p) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let mtime = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let filename = p
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        let cached = cache.get(&p);
+        entries.push(DemoLibraryEntry {
+            path: p.to_string_lossy().into_owned(),
+            filename,
+            size_bytes: meta.len(),
+            mtime,
+            hash: cached.map(|c| c.hash.clone()),
+            demo_id: cached.and_then(|c| c.demo_id),
+            upload_status: cached.map(|c| c.status.clone()),
+        });
+    }
+
+    // Newest first by default; frontend can re-sort client-side.
+    entries.sort_by(|a, b| b.mtime.cmp(&a.mtime));
+    Ok(entries)
+}
+
 #[tauri::command]
 pub fn get_upload_state(state: State<'_, AppState>) -> UploadStateSnapshot {
     // Read straight off AppState's shared UploadState - the watcher
@@ -425,6 +537,59 @@ pub async fn get_servers() -> Result<serde_json::Value, String> {
         .ok_or_else(|| "No token saved - server browser requires a launcher token from defrag.racing/user/settings".to_string())?;
     let client = crate::api::Client::new(config::api_base_url(), token).map_err(err_to_string)?;
     client.fetch_servers().await.map_err(err_to_string)
+}
+
+/// Notifications feed for the Notifications tab. Token-locked.
+/// Returns the raw shape /api/launcher/notifications produces:
+///   { records: [...], system: [...], unread: {records, system, total} }
+#[tauri::command]
+pub async fn get_notifications() -> Result<serde_json::Value, String> {
+    let token = token::load()
+        .map_err(err_to_string)?
+        .ok_or_else(|| "No token saved".to_string())?;
+    let client = crate::api::Client::new(config::api_base_url(), token).map_err(err_to_string)?;
+    client.fetch_notifications().await.map_err(err_to_string)
+}
+
+/// Queue a YouTube render for a local demo. Caller passes the file
+/// hash from uploaded.json. Returns the server's response unchanged
+/// so the frontend can react to all four cases (queued / already
+/// queued / needs upload / quota exhausted) without us mapping them
+/// into a single Rust type. status is 200/404/422/429 and the body
+/// carries the detail.
+#[tauri::command]
+pub async fn request_render(file_hash: String) -> Result<serde_json::Value, String> {
+    let token = token::load()
+        .map_err(err_to_string)?
+        .ok_or_else(|| "No token saved".to_string())?;
+    let client = crate::api::Client::new(config::api_base_url(), token).map_err(err_to_string)?;
+    let resp = client.request_render(&file_hash).await.map_err(err_to_string)?;
+    let status = resp.status().as_u16();
+    // Pass the body through with an added _http_status field so the
+    // frontend can branch on "200 vs 404 needs_upload" cleanly. We
+    // unwrap the body via .json::<Value>() unconditionally because
+    // the controller always returns JSON for all status codes.
+    let mut body = resp
+        .json::<serde_json::Value>()
+        .await
+        .map_err(err_to_string)?;
+    if let Some(obj) = body.as_object_mut() {
+        obj.insert("_http_status".into(), serde_json::Value::from(status));
+    }
+    Ok(body)
+}
+
+/// Cheap polling endpoint for a single demo's current render state.
+/// Returns the server's response verbatim (has_render bool + status
+/// + youtube_url when present). Used by the Library view to keep
+/// row states fresh without reloading the full notifications feed.
+#[tauri::command]
+pub async fn get_render_status(file_hash: String) -> Result<serde_json::Value, String> {
+    let token = token::load()
+        .map_err(err_to_string)?
+        .ok_or_else(|| "No token saved".to_string())?;
+    let client = crate::api::Client::new(config::api_base_url(), token).map_err(err_to_string)?;
+    client.render_status(&file_hash).await.map_err(err_to_string)
 }
 
 /// "Who am I" lookup for the Profile button. Token-locked. Frontend

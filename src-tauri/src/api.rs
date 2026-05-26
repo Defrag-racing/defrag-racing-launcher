@@ -231,6 +231,59 @@ impl Client {
         Ok(body)
     }
 
+    /// POST /api/launcher/render-video - queue a YouTube render for
+    /// the demo identified by hash. Server short-circuits to the
+    /// existing render if there is one (status + youtube_url
+    /// returned), otherwise creates a pending entry and returns its
+    /// queue position. 404 means "demo not uploaded yet, upload it
+    /// first" - caller can dispatch through the normal upload path.
+    pub async fn request_render(&self, file_hash: &str) -> ApiResult<reqwest::Response> {
+        let resp = self
+            .with_429_retry(|| async {
+                self.http
+                    .post(self.url("/api/launcher/render-video"))
+                    .bearer_auth(&self.token)
+                    .header("Accept", "application/json")
+                    .json(&serde_json::json!({ "file_hash": file_hash }))
+                    .send()
+                    .await
+            })
+            .await?;
+        Ok(resp)
+    }
+
+    /// GET /api/launcher/render-status?file_hash=... - cheap status
+    /// poll for a single demo's render state. Used by the Library
+    /// view to refresh a row without reloading the whole notifications
+    /// feed.
+    pub async fn render_status(&self, file_hash: &str) -> ApiResult<serde_json::Value> {
+        let resp = self
+            .http
+            .get(self.url("/api/launcher/render-status"))
+            .bearer_auth(&self.token)
+            .header("Accept", "application/json")
+            .query(&[("file_hash", file_hash)])
+            .send()
+            .await?;
+        self.check_status(&resp).await?;
+        Ok(resp.json::<serde_json::Value>().await?)
+    }
+
+    /// GET /api/launcher/notifications - records + system feeds plus
+    /// unread counts. Returned shape forwarded unchanged to the
+    /// frontend.
+    pub async fn fetch_notifications(&self) -> ApiResult<serde_json::Value> {
+        let resp = self
+            .http
+            .get(self.url("/api/launcher/notifications"))
+            .bearer_auth(&self.token)
+            .header("Accept", "application/json")
+            .send()
+            .await?;
+        self.check_status(&resp).await?;
+        Ok(resp.json::<serde_json::Value>().await?)
+    }
+
     /// One-shot "who am I" call for the Profile button. Returns minimal
     /// fields (id / mdd_id / name / plain_name / country); launcher
     /// caches the result so the button works offline thereafter.

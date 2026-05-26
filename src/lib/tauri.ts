@@ -127,6 +127,27 @@ export const tauri = {
      *  Profile button so the link works without a per-render fetch. */
     getMe: () => invoke<LauncherMe>('get_me'),
 
+    /** Demo library: every .dm_* file in the configured demos folder
+     *  with its known hash + demo_id from uploaded.json when
+     *  available. Reads FS directly, no server call. */
+    listDemos: () => invoke<DemoLibraryEntry[]>('list_demos'),
+
+    /** Notifications feed for the bell badge + Notifications tab.
+     *  Records (PB beats / WR takes) + system (render done, etc.)
+     *  plus unread counts. */
+    getNotifications: () => invoke<NotificationsFeed>('get_notifications'),
+
+    /** Queue a YouTube render for a local demo by hash. Server
+     *  short-circuits if already queued. Response includes
+     *  _http_status so the frontend can branch on 200 (queued) vs
+     *  404 (needs_upload) vs 429 (quota) without a TS catch. */
+    requestRender: (fileHash: string) =>
+        invoke<RenderRequestResponse>('request_render', { fileHash }),
+
+    /** Single-demo render status. Polls cheaper than getNotifications. */
+    getRenderStatus: (fileHash: string) =>
+        invoke<RenderStatusResponse>('get_render_status', { fileHash }),
+
     // Untyped on purpose: the JSON shape is owned by the Laravel
     // ServerListService and will grow new fields over time. Frontend
     // uses a minimal interface (DefragServer below) for the columns it
@@ -265,4 +286,95 @@ export interface LauncherMe {
     name: string;
     plain_name: string | null;
     country: string | null;
+}
+
+/** One demo file from the user's local folder. hash + demo_id are
+ *  populated only for files that have been processed (have an entry
+ *  in uploaded.json); never-seen files come back with both null and
+ *  the Library view shows them as "not yet uploaded". */
+export interface DemoLibraryEntry {
+    path: string;
+    filename: string;
+    size_bytes: number;
+    /** Unix-epoch seconds; format with locale on the frontend. */
+    mtime: number;
+    hash: string | null;
+    demo_id: number | null;
+    /** "done" | "duplicate" | null, mirrors cache.status. */
+    upload_status: string | null;
+}
+
+/** One row from RecordNotification (PB beats, WR takes, etc.). The
+ *  web side exposes its full fillable list - this is the subset the
+ *  launcher actually renders; backend additions stay forward-
+ *  compatible because the rest is ignored. */
+export interface RecordNotificationRow {
+    id: number;
+    user_id: number;
+    map: string | null;
+    physics: string | null;
+    rank: number | null;
+    time: number | null;
+    other_user_name: string | null;
+    other_user_country: string | null;
+    read: boolean;
+    created_at: string;
+}
+
+/** One row from system Notification (render done, alias suggestions,
+ *  etc.). headline + subheadline + url are the meaningful triple;
+ *  type drives the icon. */
+export interface SystemNotificationRow {
+    id: number;
+    user_id: number;
+    type: string;
+    before: string | null;
+    headline: string | null;
+    after: string | null;
+    subheadline: string | null;
+    image: string | null;
+    url: string | null;
+    read: boolean;
+    created_at: string;
+}
+
+export interface NotificationsFeed {
+    records: RecordNotificationRow[];
+    system: SystemNotificationRow[];
+    unread: { records: number; system: number; total: number };
+}
+
+/** Response from request_render. `_http_status` carries the original
+ *  HTTP code so the view can branch:
+ *   - 200 + success=true: queued, queue_position present
+ *   - 200 + already_queued: showing existing status / youtube_url
+ *   - 404 + needs_upload: launcher should upload first then retry
+ *   - 429 + remaining=0: daily quota exhausted
+ *   - 403: account is restricted */
+export interface RenderRequestResponse {
+    _http_status: number;
+    success?: boolean;
+    already_queued?: boolean;
+    needs_upload?: boolean;
+    id?: number;
+    status?: string;
+    queue_position?: number;
+    remaining_today?: number;
+    youtube_url?: string | null;
+    youtube_video_id?: string | null;
+    error?: string;
+    remaining?: number;
+}
+
+/** Response from get_render_status. has_render=false means there's
+ *  no RenderedVideo for this demo yet (or the demo isn't on the
+ *  server at all - reason="demo_not_uploaded"). */
+export interface RenderStatusResponse {
+    has_render: boolean;
+    reason?: string;
+    demo_id?: number;
+    id?: number;
+    status?: string;
+    youtube_url?: string | null;
+    youtube_video_id?: string | null;
 }

@@ -106,6 +106,15 @@ impl UploadCache {
         }
     }
 
+    /// Look up by exact path. Used by the demos-library command to
+    /// pair a filesystem entry with its known hash + demo_id without
+    /// going through the freshness check (so a file we've previously
+    /// uploaded still shows its demo_id in the library even if it
+    /// got touched in some way after).
+    pub fn get(&self, path: &Path) -> Option<&CachedEntry> {
+        self.files.get(path)
+    }
+
     /// Record a successful upload (or confirmed-duplicate) for the
     /// given file. Caller passes the freshly-computed hash + the
     /// server's response. mtime/size are read from disk here so the

@@ -208,6 +208,10 @@ pub fn run() {
             commands::get_records,
             commands::get_maps,
             commands::get_me,
+            commands::list_demos,
+            commands::get_notifications,
+            commands::request_render,
+            commands::get_render_status,
             commands::set_autostart_enabled,
             commands::is_autostart_enabled,
         ])
