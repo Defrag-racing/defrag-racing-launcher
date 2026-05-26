@@ -148,6 +148,18 @@ pub fn run() {
                     }
                 });
             }
+
+            // Auto-resume the watcher on launch if the user's last
+            // explicit action was Start. start_auto_upload() flips
+            // auto_upload_enabled=true on click, stop_auto_upload()
+            // flips it back, so a one-time click means "keep doing
+            // this across launches" - the user shouldn't have to
+            // re-click Start every cold boot. Best-effort: any failure
+            // (missing token, demos folder gone) just logs and lets
+            // the user fix it manually from the Dashboard, same as
+            // they would on a regular Start click.
+            autostart_watcher_if_enabled(app.handle());
+
             log_startup("setup() complete");
             Ok(())
         })
@@ -244,6 +256,66 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         .build(app)?;
 
     Ok(())
+}
+
+/// Spin up the upload watcher on launch when the persisted config
+/// says the user wants it - i.e. their last explicit click was Start
+/// rather than Stop. Mirrors what commands::start_auto_upload does,
+/// minus the Tauri-command plumbing (we have an AppHandle here, not a
+/// State<AppState>). Any failure just logs and leaves the watcher off;
+/// the Dashboard will show its normal "click Start" empty state and
+/// the user can fix the underlying problem (missing token, gone demos
+/// folder) at their leisure.
+fn autostart_watcher_if_enabled(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    let cfg = match config::Config::load() {
+        Ok(c) => c,
+        Err(e) => {
+            log_startup(&format!("autostart: config load failed: {}", e));
+            return;
+        }
+    };
+    if !cfg.auto_upload_enabled {
+        log_startup("autostart: auto_upload_enabled=false, skipping");
+        return;
+    }
+    let Some(demos) = cfg.demos_path.clone() else {
+        log_startup("autostart: no demos_path, skipping");
+        return;
+    };
+    if !demos.is_dir() {
+        log_startup(&format!("autostart: demos_path not a dir: {:?}", demos));
+        return;
+    }
+    let token = match token::load() {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            log_startup("autostart: no token saved, skipping");
+            return;
+        }
+        Err(e) => {
+            log_startup(&format!("autostart: token load failed: {}", e));
+            return;
+        }
+    };
+    let state: tauri::State<AppState> = app.state();
+    let handle = match watcher::start(
+        app.clone(),
+        state.upload_state.clone(),
+        demos,
+        cfg.include_subfolders,
+        config::api_base_url(),
+        token,
+        cfg.cpu_throttle_pct,
+    ) {
+        Ok(h) => h,
+        Err(e) => {
+            log_startup(&format!("autostart: watcher::start failed: {}", e));
+            return;
+        }
+    };
+    *state.watcher.lock().unwrap() = Some(handle);
+    log_startup("autostart: watcher started");
 }
 
 /// Bring the main window from hidden / minimized into the foreground.

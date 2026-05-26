@@ -256,6 +256,21 @@ pub fn start_auto_upload(
     crate::log_startup("start_auto_upload: watcher::start returned ok");
 
     *state.watcher.lock().unwrap() = Some(handle);
+    // Stick the "I want auto-upload on" preference so the next launcher
+    // boot brings the watcher up automatically. The user clicked Start;
+    // they shouldn't have to click it again every cold launch. We
+    // persist after the watcher actually started so a Start that fails
+    // (no token, demos folder gone) doesn't poison the next launch.
+    if !cfg.auto_upload_enabled {
+        let mut updated = cfg;
+        updated.auto_upload_enabled = true;
+        if let Err(e) = updated.save() {
+            crate::log_startup(&format!(
+                "start_auto_upload: failed to persist auto_upload_enabled: {}",
+                e
+            ));
+        }
+    }
     crate::log_startup("start_auto_upload: stored handle, returning");
     Ok(())
 }
@@ -264,6 +279,16 @@ pub fn start_auto_upload(
 pub fn stop_auto_upload(state: State<'_, AppState>) -> Result<(), String> {
     // Dropping the handle stops the debouncer + cancels the worker task.
     *state.watcher.lock().unwrap() = None;
+    // Symmetric with start: an explicit Stop unsticks the preference so
+    // the next boot stays quiet. Pause is a separate thing (worker
+    // parks, watcher stays alive) and doesn't touch this flag.
+    if let Ok(cfg) = Config::load() {
+        if cfg.auto_upload_enabled {
+            let mut updated = cfg;
+            updated.auto_upload_enabled = false;
+            let _ = updated.save();
+        }
+    }
     Ok(())
 }
 
