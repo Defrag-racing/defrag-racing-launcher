@@ -46,6 +46,12 @@ export interface PendingUpload {
 
 export interface UploadStateSnapshot {
     items: PendingUpload[];
+    /** Cumulative number of demos that have reached a terminal status
+     *  (Done / Duplicate / Error) since the current watcher session
+     *  started. NOT capped by the 500-row queue ceiling - use this for
+     *  honest progress reporting on big rescans. Resets when the user
+     *  Stops + Starts. */
+    processed_count: number;
 }
 
 export const tauri = {

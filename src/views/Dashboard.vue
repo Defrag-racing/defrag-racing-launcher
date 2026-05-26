@@ -10,7 +10,7 @@
     const router = useRouter();
     const config = useConfigStore();
 
-    const queue = ref<UploadStateSnapshot>({ items: [] });
+    const queue = ref<UploadStateSnapshot>({ items: [], processed_count: 0 });
     const toggling = ref(false);
     const toggleError = ref<string | null>(null);
     const paused = ref(false);
@@ -582,12 +582,21 @@
             Update failed: {{ updateState.message }}
         </div>
 
-        <!-- Queue summary strip - at-a-glance counts -->
+        <!-- Queue summary strip - at-a-glance counts. processed_count
+             is the only honest progress number during a big rescan
+             (queue.items is capped at 500 for webview survival, so
+             without it the user sees "500 total / 499 already backed
+             up" forever and assumes the worker stalled). -->
         <div
-            v-if="queue.items.length"
+            v-if="queue.items.length || queue.processed_count"
             class="px-5 py-2 border-b border-white/[0.04] text-xs text-neutral-400 flex items-center gap-3 flex-wrap"
         >
-            <span>{{ queue.items.length }} total</span>
+            <span v-if="queue.processed_count" class="text-neutral-200 font-semibold">
+                {{ queue.processed_count }} processed this session
+            </span>
+            <span v-if="queue.items.length" class="text-neutral-500">
+                ({{ queue.items.length }} shown)
+            </span>
             <span v-if="queueSummary.uploading || queueSummary.hashing" class="text-brand-400">
                 ↑ {{ queueSummary.uploading }} uploading · # {{ queueSummary.hashing }} hashing
             </span>

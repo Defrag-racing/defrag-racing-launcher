@@ -75,9 +75,23 @@ pub enum UploadStatus {
     Error,
 }
 
+/// "We're done with this file" for processed-count purposes. Pending /
+/// Hashing / Uploading mean work-in-flight and don't bump the counter;
+/// any transition INTO Done / Duplicate / Error is one finished demo.
+fn is_terminal(s: UploadStatus) -> bool {
+    matches!(s, UploadStatus::Done | UploadStatus::Duplicate | UploadStatus::Error)
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct UploadStateSnapshot {
     pub items: Vec<PendingUpload>,
+    /// Cumulative number of demos that have reached a terminal status
+    /// (Done / Duplicate / Error) since the current watcher session
+    /// started. NOT capped by QUEUE_CAP, so the UI can show real
+    /// progress even when `items` is at the 500-row visual ceiling.
+    /// Resets to 0 on every watcher::start.
+    #[serde(default)]
+    pub processed_count: u64,
 }
 
 /// Cap on the number of rows kept in the visible queue. Anything older
@@ -145,13 +159,30 @@ pub struct UploadState {
     /// `get_rate_limit_resume_at` so the Dashboard can render a
     /// countdown banner while uploads are paced down by the server.
     rate_limit_resume_at_ms: AtomicU64,
+    /// Cumulative count of items that have transitioned into a terminal
+    /// status (Done / Duplicate / Error) during the current watcher
+    /// session. The queue itself is capped at QUEUE_CAP rows for
+    /// webview survival, so this is the only honest progress number
+    /// during a multi-thousand-demo rescan: the UI was showing "500
+    /// total / 499 already backed up" forever and users assumed the
+    /// worker had stalled when it was actually deep into row 1200+.
+    processed_count: AtomicU64,
 }
 
 impl UploadState {
     pub fn snapshot(&self) -> UploadStateSnapshot {
         UploadStateSnapshot {
             items: self.inner.lock().unwrap().clone(),
+            processed_count: self.processed_count.load(Ordering::Acquire),
         }
+    }
+
+    /// Zero the per-session processed counter. Called at the top of
+    /// every watcher::start so the Dashboard counter reflects what the
+    /// CURRENT run has done, not stale numbers from the previous
+    /// Start+Stop cycle.
+    pub fn reset_processed_count(&self) {
+        self.processed_count.store(0, Ordering::Release);
     }
 
     pub fn is_paused(&self) -> bool {
@@ -306,18 +337,25 @@ impl UploadState {
         filename: &str,
         f: impl FnOnce(&mut PendingUpload),
     ) {
-        self.with_mut(|items| {
+        let became_terminal = self.with_mut(|items| {
             if let Some(existing) = items.iter_mut().find(|i| i.path == path) {
+                let was_terminal = is_terminal(existing.status);
                 f(existing);
+                !was_terminal && is_terminal(existing.status)
             } else {
                 let mut new = PendingUpload::new(path.to_path_buf(), filename.to_string());
                 f(&mut new);
+                let now_terminal = is_terminal(new.status);
                 items.insert(0, new);
                 if items.len() > QUEUE_CAP {
                     items.truncate(QUEUE_CAP);
                 }
+                now_terminal
             }
         });
+        if became_terminal {
+            self.processed_count.fetch_add(1, Ordering::AcqRel);
+        }
         self.dirty.store(true, Ordering::Release);
     }
 }
@@ -389,6 +427,10 @@ pub fn start(
     state.set_paused(false);
     state.set_rate_limit_resume_at_ms(0);
     state.set_cpu_throttle_pct(cpu_throttle_pct);
+    // The session counter is meant to track "what did THIS Start do",
+    // so zero it on every fresh start. Items in the queue (loaded
+    // from disk) stay where they are.
+    state.reset_processed_count();
     let (tx, rx) = mpsc::unbounded_channel::<Message>();
     crate::log_startup("watcher::start: channel created");
 
