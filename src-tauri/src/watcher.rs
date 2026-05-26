@@ -146,6 +146,25 @@ const HASH_MAX_WAIT_MS: u64 = 30_000;
 /// WatcherHandle::drop so nothing within the window is lost.
 const QUEUE_SAVE_INTERVAL_SECS: u64 = 1;
 
+/// How often we send a defensive RescanFolder message even though the
+/// filesystem watcher should be picking up every new demo via OS-level
+/// events. Two reasons we still need a periodic sweep:
+///   1. The notify watcher can silently drop events on some platforms
+///      (network drives, Defender exclusions, antivirus locking the
+///      file briefly during the temp→demos rename). Without a periodic
+///      catch-up the user has to remember to Stop+Start to recover.
+///   2. Edge cases like the engine crashing mid-record and writing the
+///      .dm_68 file in a non-standard way that doesn't fire a normal
+///      "create/rename" event.
+/// 60 seconds is the "I recorded a run, where is it?" threshold - the
+/// user shouldn't notice anything missing. The scan itself is just
+/// directory enumeration + a cache (size+mtime) check per file;
+/// already-processed demos take a microsecond each, only genuinely new
+/// files cost a hash, and even that is paced by the CPU throttle. So
+/// a 1-minute interval doesn't measurably touch the disk on a normal
+/// SSD - cheaper than the live notify subscription itself.
+const PERIODIC_RESCAN_SECS: u64 = 60;
+
 #[derive(Default)]
 pub struct UploadState {
     inner: Mutex<Vec<PendingUpload>>,
@@ -426,20 +445,23 @@ pub struct WatcherHandle {
     _debouncer: Debouncer<RecommendedWatcher, FileIdMap>,
     worker: tauri::async_runtime::JoinHandle<()>,
     emit_pump: tauri::async_runtime::JoinHandle<()>,
+    rescan_pump: tauri::async_runtime::JoinHandle<()>,
     pub state: Arc<UploadState>,
     /// Kept so `resume_auto_upload` can poke the worker awake with
-    /// `Message::RedrivePending` after lifting the pause gate.
+    /// `Message::RedrivePending` after lifting the pause gate, and
+    /// `clear_upload_cache` can request an immediate rescan.
     pub tx: tokio::sync::mpsc::UnboundedSender<Message>,
 }
 
 impl Drop for WatcherHandle {
     fn drop(&mut self) {
-        // Both background tasks hold clones of the AppHandle and the
-        // shared UploadState - they need an explicit abort, otherwise
+        // All three background tasks hold clones of the AppHandle and
+        // the shared UploadState - they need explicit aborts, otherwise
         // dropping the handle (Stop button, app close) leaves them
-        // running forever and each Stop+Start leaks a new pair.
+        // running forever and each Stop+Start leaks them.
         self.worker.abort();
         self.emit_pump.abort();
+        self.rescan_pump.abort();
         // Final save so the Stop button doesn't lose the last <1s of
         // state mutations (emit_pump's save is rate-limited and the
         // very last burst may have been dropped). The Arc lives on
@@ -563,10 +585,41 @@ pub fn start(
         }
     });
 
+    // Periodic rescan as a safety net. The notify-based watcher
+    // catches new demos via OS events but can silently miss some on
+    // edge platforms (network drives, antivirus locking, weird
+    // engine crashes). Firing RescanFolder every PERIODIC_RESCAN_SECS
+    // means "I recorded a run and it didn't appear" recovers on its
+    // own within one tick instead of needing Stop+Start. handle_file
+    // is idempotent for already-processed files (cache hit OR queue
+    // hit early-return), so a redundant rescan is cheap.
+    let tx_rescan = tx.clone();
+    let demos_for_rescan = demos_path.clone();
+    let rescan_pump = tauri::async_runtime::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(PERIODIC_RESCAN_SECS));
+        // Skip the immediate-fire of the first tick - watcher::start
+        // already queues the initial rescan, no point doing it twice.
+        tick.tick().await;
+        loop {
+            tick.tick().await;
+            if tx_rescan
+                .send(Message::RescanFolder {
+                    folder: demos_for_rescan.clone(),
+                    recursive: include_subfolders,
+                })
+                .is_err()
+            {
+                // Worker side hung up; nothing more we can do.
+                break;
+            }
+        }
+    });
+
     Ok(WatcherHandle {
         _debouncer: debouncer,
         worker,
         emit_pump,
+        rescan_pump,
         state,
         tx,
     })

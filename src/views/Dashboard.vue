@@ -504,8 +504,12 @@
                     </div>
                     <div class="text-xs text-neutral-500 mt-0.5 leading-snug">
                         <template v-if="config.autoUploadRunning && !paused">
-                            Watching your demos folder. New <code class="bg-black/40 px-1 rounded">.dm_*</code> files
-                            are hashed locally and uploaded to defrag.racing if the server doesn't already have them.
+                            Watching your demos folder live (new
+                            <code class="bg-black/40 px-1 rounded">.dm_*</code> files
+                            appear within ~5s of recording stop) and re-scanning every
+                            minute as a safety net so nothing slips through. The
+                            scan only lists filenames - hashing is paced by your CPU
+                            throttle so it doesn't lag your disk.
                         </template>
                         <template v-else-if="config.autoUploadRunning && paused">
                             Watcher is still picking up new demos, but uploads are paused. Click Resume to drain the queue.

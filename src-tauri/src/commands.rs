@@ -139,13 +139,41 @@ pub fn reset_launcher(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
-/// Force the next rescan to re-hash every file and re-query the server,
-/// regardless of cache state. Used when an admin deleted a demo on the
-/// server and the user wants to re-upload, or when the user suspects
-/// the cache has drifted.
+/// "Force re-check" in Settings - means exactly what it says on the
+/// label: forget every uploaded-hash record and re-process the entire
+/// demos folder from scratch. Three coordinated wipes + an immediate
+/// rescan are needed because the cache, the queue items, and the
+/// already_present early-return in handle_file all independently keep
+/// state that would otherwise cause "Force re-check" to silently do
+/// nothing:
+///
+///   1. uploaded.json - the size+mtime → hash cache. If this isn't
+///      cleared, every file hits the cache on the next rescan and is
+///      marked Duplicate without a server call.
+///   2. queue.json + in-memory items. Even with cache empty,
+///      handle_file's early-return skips any path already in the
+///      visible queue with Done/Duplicate status, so without this
+///      wipe a returning user with 5000 cached queue rows would see
+///      no re-checks happen at all.
+///   3. Immediate RescanFolder kick. The user pressed the button to
+///      see something happen; we shouldn't make them Stop+Start to
+///      trigger the rescan they just asked for. No-op when the
+///      watcher isn't running - the next Start will rescan anyway.
 #[tauri::command]
-pub fn clear_upload_cache() -> Result<(), String> {
-    UploadCache::clear().map_err(err_to_string)
+pub fn clear_upload_cache(state: State<'_, AppState>) -> Result<(), String> {
+    UploadCache::clear().map_err(err_to_string)?;
+    let _ = watcher::UploadState::clear_persisted();
+    state.upload_state.clear_items();
+    if let Some(h) = state.watcher.lock().unwrap().as_ref() {
+        let cfg = Config::load().map_err(err_to_string)?;
+        if let Some(demos) = cfg.demos_path {
+            let _ = h.tx.send(watcher::Message::RescanFolder {
+                folder: demos,
+                recursive: cfg.include_subfolders,
+            });
+        }
+    }
+    Ok(())
 }
 
 // ---- Autostart -------------------------------------------------------------

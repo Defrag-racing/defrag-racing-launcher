@@ -399,93 +399,126 @@
                     <li
                         v-for="s in filteredServers"
                         :key="`${s.ip}:${s.port}`"
-                        class="px-5 py-3 flex items-start gap-3"
+                        class="px-5 py-3"
                     >
-                        <!-- Map thumbnail. Click opens the map page on
-                             defrag.racing in the system browser. -->
-                        <button
-                            class="w-20 h-14 rounded bg-black/40 border border-white/10 overflow-hidden flex-shrink-0 hover:border-brand-500/40"
-                            :title="`Open ${s.map} on defrag.racing`"
-                            @click="openMap(s.map)"
-                        >
-                            <img
-                                v-if="thumbnailUrl(s)"
-                                :src="thumbnailUrl(s)!"
-                                :alt="s.map"
-                                class="w-full h-full object-cover"
-                                loading="lazy"
-                            />
-                            <div v-else class="w-full h-full flex items-center justify-center text-[10px] text-neutral-600 uppercase">
-                                no map
-                            </div>
-                        </button>
-
-                        <div class="flex-1 min-w-0">
-                            <div class="flex items-center gap-2 min-w-0">
+                        <div class="flex items-start gap-3">
+                            <!-- Map thumbnail. Click opens the map page on
+                                 defrag.racing in the system browser. -->
+                            <button
+                                class="w-20 h-14 rounded bg-black/40 border border-white/10 overflow-hidden flex-shrink-0 hover:border-brand-500/40"
+                                :title="`Open ${s.map} on defrag.racing`"
+                                @click="openMap(s.map)"
+                            >
                                 <img
-                                    v-if="flagUrl(s.location)"
-                                    :src="flagUrl(s.location)!"
-                                    :alt="s.location || ''"
-                                    class="w-4 h-3 rounded flex-shrink-0"
-                                    @error="($event.target as HTMLImageElement).style.display='none'"
+                                    v-if="thumbnailUrl(s)"
+                                    :src="thumbnailUrl(s)!"
+                                    :alt="s.map"
+                                    class="w-full h-full object-cover"
+                                    loading="lazy"
                                 />
-                                <div
-                                    class="text-sm text-neutral-100 truncate font-semibold"
-                                    :title="s.plain_name || stripColors(s.name)"
-                                    v-html="q3ToHtml(s.name || s.plain_name)"
-                                ></div>
-                                <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-brand-500/15 text-brand-300 flex-shrink-0">
-                                    {{ gametypeTag(s) }}
-                                </span>
+                                <div v-else class="w-full h-full flex items-center justify-center text-[10px] text-neutral-600 uppercase">
+                                    no map
+                                </div>
+                            </button>
+
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 min-w-0">
+                                    <img
+                                        v-if="flagUrl(s.location)"
+                                        :src="flagUrl(s.location)!"
+                                        :alt="s.location || ''"
+                                        class="w-4 h-3 rounded flex-shrink-0"
+                                        @error="($event.target as HTMLImageElement).style.display='none'"
+                                    />
+                                    <div
+                                        class="text-sm text-neutral-100 truncate font-semibold"
+                                        :title="s.plain_name || stripColors(s.name)"
+                                        v-html="q3ToHtml(s.name || s.plain_name)"
+                                    ></div>
+                                    <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-brand-500/15 text-brand-300 flex-shrink-0">
+                                        {{ gametypeTag(s) }}
+                                    </span>
+                                </div>
+                                <div class="text-xs text-neutral-500 truncate flex items-center gap-2 mt-0.5">
+                                    <button
+                                        class="text-brand-400 hover:underline"
+                                        @click="openMap(s.map)"
+                                    >{{ s.map }}</button>
+                                    <span class="uppercase text-[10px] px-1 py-0.5 rounded bg-white/5">{{ physicsOf(s) }}</span>
+                                    <span class="text-neutral-600">·</span>
+                                    <span class="font-mono">{{ s.ip }}:{{ s.port }}</span>
+                                </div>
+                                <!-- Per-user PB + rank for the token owner on
+                                     this server's current map. Hidden when the
+                                     user has no time on it. -->
+                                <div v-if="s.mytime_time" class="text-xs text-emerald-300/80 mt-0.5">
+                                    Your PB: <strong>{{ formatTime(s.mytime_time) }}</strong>
+                                    <span v-if="s.myrank_position && s.myrank_total" class="text-emerald-300/60 ml-1">
+                                        (rank {{ s.myrank_position }} / {{ s.myrank_total }})
+                                    </span>
+                                </div>
+                                <!-- Map record holder for context. Skipped when
+                                     the server doesn't report a besttime. -->
+                                <div v-if="s.besttime_time && s.besttime_name" class="text-xs text-yellow-300/70 mt-0.5 flex items-center gap-1">
+                                    <span class="text-yellow-500">★</span>
+                                    <span>{{ formatTime(s.besttime_time) }}</span>
+                                    <span class="text-neutral-500">by</span>
+                                    <img
+                                        v-if="flagUrl(s.besttime_country)"
+                                        :src="flagUrl(s.besttime_country)!"
+                                        :alt="s.besttime_country || ''"
+                                        class="w-3 h-2 rounded flex-shrink-0"
+                                        @error="($event.target as HTMLImageElement).style.display='none'"
+                                    />
+                                    <span
+                                        class="truncate"
+                                        :title="stripColors(s.besttime_name || '')"
+                                        v-html="q3ToHtml(s.besttime_name)"
+                                    ></span>
+                                </div>
                             </div>
-                            <div class="text-xs text-neutral-500 truncate flex items-center gap-2 mt-0.5">
+
+                            <div class="flex flex-col items-end gap-1 flex-shrink-0">
+                                <div class="text-xs text-neutral-400 whitespace-nowrap">
+                                    <span class="text-neutral-100 font-semibold text-sm">{{ playerCount(s) }}</span>
+                                    player{{ playerCount(s) === 1 ? '' : 's' }}
+                                </div>
                                 <button
-                                    class="text-brand-400 hover:underline"
-                                    @click="openMap(s.map)"
-                                >{{ s.map }}</button>
-                                <span class="uppercase text-[10px] px-1 py-0.5 rounded bg-white/5">{{ physicsOf(s) }}</span>
-                                <span class="text-neutral-600">·</span>
-                                <span class="font-mono">{{ s.ip }}:{{ s.port }}</span>
+                                    class="px-3 py-1 rounded bg-brand-500/20 hover:bg-brand-500/30 text-brand-300 text-xs font-semibold"
+                                    @click="connect(s)"
+                                >Connect</button>
                             </div>
-                            <!-- Per-user PB + rank for the token owner on
-                                 this server's current map. Hidden when the
-                                 user has no time on it. -->
-                            <div v-if="s.mytime_time" class="text-xs text-emerald-300/80 mt-0.5">
-                                Your PB: <strong>{{ formatTime(s.mytime_time) }}</strong>
-                                <span v-if="s.myrank_position && s.myrank_total" class="text-emerald-300/60 ml-1">
-                                    (rank {{ s.myrank_position }} / {{ s.myrank_total }})
-                                </span>
-                            </div>
-                            <!-- Map record holder for context. Skipped when
-                                 the server doesn't report a besttime. -->
-                            <div v-if="s.besttime_time && s.besttime_name" class="text-xs text-yellow-300/70 mt-0.5 flex items-center gap-1">
-                                <span class="text-yellow-500">★</span>
-                                <span>{{ formatTime(s.besttime_time) }}</span>
-                                <span class="text-neutral-500">by</span>
+                        </div>
+
+                        <!-- Player list. Indented under the thumbnail so the
+                             row reads "this server, with these people on it"
+                             at a glance. Hidden on empty servers - the
+                             player count above already says zero. Players
+                             only; spectators would crowd the row and the
+                             "is it busy" question is answered by player
+                             count alone. -->
+                        <div
+                            v-if="(s.online_players?.length ?? 0) > 0"
+                            class="ml-[5.75rem] mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs"
+                        >
+                            <span
+                                v-for="(p, idx) in (s.online_players ?? [])"
+                                :key="`${s.ip}:${s.port}#${idx}`"
+                                class="flex items-center gap-1 max-w-[14rem] min-w-0"
+                            >
                                 <img
-                                    v-if="flagUrl(s.besttime_country)"
-                                    :src="flagUrl(s.besttime_country)!"
-                                    :alt="s.besttime_country || ''"
+                                    v-if="flagUrl(p.country)"
+                                    :src="flagUrl(p.country)!"
+                                    :alt="p.country || ''"
                                     class="w-3 h-2 rounded flex-shrink-0"
                                     @error="($event.target as HTMLImageElement).style.display='none'"
                                 />
                                 <span
                                     class="truncate"
-                                    :title="stripColors(s.besttime_name || '')"
-                                    v-html="q3ToHtml(s.besttime_name)"
+                                    :title="p.plain_name || stripColors(p.name)"
+                                    v-html="q3ToHtml(p.name || p.plain_name)"
                                 ></span>
-                            </div>
-                        </div>
-
-                        <div class="flex flex-col items-end gap-1 flex-shrink-0">
-                            <div class="text-xs text-neutral-400 whitespace-nowrap">
-                                <span class="text-neutral-100 font-semibold text-sm">{{ playerCount(s) }}</span>
-                                player{{ playerCount(s) === 1 ? '' : 's' }}
-                            </div>
-                            <button
-                                class="px-3 py-1 rounded bg-brand-500/20 hover:bg-brand-500/30 text-brand-300 text-xs font-semibold"
-                                @click="connect(s)"
-                            >Connect</button>
+                            </span>
                         </div>
                     </li>
                 </ul>
