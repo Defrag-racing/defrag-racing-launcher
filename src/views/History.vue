@@ -5,7 +5,7 @@
     // name) + map + ip:port; clicking the row re-connects to the same
     // address via the existing protocol handler.
 
-    import { computed, onMounted, ref } from 'vue';
+    import { computed, onActivated, onMounted, ref } from 'vue';
     import { tauri, type ConnectionEntry } from '../lib/tauri';
     import { q3ToHtml } from '../lib/q3color';
     import { openUrl } from '@tauri-apps/plugin-opener';
@@ -28,6 +28,10 @@
     };
 
     onMounted(refresh);
+    // keep-alive re-entry: re-read history.json so a defrag:// click
+    // that happened while the user was on a different tab shows up
+    // immediately when they switch back here.
+    onActivated(() => { void refresh(); });
 
     const clearAll = async () => {
         if (!confirm('Clear all connection history?')) return;

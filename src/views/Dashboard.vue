@@ -513,6 +513,82 @@
         for (const it of queue.value.items) counts[it.status as keyof typeof counts]++;
         return counts;
     });
+
+    // -- Retry + context menu ------------------------------------------
+    const retrying = ref<Set<string>>(new Set());
+    const retryUpload = async (item: PendingUpload) => {
+        if (retrying.value.has(item.path)) return;
+        retrying.value.add(item.path);
+        retrying.value = new Set(retrying.value);
+        try {
+            await tauri.retryUpload(item.path);
+        } catch (e: any) {
+            toggleError.value = e?.toString?.() ?? 'Retry failed';
+        } finally {
+            retrying.value.delete(item.path);
+            retrying.value = new Set(retrying.value);
+        }
+    };
+
+    type CtxMenu = { x: number; y: number; item: PendingUpload };
+    const ctxMenu = ref<CtxMenu | null>(null);
+    const openContextMenu = (e: MouseEvent, item: PendingUpload) => {
+        e.preventDefault();
+        ctxMenu.value = { x: e.clientX, y: e.clientY, item };
+    };
+    const closeContextMenu = () => { ctxMenu.value = null; };
+
+    const filenameStem = (filename: string): string => {
+        const idx = filename.lastIndexOf('.');
+        return idx > 0 ? filename.slice(0, idx) : filename;
+    };
+
+    const copyToClipboard = async (text: string) => {
+        try { await navigator.clipboard.writeText(text); } catch {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); } catch { /* ignore */ }
+            document.body.removeChild(ta);
+        }
+    };
+
+    const ctxOpenInExplorer = async () => {
+        if (!ctxMenu.value) return;
+        const p = ctxMenu.value.item.path;
+        closeContextMenu();
+        try {
+            const { revealItemInDir } = await import('@tauri-apps/plugin-opener');
+            await revealItemInDir(p);
+        } catch (e: any) {
+            toggleError.value = e?.toString?.() ?? 'Failed to open in explorer';
+        }
+    };
+
+    const ctxCopyPath = async () => {
+        if (!ctxMenu.value) return;
+        await copyToClipboard(ctxMenu.value.item.path);
+        closeContextMenu();
+    };
+
+    const ctxCopyDemoCmd = async () => {
+        if (!ctxMenu.value) return;
+        await copyToClipboard(`/demo ${filenameStem(ctxMenu.value.item.filename)}`);
+        closeContextMenu();
+    };
+
+    const ctxDeleteDemo = async () => {
+        if (!ctxMenu.value) return;
+        const it = ctxMenu.value.item;
+        closeContextMenu();
+        if (!window.confirm(`Permanently delete ${it.filename}?\n\nThe file on disk will be removed. Anything already on defrag.racing stays.`)) return;
+        try { await tauri.deleteDemo(it.path); } catch (e: any) {
+            toggleError.value = e?.toString?.() ?? 'Delete failed';
+        }
+    };
 </script>
 
 <template>
@@ -842,7 +918,12 @@
             </div>
 
             <ul v-else class="divide-y divide-white/[0.04]">
-                <li v-for="item in filteredQueueItems" :key="item.path" class="px-5 py-3">
+                <li
+                    v-for="item in filteredQueueItems"
+                    :key="item.path"
+                    class="px-5 py-3"
+                    @contextmenu="openContextMenu($event, item)"
+                >
                     <button
                         class="w-full flex items-center gap-3 text-left"
                         @click="toggleExpand(item.path)"
@@ -855,6 +936,13 @@
                         <div class="text-xs font-semibold" :class="statusColor(item)">
                             {{ statusLabel(item) }}
                         </div>
+                        <button
+                            v-if="item.status === 'error' && config.autoUploadRunning"
+                            class="text-[11px] px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-semibold disabled:opacity-50"
+                            :disabled="retrying.has(item.path)"
+                            :title="`Re-queue ${item.filename} for upload`"
+                            @click.stop="retryUpload(item)"
+                        >{{ retrying.has(item.path) ? 'Retrying…' : 'Retry' }}</button>
                         <div class="text-xs text-neutral-600 w-3 text-right">
                             {{ expanded.has(item.path) ? '▾' : '▸' }}
                         </div>
@@ -907,6 +995,24 @@
                 </li>
             </ul>
         </div>
+
+        <template v-if="ctxMenu">
+            <div class="fixed inset-0 z-40" @click="closeContextMenu" @contextmenu.prevent="closeContextMenu"></div>
+            <div
+                class="fixed z-50 min-w-[180px] bg-neutral-900 border border-white/10 rounded shadow-xl py-1 text-sm"
+                :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+            >
+                <button class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-neutral-200" @click="ctxOpenInExplorer">Open in explorer</button>
+                <button class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-neutral-200" @click="ctxCopyPath">Copy path</button>
+                <button
+                    class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-neutral-200"
+                    title="Copy a /demo console command you can paste in Quake to play this demo"
+                    @click="ctxCopyDemoCmd"
+                >Copy /demo command</button>
+                <div class="my-1 border-t border-white/10"></div>
+                <button class="w-full text-left px-3 py-1.5 hover:bg-red-500/10 text-red-300" @click="ctxDeleteDemo">Delete demo</button>
+            </div>
+        </template>
     </div>
 </template>
 

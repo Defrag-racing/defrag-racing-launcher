@@ -4,7 +4,7 @@
     // toggle / item filtering) stays on the web's /maps page, which
     // any thumbnail / name click jumps to with the full filter UI.
 
-    import { onMounted, onUnmounted, ref, watch } from 'vue';
+    import { onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
     import { tauri, type MapRow, type Paginated } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
     import { openUrl } from '@tauri-apps/plugin-opener';
@@ -42,10 +42,39 @@
         }, 350);
     });
 
+    // Auto-refresh while the tab is active. Map list rarely changes in
+    // a minute window but a longer interval avoids re-pulling 50 rows
+    // for a user just clicking around. Visibility-aware so a tray-
+    // hidden window doesn't keep hammering the endpoint.
+    const POLL_MS = 120_000;
+    let pollTimer: number | undefined;
+    const startPolling = () => {
+        stopPolling();
+        pollTimer = window.setInterval(() => {
+            if (!document.hidden) void load();
+        }, POLL_MS);
+    };
+    const stopPolling = () => {
+        if (pollTimer !== undefined) { window.clearInterval(pollTimer); pollTimer = undefined; }
+    };
+    const onVisibility = () => {
+        if (document.hidden) stopPolling();
+        else { void load(); startPolling(); }
+    };
+
     onMounted(() => {
         void load();
+        startPolling();
+        document.addEventListener('visibilitychange', onVisibility);
     });
+    onActivated(() => {
+        void load();
+        startPolling();
+    });
+    onDeactivated(() => stopPolling());
     onUnmounted(() => {
+        stopPolling();
+        document.removeEventListener('visibilitychange', onVisibility);
         if (searchTimer !== undefined) window.clearTimeout(searchTimer);
     });
 

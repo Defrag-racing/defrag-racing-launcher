@@ -227,7 +227,15 @@
             <button class="ml-auto text-neutral-400 hover:text-neutral-200" @click="dismissLaunchError">×</button>
         </p>
 
-        <RouterView v-if="config.loaded" />
+        <!-- keep-alive: cached views survive tab switches so paginated
+             lists + filters + scroll positions stay intact. Each view
+             owns its own poll (onActivated starts, onDeactivated stops)
+             so a backgrounded tab doesn't keep hitting the API. -->
+        <RouterView v-if="config.loaded" v-slot="{ Component }">
+            <KeepAlive>
+                <component :is="Component" />
+            </KeepAlive>
+        </RouterView>
         <div v-else class="flex-1 flex items-center justify-center text-sm text-neutral-500">
             Loading…
         </div>

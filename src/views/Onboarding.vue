@@ -147,7 +147,7 @@
                     <p class="text-sm text-neutral-400 leading-relaxed">
                         A small companion app for
                         <a href="#" @click.prevent="openUrl('https://defrag.racing')" class="text-brand-400 hover:underline">defrag.racing</a>.
-                        It does four things:
+                        Here's what's inside:
                     </p>
                     <ul class="text-sm text-neutral-300 space-y-1.5 pl-1">
                         <li class="flex gap-2">
@@ -156,11 +156,23 @@
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
-                            <span><strong>Server browser</strong> - live list of Defrag servers with your PB and rank on each map.</span>
+                            <span><strong>Library</strong> - browse every local demo and queue YouTube renders from one click.</span>
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
-                            <span><strong>Notifications</strong> - record-related and account alerts from the website, in the launcher.</span>
+                            <span><strong>Servers</strong> - live list of Defrag servers with your PB and rank on each map.</span>
+                        </li>
+                        <li class="flex gap-2">
+                            <span class="text-brand-400 mt-0.5">•</span>
+                            <span><strong>Records &amp; Maps</strong> - paginated leaderboards (VQ3 + CPM side-by-side) and the full map list with thumbnails.</span>
+                        </li>
+                        <li class="flex gap-2">
+                            <span class="text-brand-400 mt-0.5">•</span>
+                            <span><strong>Notifications</strong> - PB beats, world record takes, render-done events and account alerts, sorted by type.</span>
+                        </li>
+                        <li class="flex gap-2">
+                            <span class="text-brand-400 mt-0.5">•</span>
+                            <span><strong>History</strong> - log of every <code class="text-xs bg-black/40 px-1 rounded">defrag://</code> server you joined, one-click Reconnect.</span>
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
@@ -168,7 +180,7 @@
                         </li>
                     </ul>
                     <p class="text-xs text-neutral-500 leading-relaxed pt-1">
-                        First three need a token from your defrag.racing account. The <code class="bg-black/40 px-1 rounded">defrag://</code> handler works without one. Setup takes under a minute.
+                        Most of this needs a token from your defrag.racing account. The <code class="bg-black/40 px-1 rounded">defrag://</code> handler works without one. Setup takes under a minute.
                     </p>
                     <div class="flex justify-end pt-2">
                         <button class="btn-primary" @click="step = 2">Next</button>

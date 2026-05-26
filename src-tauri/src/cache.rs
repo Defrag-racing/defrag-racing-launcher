@@ -115,6 +115,15 @@ impl UploadCache {
         self.files.get(path)
     }
 
+    /// Drop the cache entry for a single path. Called when the user
+    /// deletes a demo from the Library context menu - we don't want
+    /// the stale hash to come back via a subsequent rescan and re-
+    /// upload an empty path. Best-effort: missing entry / missing
+    /// file is fine, the goal is just "forget this".
+    pub fn remove(&mut self, path: &Path) {
+        self.files.remove(path);
+    }
+
     /// Record a successful upload (or confirmed-duplicate) for the
     /// given file. Caller passes the freshly-computed hash + the
     /// server's response. mtime/size are read from disk here so the

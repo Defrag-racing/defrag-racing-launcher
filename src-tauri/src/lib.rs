@@ -212,6 +212,8 @@ pub fn run() {
             commands::get_notifications,
             commands::request_render,
             commands::get_render_status,
+            commands::retry_upload,
+            commands::delete_demo,
             commands::set_autostart_enabled,
             commands::is_autostart_enabled,
         ])

@@ -10,7 +10,7 @@
     // through, so a new backend column doesn't force a launcher
     // release.
 
-    import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+    import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
     import { tauri, type DefragServer } from '../lib/tauri';
     import { q3ToHtml } from '../lib/q3color';
     import { useConfigStore } from '../stores/config';
@@ -76,18 +76,38 @@
         }
     };
 
+    const startPolling = () => {
+        stopPolling();
+        if (!config.hasToken) return;
+        pollTimer = window.setInterval(() => {
+            if (!document.hidden) fetchServers();
+        }, POLL_INTERVAL_MS);
+    };
+    const stopPolling = () => {
+        if (pollTimer !== undefined) { window.clearInterval(pollTimer); pollTimer = undefined; }
+    };
+    const onVisibility = () => {
+        if (document.hidden) stopPolling();
+        else if (config.hasToken) { fetchServers(); startPolling(); }
+    };
+
     onMounted(() => {
-        // Only attempt to fetch if a token is present. Without one the
-        // backend returns 401, which we'd just surface as an error -
-        // the empty-state UI explains what to do instead.
         if (config.hasToken) {
             fetchServers();
-            pollTimer = window.setInterval(fetchServers, POLL_INTERVAL_MS);
+            startPolling();
+        }
+        document.addEventListener('visibilitychange', onVisibility);
+    });
+    onActivated(() => {
+        if (config.hasToken) {
+            fetchServers();
+            startPolling();
         }
     });
-
+    onDeactivated(() => stopPolling());
     onUnmounted(() => {
-        if (pollTimer !== undefined) window.clearInterval(pollTimer);
+        stopPolling();
+        document.removeEventListener('visibilitychange', onVisibility);
     });
 
     // -- Server classification helpers --------------------------------

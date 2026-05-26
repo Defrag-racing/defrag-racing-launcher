@@ -341,6 +341,16 @@ impl UploadState {
         self.dirty.store(true, Ordering::Release);
     }
 
+    /// Drop a single row by path. Called by the Library context menu's
+    /// Delete action so the deleted file disappears from the activity
+    /// feed too, not just the cache. No-op when the row isn't there
+    /// (it may never have been queued, e.g. file never made it past
+    /// the watcher).
+    pub fn remove_path(&self, path: &Path) {
+        self.with_mut(|items| items.retain(|i| i.path != path));
+        self.dirty.store(true, Ordering::Release);
+    }
+
     /// Idle period to wait AFTER a hash of `hash_duration`, computed to
     /// keep total CPU usage at the configured duty cycle. The math is
     /// straightforward: at target T%, the hash should occupy T% of any

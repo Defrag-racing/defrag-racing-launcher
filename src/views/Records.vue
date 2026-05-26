@@ -6,7 +6,7 @@
     // merge. The launcher's job is the quick browse; users who want
     // the full rating UI click a map or nickname through to the web.
 
-    import { onMounted, ref } from 'vue';
+    import { onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
     import { tauri, type RecordRow, type Paginated } from '../lib/tauri';
     import { q3ToHtml } from '../lib/q3color';
     import { useConfigStore } from '../stores/config';
@@ -36,11 +36,42 @@
         }
     };
 
+    const refreshBoth = () => {
+        if (!config.hasToken) return;
+        void load('vq3', vq3Page.value);
+        void load('cpm', cpmPage.value);
+    };
+
+    const POLL_MS = 60_000;
+    let pollTimer: number | undefined;
+    const startPolling = () => {
+        stopPolling();
+        pollTimer = window.setInterval(() => {
+            if (!document.hidden) refreshBoth();
+        }, POLL_MS);
+    };
+    const stopPolling = () => {
+        if (pollTimer !== undefined) { window.clearInterval(pollTimer); pollTimer = undefined; }
+    };
+
+    const onVisibility = () => {
+        if (document.hidden) stopPolling();
+        else { refreshBoth(); startPolling(); }
+    };
+
     onMounted(() => {
-        if (config.hasToken) {
-            void load('vq3', 1);
-            void load('cpm', 1);
-        }
+        refreshBoth();
+        startPolling();
+        document.addEventListener('visibilitychange', onVisibility);
+    });
+    onActivated(() => {
+        refreshBoth();
+        startPolling();
+    });
+    onDeactivated(() => stopPolling());
+    onUnmounted(() => {
+        stopPolling();
+        document.removeEventListener('visibilitychange', onVisibility);
     });
 
     const setVq3Page = (p: number) => {

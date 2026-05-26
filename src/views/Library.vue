@@ -3,17 +3,11 @@
     // folder with its server state (uploaded? rendered? not yet?),
     // a name filter, sort (date / name), and a per-row Render button
     // that queues a YouTube render through /api/launcher/render-video.
-    //
-    // Demos that haven't been uploaded yet show a "Render" button
-    // that uploads first - the backend returns 404+needs_upload in
-    // that case and we don't try to be clever about it; we just tell
-    // the user to wait for the watcher to pick the file up. Once it's
-    // in the cache (Done/Duplicate), Render queues server-side.
 
-    import { computed, onMounted, onUnmounted, ref } from 'vue';
+    import { computed, onActivated, onMounted, onUnmounted, ref } from 'vue';
     import { tauri, type DemoLibraryEntry, type RenderStatusResponse } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
-    import { openUrl } from '@tauri-apps/plugin-opener';
+    import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 
     const config = useConfigStore();
 
@@ -57,6 +51,12 @@
             await warmupRenderStates();
         }
     });
+
+    // keep-alive re-entry: pick up new demos written by the watcher
+    // while the user was on a different tab. Cheap (filesystem stat
+    // per file) so we skip any debounce; the rest of the UI is
+    // optimistically reactive to the returned list.
+    onActivated(() => { void refresh(); });
 
     let warmupCancelled = false;
     onUnmounted(() => { warmupCancelled = true; });
@@ -122,7 +122,7 @@
 
     const renderDemo = async (d: DemoLibraryEntry) => {
         if (!d.hash) {
-            error.value = `${d.filename} hasn't been uploaded yet - wait for the watcher to pick it up.`;
+            error.value = `${d.filename} hasn't been uploaded yet - turn on auto-backup (Demos tab → Start) and the watcher will pick it up.`;
             return;
         }
         rendering.value.add(d.hash);
@@ -132,7 +132,6 @@
             const r = await tauri.requestRender(d.hash);
             switch (r._http_status) {
                 case 200:
-                    // Queued or already_queued. Sync render state cache.
                     renderState.value = {
                         ...renderState.value,
                         [d.hash]: {
@@ -193,6 +192,83 @@
             return;
         }
         return renderDemo(d);
+    };
+
+    // -- Context menu ---------------------------------------------------
+    // One menu at a time; viewport-positioned so the parent's overflow
+    // clipping doesn't chop it. The Vue side just renders the four
+    // actions and the open/close state; positioning is window-coord
+    // because nesting an absolute popover inside the row would clip
+    // against the scrolling <ul>.
+    type CtxMenu = { x: number; y: number; demo: DemoLibraryEntry };
+    const ctxMenu = ref<CtxMenu | null>(null);
+    const openContextMenu = (e: MouseEvent, d: DemoLibraryEntry) => {
+        e.preventDefault();
+        ctxMenu.value = { x: e.clientX, y: e.clientY, demo: d };
+    };
+    const closeContextMenu = () => { ctxMenu.value = null; };
+
+    // Strip the .dm_<version> suffix so the /demo command pastes a
+    // name Quake accepts (the engine's own demo command expects the
+    // bare name + auto-appends the right extension).
+    const filenameStem = (filename: string): string => {
+        const idx = filename.lastIndexOf('.');
+        return idx > 0 ? filename.slice(0, idx) : filename;
+    };
+
+    const copyToClipboard = async (text: string) => {
+        try {
+            await navigator.clipboard.writeText(text);
+        } catch {
+            // Webview clipboard occasionally rejects without a permission
+            // prompt; fall back to a hidden textarea + execCommand which
+            // works in every WebView2 / WKWebView we ship to.
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); } catch { /* ignore */ }
+            document.body.removeChild(ta);
+        }
+    };
+
+    const ctxOpenInExplorer = async () => {
+        if (!ctxMenu.value) return;
+        const p = ctxMenu.value.demo.path;
+        closeContextMenu();
+        try { await revealItemInDir(p); } catch (e: any) {
+            error.value = e?.toString?.() ?? 'Failed to open in explorer';
+        }
+    };
+
+    const ctxCopyPath = async () => {
+        if (!ctxMenu.value) return;
+        await copyToClipboard(ctxMenu.value.demo.path);
+        closeContextMenu();
+    };
+
+    const ctxCopyDemoCmd = async () => {
+        if (!ctxMenu.value) return;
+        const stem = filenameStem(ctxMenu.value.demo.filename);
+        await copyToClipboard(`/demo ${stem}`);
+        closeContextMenu();
+    };
+
+    const ctxDeleteDemo = async () => {
+        if (!ctxMenu.value) return;
+        const d = ctxMenu.value.demo;
+        closeContextMenu();
+        if (!window.confirm(`Permanently delete ${d.filename}?\n\nThe file on disk will be removed. Anything already on defrag.racing stays.`)) {
+            return;
+        }
+        try {
+            await tauri.deleteDemo(d.path);
+            demos.value = demos.value.filter((x) => x.path !== d.path);
+        } catch (e: any) {
+            error.value = e?.toString?.() ?? 'Delete failed';
+        }
     };
 </script>
 
@@ -265,7 +341,12 @@
                 </div>
             </div>
             <ul v-else class="divide-y divide-white/[0.04]">
-                <li v-for="d in filteredDemos" :key="d.path" class="px-5 py-2 flex items-center gap-3">
+                <li
+                    v-for="d in filteredDemos"
+                    :key="d.path"
+                    class="px-5 py-2 flex items-center gap-3 hover:bg-white/[0.02]"
+                    @contextmenu="openContextMenu($event, d)"
+                >
                     <div class="flex-1 min-w-0">
                         <div class="text-sm text-neutral-200 truncate font-medium" :title="d.filename">
                             {{ d.filename }}
@@ -299,11 +380,42 @@
                             ? 'bg-red-500/20 hover:bg-red-500/30 text-red-300'
                             : 'bg-brand-500/20 hover:bg-brand-500/30 text-brand-300'"
                         :disabled="!d.hash || (!!d.hash && rendering.has(d.hash))"
-                        :title="!d.hash ? 'Wait for the watcher to upload this demo first' : 'Queue a YouTube render'"
+                        :title="!d.hash ? 'Turn on auto-backup (Demos tab → Start) so the watcher uploads this demo first' : 'Queue a YouTube render'"
                         @click="renderClickFor(d)"
                     >{{ renderLabelFor(d) }}</button>
                 </li>
             </ul>
         </div>
+
+        <!-- Context menu. Fixed positioning relative to the viewport
+             rather than absolute inside the row so the scrolling <ul>'s
+             overflow doesn't clip it. Backdrop captures outside-clicks
+             to close. -->
+        <template v-if="ctxMenu">
+            <div class="fixed inset-0 z-40" @click="closeContextMenu" @contextmenu.prevent="closeContextMenu"></div>
+            <div
+                class="fixed z-50 min-w-[180px] bg-neutral-900 border border-white/10 rounded shadow-xl py-1 text-sm"
+                :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+            >
+                <button
+                    class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-neutral-200"
+                    @click="ctxOpenInExplorer"
+                >Open in explorer</button>
+                <button
+                    class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-neutral-200"
+                    @click="ctxCopyPath"
+                >Copy path</button>
+                <button
+                    class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-neutral-200"
+                    title="Copy a /demo console command you can paste in Quake to play this demo"
+                    @click="ctxCopyDemoCmd"
+                >Copy /demo command</button>
+                <div class="my-1 border-t border-white/10"></div>
+                <button
+                    class="w-full text-left px-3 py-1.5 hover:bg-red-500/10 text-red-300"
+                    @click="ctxDeleteDemo"
+                >Delete demo</button>
+            </div>
+        </template>
     </div>
 </template>

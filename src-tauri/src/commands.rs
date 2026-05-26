@@ -708,3 +708,54 @@ pub fn get_connection_history(state: State<'_, AppState>) -> Vec<ConnectionEntry
 pub fn clear_connection_history(state: State<'_, AppState>) {
     state.history.clear();
 }
+
+// ---- Per-row Library / Dashboard actions ----------------------------------
+
+/// Re-queue a single demo for upload after it landed in Error status.
+/// Sends Message::FileAdded which handle_file then re-processes - the
+/// already_present check only short-circuits Done/Duplicate, so Error
+/// rows naturally re-enter the hash + upload path. No-op when the
+/// watcher isn't running (the row would have nowhere to be processed);
+/// the Dashboard hides the Retry button in that case anyway.
+#[tauri::command]
+pub fn retry_upload(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let path_buf = PathBuf::from(&path);
+    let handle_guard = state.watcher.lock().unwrap();
+    let h = handle_guard
+        .as_ref()
+        .ok_or_else(|| "Auto-upload is off - press Start to enable retries".to_string())?;
+    h.tx.send(Message::FileAdded(path_buf))
+        .map_err(|e| format!("queue full: {}", e))
+}
+
+/// Delete a demo file from disk and forget its cache row. Used by the
+/// Library context menu. If the running watcher has a queue entry for
+/// the same path, we drop that too so the row disappears from the
+/// Dashboard without a refresh.
+///
+/// Deliberately conservative about the path: must be a file (not a
+/// directory) and must exist - any error other than "already gone" is
+/// surfaced to the user. The cache + queue wipes are best-effort.
+#[tauri::command]
+pub fn delete_demo(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let path_buf = PathBuf::from(&path);
+    if !path_buf.exists() {
+        // Tolerate: pretend the delete succeeded so the UI row goes
+        // away without a confusing error if the user already nuked the
+        // file from explorer.
+        let mut cache = UploadCache::load();
+        cache.remove(&path_buf);
+        let _ = cache.save();
+        state.upload_state.remove_path(&path_buf);
+        return Ok(());
+    }
+    if !path_buf.is_file() {
+        return Err(format!("Not a file: {}", path));
+    }
+    std::fs::remove_file(&path_buf).map_err(err_to_string)?;
+    let mut cache = UploadCache::load();
+    cache.remove(&path_buf);
+    let _ = cache.save();
+    state.upload_state.remove_path(&path_buf);
+    Ok(())
+}

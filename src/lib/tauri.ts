@@ -148,6 +148,15 @@ export const tauri = {
     getRenderStatus: (fileHash: string) =>
         invoke<RenderStatusResponse>('get_render_status', { fileHash }),
 
+    /** Re-queue a single demo that failed upload. Requires the watcher
+     *  to be running - the Tauri side returns an error otherwise. */
+    retryUpload: (path: string) => invoke<void>('retry_upload', { path }),
+
+    /** Delete a demo from disk + clear its cache + queue rows. Used by
+     *  the Library context menu. Surfaces filesystem errors to the
+     *  caller; a missing file is silently accepted as "already gone". */
+    deleteDemo: (path: string) => invoke<void>('delete_demo', { path }),
+
     // Untyped on purpose: the JSON shape is owned by the Laravel
     // ServerListService and will grow new fields over time. Frontend
     // uses a minimal interface (DefragServer below) for the columns it
@@ -304,26 +313,39 @@ export interface DemoLibraryEntry {
     upload_status: string | null;
 }
 
-/** One row from RecordNotification (PB beats, WR takes, etc.). The
- *  web side exposes its full fillable list - this is the subset the
- *  launcher actually renders; backend additions stay forward-
- *  compatible because the rest is ignored. */
+/** One row from RecordNotification. Field names match the web's
+ *  `protected $fillable` on the Eloquent model so the JSON forwarded
+ *  by the launcher controller lands here unchanged. `mdd_id` links to
+ *  the public profile page. `worldrecord=true` flips the card styling
+ *  to gold ("someone took the WR" beats "someone beat your time"). */
 export interface RecordNotificationRow {
     id: number;
     user_id: number;
-    map: string | null;
+    /** Player who took the record. Q3 color codes preserved. */
+    name: string | null;
+    country: string | null;
     physics: string | null;
-    rank: number | null;
+    mode: string | null;
     time: number | null;
-    other_user_name: string | null;
-    other_user_country: string | null;
+    /** Token owner's previous time on the map. Used to compute the
+     *  delta the card shows in green. Null when the owner had no PB
+     *  before (e.g. a fresh map). */
+    my_time: number | null;
+    mdd_id: number | null;
+    record_player_id: number | null;
+    mapname: string | null;
+    date_set: string | null;
+    worldrecord: boolean;
     read: boolean;
     created_at: string;
 }
 
 /** One row from system Notification (render done, alias suggestions,
- *  etc.). headline + subheadline + url are the meaningful triple;
- *  type drives the icon. */
+ *  announcements, clan/tournament events, etc.). `type` drives icon
+ *  + color + filter bucket on the Notifications tab. `before`,
+ *  `headline`, `after` are the three text parts; clicking `url`
+ *  opens the related page. Render notifications use `subheadline`
+ *  for the demo download/play URL too. */
 export interface SystemNotificationRow {
     id: number;
     user_id: number;
