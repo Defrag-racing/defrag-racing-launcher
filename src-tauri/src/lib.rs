@@ -205,6 +205,9 @@ pub fn run() {
             commands::cancel_pending_deep_link,
             commands::get_connection_history,
             commands::clear_connection_history,
+            commands::get_records,
+            commands::get_maps,
+            commands::get_me,
             commands::set_autostart_enabled,
             commands::is_autostart_enabled,
         ])

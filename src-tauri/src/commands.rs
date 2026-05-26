@@ -427,6 +427,43 @@ pub async fn get_servers() -> Result<serde_json::Value, String> {
     client.fetch_servers().await.map_err(err_to_string)
 }
 
+/// "Who am I" lookup for the Profile button. Token-locked. Frontend
+/// calls this once at app boot and caches the result so the button
+/// works without a re-fetch on every render.
+#[tauri::command]
+pub async fn get_me() -> Result<serde_json::Value, String> {
+    let token = token::load()
+        .map_err(err_to_string)?
+        .ok_or_else(|| "No token saved".to_string())?;
+    let client = crate::api::Client::new(config::api_base_url(), token).map_err(err_to_string)?;
+    client.fetch_me().await.map_err(err_to_string)
+}
+
+/// Records browser feed for the Records tab. Token-locked,
+/// launcher:read ability required. Physics is one of "vq3" / "cpm",
+/// page is 1-based. Returns the raw Laravel paginator JSON; the
+/// frontend reads `data`, `current_page`, `last_page`, `total`.
+#[tauri::command]
+pub async fn get_records(physics: String, page: u32) -> Result<serde_json::Value, String> {
+    let token = token::load()
+        .map_err(err_to_string)?
+        .ok_or_else(|| "No token saved - records browser requires a launcher token from defrag.racing/user/settings".to_string())?;
+    let client = crate::api::Client::new(config::api_base_url(), token).map_err(err_to_string)?;
+    client.fetch_records(&physics, page).await.map_err(err_to_string)
+}
+
+/// Maps browser feed for the Maps tab. Same token/ability shape as
+/// get_records. Search is an optional substring matched against map
+/// name (case-insensitive on the SQL side).
+#[tauri::command]
+pub async fn get_maps(page: u32, search: Option<String>) -> Result<serde_json::Value, String> {
+    let token = token::load()
+        .map_err(err_to_string)?
+        .ok_or_else(|| "No token saved - maps browser requires a launcher token from defrag.racing/user/settings".to_string())?;
+    let client = crate::api::Client::new(config::api_base_url(), token).map_err(err_to_string)?;
+    client.fetch_maps(page, search.as_deref()).await.map_err(err_to_string)
+}
+
 /// Read (without consuming) the URL waiting for user confirmation. Called
 /// by the frontend on mount so cold-start-via-deep-link surfaces the
 /// Connect prompt without the user needing to re-click the link.

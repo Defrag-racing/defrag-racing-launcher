@@ -113,6 +113,20 @@ export const tauri = {
     getConnectionHistory: () => invoke<ConnectionEntry[]>('get_connection_history'),
     clearConnectionHistory: () => invoke<void>('clear_connection_history'),
 
+    /** Paginated recent records. `physics` is "vq3" | "cpm", page is
+     *  1-based. Returns the raw Laravel paginator (data + current_page
+     *  + last_page + total + ...) so the view can render pager UI. */
+    getRecords: (physics: 'vq3' | 'cpm', page: number) =>
+        invoke<Paginated<RecordRow>>('get_records', { physics, page }),
+    /** Paginated map list, newest first. `search` is an optional
+     *  substring match on map name; empty/null means no filter. */
+    getMaps: (page: number, search?: string | null) =>
+        invoke<Paginated<MapRow>>('get_maps', { page, search: search || null }),
+
+    /** One-shot "who am I" lookup. Launcher caches the result for the
+     *  Profile button so the link works without a per-render fetch. */
+    getMe: () => invoke<LauncherMe>('get_me'),
+
     // Untyped on purpose: the JSON shape is owned by the Laravel
     // ServerListService and will grow new fields over time. Frontend
     // uses a minimal interface (DefragServer below) for the columns it
@@ -191,4 +205,64 @@ export interface ConnectionEntry {
     server_name: string | null;
     physics: string | null;
     source: string;
+}
+
+/** Laravel paginator wrapper. Same shape Laravel emits via
+ *  Eloquent::paginate(); only the fields the launcher actually reads
+ *  are typed. */
+export interface Paginated<T> {
+    data: T[];
+    current_page: number;
+    last_page: number;
+    per_page: number;
+    total: number;
+}
+
+/** One record row from /api/launcher/records. mdd_id links to a
+ *  /profile/{mdd_id} page on the web; user is eager-loaded so the
+ *  launcher can show a real player name (with country flag) when
+ *  available. */
+export interface RecordRow {
+    id: number;
+    name: string;
+    country: string | null;
+    mdd_id: number | null;
+    mapname: string;
+    rank: number | null;
+    time: number;
+    date_set: string;
+    physics: string;
+    mode: string;
+    user?: {
+        id: number;
+        name: string;
+        plain_name?: string | null;
+        country?: string | null;
+    } | null;
+}
+
+/** One map row from /api/launcher/maps. thumbnail is a storage-
+ *  relative path (or full URL); resolve via storage/ prefix the
+ *  same way the Servers view does for mapdata thumbnails. */
+export interface MapRow {
+    id: number;
+    name: string;
+    author: string | null;
+    thumbnail: string | null;
+    physics: string | null;
+    gametype: string | null;
+    is_nsfw: boolean;
+    date_added: string | null;
+}
+
+/** Token owner identity for the Profile button. mdd_id is the public
+ *  profile id on defrag.racing; null when the user hasn't linked their
+ *  account to an mdd profile yet (the Profile button is disabled in
+ *  that case). */
+export interface LauncherMe {
+    id: number;
+    mdd_id: number | null;
+    name: string;
+    plain_name: string | null;
+    country: string | null;
 }

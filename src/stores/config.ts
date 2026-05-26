@@ -5,7 +5,7 @@
 
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import { tauri, type LauncherConfig } from '../lib/tauri';
+import { tauri, type LauncherConfig, type LauncherMe } from '../lib/tauri';
 
 export const useConfigStore = defineStore('config', () => {
     const config = ref<LauncherConfig>({
@@ -22,11 +22,25 @@ export const useConfigStore = defineStore('config', () => {
     const hasToken = ref(false);
     const autoUploadRunning = ref(false);
     const loaded = ref(false);
+    /** Cached "who am I" so the Profile button works without a per-
+     *  render fetch. Fetched once on refresh() when a token is
+     *  present; null if no token / fetch failed / user has no mdd
+     *  profile linked. */
+    const me = ref<LauncherMe | null>(null);
 
     const refresh = async () => {
         config.value = await tauri.getConfig();
         hasToken.value = await tauri.hasToken();
         autoUploadRunning.value = await tauri.isAutoUploadRunning();
+        if (hasToken.value) {
+            try {
+                me.value = await tauri.getMe();
+            } catch {
+                me.value = null;
+            }
+        } else {
+            me.value = null;
+        }
         loaded.value = true;
     };
 
@@ -35,5 +49,5 @@ export const useConfigStore = defineStore('config', () => {
         await tauri.saveConfig(config.value);
     };
 
-    return { config, hasToken, autoUploadRunning, loaded, refresh, save };
+    return { config, hasToken, autoUploadRunning, loaded, me, refresh, save };
 });

@@ -231,6 +231,21 @@ impl Client {
         Ok(body)
     }
 
+    /// One-shot "who am I" call for the Profile button. Returns minimal
+    /// fields (id / mdd_id / name / plain_name / country); launcher
+    /// caches the result so the button works offline thereafter.
+    pub async fn fetch_me(&self) -> ApiResult<serde_json::Value> {
+        let resp = self
+            .http
+            .get(self.url("/api/launcher/me"))
+            .bearer_auth(&self.token)
+            .header("Accept", "application/json")
+            .send()
+            .await?;
+        self.check_status(&resp).await?;
+        Ok(resp.json::<serde_json::Value>().await?)
+    }
+
     /// Pull the server-browser feed from /api/launcher/servers. Returns
     /// the raw JSON value the Laravel endpoint produced - we don't define
     /// a Rust struct mirror because the shape comes straight from the
@@ -249,6 +264,47 @@ impl Client {
         self.check_status(&resp).await?;
         let body = resp.json::<serde_json::Value>().await?;
         Ok(body)
+    }
+
+    /// Paginated recent records, one physics per call. The Laravel
+    /// endpoint returns a standard Eloquent paginator
+    /// (data + current_page + last_page + total etc.); we forward the
+    /// JSON unchanged so the frontend can render pager UI without
+    /// teaching the Tauri layer about pagination structure.
+    pub async fn fetch_records(&self, physics: &str, page: u32) -> ApiResult<serde_json::Value> {
+        let resp = self
+            .http
+            .get(self.url("/api/launcher/records"))
+            .bearer_auth(&self.token)
+            .header("Accept", "application/json")
+            .query(&[("physics", physics), ("page", &page.to_string())])
+            .send()
+            .await?;
+        self.check_status(&resp).await?;
+        Ok(resp.json::<serde_json::Value>().await?)
+    }
+
+    /// Paginated map list with optional substring search. Same
+    /// paginator shape as fetch_records; we pass `search` as an
+    /// empty-string-omitted query param so the URL stays clean on
+    /// the no-filter path.
+    pub async fn fetch_maps(&self, page: u32, search: Option<&str>) -> ApiResult<serde_json::Value> {
+        let mut params: Vec<(&str, String)> = vec![("page", page.to_string())];
+        if let Some(s) = search {
+            if !s.is_empty() {
+                params.push(("search", s.to_string()));
+            }
+        }
+        let resp = self
+            .http
+            .get(self.url("/api/launcher/maps"))
+            .bearer_auth(&self.token)
+            .header("Accept", "application/json")
+            .query(&params)
+            .send()
+            .await?;
+        self.check_status(&resp).await?;
+        Ok(resp.json::<serde_json::Value>().await?)
     }
 
     async fn check_status(&self, resp: &reqwest::Response) -> ApiResult<()> {

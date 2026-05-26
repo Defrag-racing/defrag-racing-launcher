@@ -14,8 +14,26 @@
     // the Play button + tabs are always one click from any view.
     const showNav = computed(() => {
         const r = route.name;
-        return r === 'dashboard' || r === 'servers' || r === 'settings';
+        return r === 'dashboard'
+            || r === 'servers'
+            || r === 'records'
+            || r === 'maps'
+            || r === 'history'
+            || r === 'settings';
     });
+
+    /// Open the token owner's profile page on defrag.racing. Disabled
+    /// when we don't have an mdd_id - either the user hasn't linked
+    /// their account to an mdd profile yet, or the launcher hasn't
+    /// successfully fetched /api/launcher/me (no token, network
+    /// error). Title attr explains why so a disabled button isn't a
+    /// mystery.
+    const openProfile = async () => {
+        const mddId = config.me?.mdd_id;
+        if (!mddId) return;
+        const { openUrl } = await import('@tauri-apps/plugin-opener');
+        await openUrl(`https://defrag.racing/profile/${mddId}`).catch(() => {});
+    };
 
     const launching = ref(false);
     const launchError = ref<string | null>(null);
@@ -82,6 +100,20 @@
                         : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
                 >Servers</RouterLink>
                 <RouterLink
+                    :to="{ name: 'records' }"
+                    class="px-3 py-1.5 text-sm rounded transition-colors"
+                    :class="route.name === 'records'
+                        ? 'bg-white/10 text-neutral-100 font-semibold'
+                        : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
+                >Records</RouterLink>
+                <RouterLink
+                    :to="{ name: 'maps' }"
+                    class="px-3 py-1.5 text-sm rounded transition-colors"
+                    :class="route.name === 'maps'
+                        ? 'bg-white/10 text-neutral-100 font-semibold'
+                        : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
+                >Maps</RouterLink>
+                <RouterLink
                     :to="{ name: 'history' }"
                     class="px-3 py-1.5 text-sm rounded transition-colors"
                     :class="route.name === 'history'
@@ -107,6 +139,19 @@
                     <span>{{ launching ? 'Launching…' : 'Quick launch' }}</span>
                 </button>
 
+                <!-- Profile: opens the token owner's defrag.racing
+                     profile page in the default browser. Disabled
+                     when we don't yet know who the user is (no
+                     token, /api/launcher/me failed, or no linked
+                     mdd profile). -->
+                <button
+                    class="px-3 py-1.5 rounded text-sm transition-colors text-neutral-400 hover:text-neutral-200 hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed"
+                    :disabled="!config.me?.mdd_id"
+                    :title="config.me?.mdd_id
+                        ? `Open profile of ${config.me?.plain_name || config.me?.name} on defrag.racing`
+                        : 'Profile link unavailable - paste a token in Settings'"
+                    @click="openProfile"
+                >Profile</button>
                 <RouterLink
                     :to="{ name: 'settings' }"
                     class="px-3 py-1.5 rounded text-sm transition-colors"
