@@ -58,10 +58,33 @@ impl UploadCache {
     /// Best-effort load: any error (missing file, parse failure,
     /// permissions) returns an empty cache so the watcher just falls
     /// back to full hash+lookup, the conservative behavior.
+    ///
+    /// Path normalisation runs over every loaded key. Without this,
+    /// cache entries written by the watcher (which receives
+    /// notify-debouncer paths) and lookups from list_demos (which
+    /// walkdirs the configured demos_path) can disagree on whether
+    /// the Windows verbatim `\\?\` prefix is present, so `E:\foo`
+    /// and `\\?\E:\foo` resolve to different HashMap buckets even
+    /// though they point at the same file. Migration is one-shot per
+    /// process: the next save() writes the cleaned keys back to disk.
     pub fn load() -> Self {
         let Ok(path) = Self::path() else { return Self::default() };
         let Ok(raw) = fs::read_to_string(&path) else { return Self::default() };
-        serde_json::from_str(&raw).unwrap_or_default()
+        let mut cache: UploadCache = serde_json::from_str(&raw).unwrap_or_default();
+        // Migrate any prefixed / dirty keys into their normalised form.
+        // Collecting first so we don't mutate the map mid-iteration.
+        let dirty: Vec<PathBuf> = cache
+            .files
+            .keys()
+            .filter(|k| normalize(k) != **k)
+            .cloned()
+            .collect();
+        for old in dirty {
+            if let Some(entry) = cache.files.remove(&old) {
+                cache.files.insert(normalize(&old), entry);
+            }
+        }
+        cache
     }
 
     pub fn save(&self) -> Result<()> {
@@ -90,7 +113,7 @@ impl UploadCache {
     /// is treated as a cache miss; the caller will re-hash and either
     /// upload or confirm-duplicate, and overwrite the cache entry.
     pub fn get_if_fresh(&self, path: &Path) -> Option<&CachedEntry> {
-        let entry = self.files.get(path)?;
+        let entry = self.files.get(&normalize(path))?;
         let meta = fs::metadata(path).ok()?;
         let size = meta.len();
         let mtime = meta
@@ -112,7 +135,7 @@ impl UploadCache {
     /// uploaded still shows its demo_id in the library even if it
     /// got touched in some way after).
     pub fn get(&self, path: &Path) -> Option<&CachedEntry> {
-        self.files.get(path)
+        self.files.get(&normalize(path))
     }
 
     /// Drop the cache entry for a single path. Called when the user
@@ -121,7 +144,7 @@ impl UploadCache {
     /// upload an empty path. Best-effort: missing entry / missing
     /// file is fine, the goal is just "forget this".
     pub fn remove(&mut self, path: &Path) {
-        self.files.remove(path);
+        self.files.remove(&normalize(path));
     }
 
     /// Record a successful upload (or confirmed-duplicate) for the
@@ -141,7 +164,7 @@ impl UploadCache {
         let Ok(mtime_dur) = mtime_st.duration_since(SystemTime::UNIX_EPOCH) else { return };
         let mtime = mtime_dur.as_secs();
         self.files.insert(
-            path.to_path_buf(),
+            normalize(path),
             CachedEntry {
                 mtime,
                 size,
@@ -150,5 +173,22 @@ impl UploadCache {
                 demo_id,
             },
         );
+    }
+}
+
+/// Strip Windows verbatim-path prefix `\\?\` so callers feeding paths
+/// from notify-debouncer (which canonicalises on Windows) and walkdir
+/// (which doesn't) hit the same HashMap bucket. On macOS / Linux the
+/// prefix never appears so this is a no-op there. We deliberately do
+/// NOT lowercase: Windows filenames are case-insensitive but Rust's
+/// PathBuf comparison treats them as case-sensitive, and forcing
+/// lowercase would re-introduce mismatch risk on case-preserving
+/// filesystems (ReFS, exFAT external drives).
+fn normalize(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(stripped)
+    } else {
+        path.to_path_buf()
     }
 }

@@ -63,18 +63,18 @@ export function q3ToHtml(name: string | null | undefined): string {
     let result = '';
     let color = '7';
     let buffer = '';
-    // Thin white outline via 4-direction text-shadow so the darkest
-    // Q3 colors (^0 black, ^9/^z gray) stay legible against the
-    // launcher's neutral-900 background. Web ignores this and pure-
-    // black nicks vanish there too; here we give every span the same
-    // outline so all colors look consistent rather than only patching
-    // black, and the effect doubles as a subtle Q3-HUD glow on
-    // brighter hues.
-    const SHADOW = '-1px -1px 0 rgba(255,255,255,0.35),1px -1px 0 rgba(255,255,255,0.35),-1px 1px 0 rgba(255,255,255,0.35),1px 1px 0 rgba(255,255,255,0.35)';
+    // Outline only the pitch-black ^0 spans - everything else in the
+    // Q3 palette is saturated enough to read on the launcher's
+    // neutral-900 background (gray ^9 / ^z is rgb(128) which clears
+    // AA contrast on its own). Applying the shadow to bright colors
+    // made them look fuzzy / glowing, so we keep them clean.
+    const DARK_COLORS = new Set(['0']);
+    const SHADOW = '-1px -1px 0 rgba(255,255,255,0.55),1px -1px 0 rgba(255,255,255,0.55),-1px 1px 0 rgba(255,255,255,0.55),1px 1px 0 rgba(255,255,255,0.55)';
     const flush = () => {
         if (buffer) {
             const c = Q3_PALETTE[color] ?? Q3_PALETTE['7'];
-            result += `<span style="color:${c};text-shadow:${SHADOW}">${escapeHtml(buffer)}</span>`;
+            const shadow = DARK_COLORS.has(color) ? `;text-shadow:${SHADOW}` : '';
+            result += `<span style="color:${c}${shadow}">${escapeHtml(buffer)}</span>`;
             buffer = '';
         }
     };
