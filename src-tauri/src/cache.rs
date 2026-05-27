@@ -55,9 +55,18 @@ impl UploadCache {
         Ok(dir.join("uploaded.json"))
     }
 
-    /// Best-effort load: any error (missing file, parse failure,
-    /// permissions) returns an empty cache so the watcher just falls
-    /// back to full hash+lookup, the conservative behavior.
+    /// Best-effort load: missing file or permission error returns an
+    /// empty cache so the watcher just falls back to full hash+lookup,
+    /// the conservative behavior.
+    ///
+    /// If the file exists but FAILS to parse (corruption, partial
+    /// write, encoding glitch), we rename it to `uploaded.json.bak.<ts>`
+    /// before returning empty. The previous behavior silently dropped
+    /// the parse error and the very next `cache.save()` overwrote the
+    /// corrupted-but-still-readable JSON with a fresh empty cache -
+    /// users lost thousands of cached hashes that way, with no path
+    /// to recovery. Renaming preserves the file for manual inspection
+    /// + restore.
     ///
     /// Path normalisation runs over every loaded key. Without this,
     /// cache entries written by the watcher (which receives
@@ -70,7 +79,22 @@ impl UploadCache {
     pub fn load() -> Self {
         let Ok(path) = Self::path() else { return Self::default() };
         let Ok(raw) = fs::read_to_string(&path) else { return Self::default() };
-        let mut cache: UploadCache = serde_json::from_str(&raw).unwrap_or_default();
+        let mut cache: UploadCache = match serde_json::from_str(&raw) {
+            Ok(c) => c,
+            Err(e) => {
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let bak = path.with_file_name(format!("uploaded.json.bak.{}", ts));
+                let _ = fs::rename(&path, &bak);
+                crate::log_startup(&format!(
+                    "uploaded.json parse failed ({}); renamed to {:?}",
+                    e, bak
+                ));
+                return UploadCache::default();
+            }
+        };
         // Migrate any prefixed / dirty keys into their normalised form.
         // Collecting first so we don't mutate the map mid-iteration.
         let dirty: Vec<PathBuf> = cache
@@ -184,7 +208,7 @@ impl UploadCache {
 /// PathBuf comparison treats them as case-sensitive, and forcing
 /// lowercase would re-introduce mismatch risk on case-preserving
 /// filesystems (ReFS, exFAT external drives).
-fn normalize(path: &Path) -> PathBuf {
+pub fn normalize(path: &Path) -> PathBuf {
     let s = path.to_string_lossy();
     if let Some(stripped) = s.strip_prefix(r"\\?\") {
         PathBuf::from(stripped)

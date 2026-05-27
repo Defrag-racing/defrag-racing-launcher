@@ -400,12 +400,19 @@ pub struct DemoLibraryEntry {
 
 /// List every .dm_* file in the configured demos folder with the
 /// metadata the Library view needs. Reads the FS directly (cheap
-/// stat() per file) and joins with uploaded.json for known hashes.
-/// Used by the Library tab on mount; not polled - the user can hit
-/// a Refresh button to pick up new demos that landed while the tab
-/// was open.
+/// stat() per file) and joins with uploaded.json for known hashes
+/// AND the live queue for known statuses. The queue fallback covers
+/// the case where uploaded.json got wiped (corruption, manual delete,
+/// pre-bugfix old build) but queue.json still has the user's full
+/// processing history - without it, every row would say NOT UPLOADED
+/// even though the server has the demo. Hash stays None for
+/// queue-only entries so the Render button correctly disables until
+/// a fresh hash lands in cache (only the auto-uploader can do that
+/// because it has the raw file).
 #[tauri::command]
-pub fn list_demos() -> Result<Vec<DemoLibraryEntry>, String> {
+pub fn list_demos(state: State<'_, AppState>) -> Result<Vec<DemoLibraryEntry>, String> {
+    use crate::watcher::UploadStatus;
+    use std::collections::HashMap;
     use std::time::UNIX_EPOCH;
     let cfg = Config::load().map_err(err_to_string)?;
     let demos = cfg
@@ -416,6 +423,16 @@ pub fn list_demos() -> Result<Vec<DemoLibraryEntry>, String> {
         return Err(format!("Demos path {:?} does not exist", demos));
     }
     let cache = UploadCache::load();
+
+    // Snapshot the live queue and index it by normalised path so the
+    // walkdir output (with or without \\?\ prefix) hits the same bucket
+    // regardless of how the watcher captured the path originally.
+    let queue_snapshot = state.upload_state.snapshot();
+    let queue_index: HashMap<PathBuf, (UploadStatus, Option<u64>)> = queue_snapshot
+        .items
+        .iter()
+        .map(|i| (crate::cache::normalize(&i.path), (i.status, i.demo_id)))
+        .collect();
 
     let mut entries = Vec::new();
     let walker: Box<dyn Iterator<Item = PathBuf>> = if cfg.include_subfolders {
@@ -438,7 +455,6 @@ pub fn list_demos() -> Result<Vec<DemoLibraryEntry>, String> {
     };
 
     for p in walker {
-        // Match the same demo-file rule the watcher uses.
         let ext_ok = p
             .extension()
             .and_then(|e| e.to_str())
@@ -447,7 +463,6 @@ pub fn list_demos() -> Result<Vec<DemoLibraryEntry>, String> {
         if !ext_ok {
             continue;
         }
-        // Skip Quake's temp/ subfolder where in-progress recordings live.
         let in_temp = p.components().any(|c| {
             c.as_os_str()
                 .to_str()
@@ -473,18 +488,31 @@ pub fn list_demos() -> Result<Vec<DemoLibraryEntry>, String> {
             .unwrap_or("")
             .to_string();
         let cached = cache.get(&p);
+        let queue_hit = if cached.is_none() {
+            queue_index.get(&crate::cache::normalize(&p))
+        } else {
+            None
+        };
+        let upload_status = cached.map(|c| c.status.clone()).or_else(|| {
+            queue_hit.and_then(|(s, _)| match s {
+                UploadStatus::Done => Some("done".to_string()),
+                UploadStatus::Duplicate => Some("duplicate".to_string()),
+                _ => None,
+            })
+        });
         entries.push(DemoLibraryEntry {
             path: p.to_string_lossy().into_owned(),
             filename,
             size_bytes: meta.len(),
             mtime,
             hash: cached.map(|c| c.hash.clone()),
-            demo_id: cached.and_then(|c| c.demo_id),
-            upload_status: cached.map(|c| c.status.clone()),
+            demo_id: cached
+                .and_then(|c| c.demo_id)
+                .or_else(|| queue_hit.and_then(|(_, id)| *id)),
+            upload_status,
         });
     }
 
-    // Newest first by default; frontend can re-sort client-side.
     entries.sort_by(|a, b| b.mtime.cmp(&a.mtime));
     Ok(entries)
 }
