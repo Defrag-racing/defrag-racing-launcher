@@ -60,9 +60,16 @@ jobs:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Rust cache
+        # cache-targets: false skips src-tauri/target (4-8 GB of
+        # compiled artifacts) and only caches cargo registry + git
+        # deps. Full target cache was overflowing GH's 10 GB cache
+        # limit AND OOM-killing zstd mid-compression on Windows
+        # runners. Trade-off: +5 min build time, byte-identical
+        # binary output (release-mode cargo is deterministic).
         uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
+          cache-targets: false
 
       - name: Install Linux deps
         if: matrix.platform == 'ubuntu-22.04'

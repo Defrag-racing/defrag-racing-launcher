@@ -61,9 +61,19 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # cache-targets: false skips src-tauri/target (4-8 GB of
+      # compiled artifacts) and only caches cargo registry + git
+      # deps (~800 MB). The full target cache was overflowing
+      # GitHub's 10 GB per-cache limit AND OOM-killing tar/zstd
+      # mid-compression on the 14 GB Windows runner - the action's
+      # post-step exited silently because zstd was SIGKILL'd by
+      # the OS, masking the real cause. Trade-off: ~5 min slower
+      # build (deps recompile from source) for stable CI. The
+      # produced MSI is byte-identical either way.
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
+          cache-targets: false
 
       - run: npm ci
 
