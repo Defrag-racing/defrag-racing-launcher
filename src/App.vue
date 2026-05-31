@@ -95,6 +95,35 @@
         if (country === '_404' || country === 'XX') return null;
         return `https://defrag.racing/images/flags/${country.toLowerCase()}.png`;
     };
+
+    /** Mirror of Servers.vue::gametypeTag - the short uppercase pill
+     *  shown next to the server name. Same fallback chain so the modal
+     *  reads consistently with the Servers list. */
+    const gametypeTagOf = (s: DefragServer): string => {
+        const serverName = (s.plain_name || '').toLowerCase();
+        const mixed = String(s.defrag_gametype) === '5' || serverName.includes('mixed');
+        if (mixed) return 'MIXED';
+        const t = (s.type || 'run').toLowerCase();
+        if (t === 'ctf') return 'CTF';
+        if (t === 'freestyle') return 'FREESTYLE';
+        if (t === 'teamrun') return 'TEAMRUN';
+        return 'RUN';
+    };
+
+    /** Defrag times in ms → MM:SS.mmm / SS.mmm. */
+    const formatTimeMs = (ms: number | null | undefined): string => {
+        if (ms == null || ms <= 0) return '-';
+        const totalSec = Math.floor(ms / 1000);
+        const m = Math.floor(totalSec / 60);
+        const s = totalSec % 60;
+        const mmm = ms % 1000;
+        if (m > 0) return `${m}:${s.toString().padStart(2, '0')}.${mmm.toString().padStart(3, '0')}`;
+        return `${s}.${mmm.toString().padStart(3, '0')}`;
+    };
+
+    const stripQ3Colors = (s: string | null | undefined): string =>
+        (s ?? '').replace(/\^\d|\^x[\da-fA-F]{2}|\^[\da-fA-F]{6}/g, '');
+
     const openServerMap = async (mapname: string | undefined) => {
         if (!mapname) return;
         const { openUrl } = await import('@tauri-apps/plugin-opener');
@@ -368,23 +397,26 @@
 
         <!-- defrag:// pending-connection modal. Floats above the whole
              launcher so the user sees it regardless of which tab is
-             active. Backdrop darkens everything else and acts as a
-             dismiss target. -->
+             active. Layout matches the Servers row so the modal reads
+             as "this is the server you'd see in the browser" rather
+             than a bare IP prompt: bigger map thumbnail + gametype
+             tag + Your PB + map record holder + player list. -->
         <div
             v-if="pendingDeepLink"
-            class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm overflow-auto"
             @click.self="cancelConnect"
         >
-            <div class="w-full max-w-md bg-neutral-900 border border-brand-500/30 rounded-lg shadow-2xl overflow-hidden">
+            <div class="w-full max-w-xl my-auto bg-neutral-900 border border-brand-500/30 rounded-lg shadow-2xl overflow-hidden">
                 <div class="px-5 py-3 border-b border-white/10 flex items-center gap-2">
                     <span class="text-brand-400">🎮</span>
                     <div class="font-semibold text-neutral-100">Join server?</div>
                 </div>
 
                 <div class="p-5 space-y-3">
-                    <div v-if="pendingServer" class="flex items-start gap-3">
+                    <!-- Rich server card. Mirrors the Servers tab row. -->
+                    <div v-if="pendingServer" class="flex items-start gap-4">
                         <button
-                            class="w-24 h-16 rounded bg-black/40 border border-white/10 overflow-hidden flex-shrink-0 hover:border-brand-500/40"
+                            class="w-36 h-24 rounded bg-black/40 border border-white/10 overflow-hidden flex-shrink-0 hover:border-brand-500/40"
                             :title="`Open ${pendingServer.map} on defrag.racing`"
                             @click="openServerMap(pendingServer.map)"
                         >
@@ -399,8 +431,10 @@
                                 no map
                             </div>
                         </button>
-                        <div class="flex-1 min-w-0">
-                            <div class="flex items-center gap-2 min-w-0">
+
+                        <div class="flex-1 min-w-0 space-y-1">
+                            <!-- Server name + flag + gametype tag + physics pill. -->
+                            <div class="flex items-center gap-2 min-w-0 flex-wrap">
                                 <img
                                     v-if="flagUrlOf(pendingServer.location)"
                                     :src="flagUrlOf(pendingServer.location)!"
@@ -410,25 +444,91 @@
                                 />
                                 <div
                                     class="text-sm text-neutral-100 truncate font-semibold"
+                                    :title="stripQ3Colors(pendingServer.name || pendingServer.plain_name)"
                                     v-html="q3ToHtml(pendingServer.name || pendingServer.plain_name)"
                                 ></div>
+                                <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-brand-500/15 text-brand-300 flex-shrink-0">
+                                    {{ gametypeTagOf(pendingServer) }}
+                                </span>
                                 <span class="uppercase text-[10px] px-1 py-0.5 rounded bg-white/5 text-neutral-300 flex-shrink-0">
                                     {{ physicsOfServer(pendingServer) }}
                                 </span>
                             </div>
-                            <div class="text-xs text-neutral-400 flex items-center gap-2 mt-1">
-                                <button class="text-brand-400 hover:underline" @click="openServerMap(pendingServer.map)">
+
+                            <!-- Map link + ip:port + players. -->
+                            <div class="text-xs text-neutral-400 flex items-center gap-2 flex-wrap">
+                                <button class="text-brand-400 hover:underline truncate max-w-[14rem]" @click="openServerMap(pendingServer.map)">
                                     {{ pendingServer.map }}
                                 </button>
                                 <span class="text-neutral-600">·</span>
                                 <span class="font-mono">{{ pendingServer.ip }}:{{ pendingServer.port }}</span>
+                                <span class="text-neutral-600">·</span>
+                                <span class="text-neutral-300 font-semibold">{{ playerCountOf(pendingServer) }}</span>
+                                <span>player{{ playerCountOf(pendingServer) === 1 ? '' : 's' }}</span>
                             </div>
-                            <div class="text-xs text-neutral-500 mt-0.5">
-                                {{ playerCountOf(pendingServer) }} player{{ playerCountOf(pendingServer) === 1 ? '' : 's' }} online
+
+                            <!-- Your PB on this map, if any. -->
+                            <div v-if="pendingServer.mytime_time" class="text-xs text-emerald-300/85">
+                                Your PB: <strong class="font-mono">{{ formatTimeMs(pendingServer.mytime_time) }}</strong>
+                                <span v-if="pendingServer.myrank_position && pendingServer.myrank_total" class="text-emerald-300/60 ml-1">
+                                    (rank {{ pendingServer.myrank_position }} / {{ pendingServer.myrank_total }})
+                                </span>
+                            </div>
+
+                            <!-- Map record holder. -->
+                            <div
+                                v-if="pendingServer.besttime_time && pendingServer.besttime_name"
+                                class="text-xs text-yellow-300/75 flex items-center gap-1.5 flex-wrap"
+                            >
+                                <span class="text-yellow-500">★</span>
+                                <span class="font-mono">{{ formatTimeMs(pendingServer.besttime_time) }}</span>
+                                <span class="text-neutral-500">by</span>
+                                <img
+                                    v-if="flagUrlOf(pendingServer.besttime_country)"
+                                    :src="flagUrlOf(pendingServer.besttime_country)!"
+                                    :alt="pendingServer.besttime_country || ''"
+                                    class="w-3 h-2 rounded flex-shrink-0"
+                                    @error="($event.target as HTMLImageElement).style.display='none'"
+                                />
+                                <span
+                                    class="truncate max-w-[10rem]"
+                                    :title="stripQ3Colors(pendingServer.besttime_name)"
+                                    v-html="q3ToHtml(pendingServer.besttime_name)"
+                                ></span>
                             </div>
                         </div>
                     </div>
-                    <div v-else class="text-sm">
+
+                    <!-- Player list under the card. Same shape as
+                         Servers row: flag + Q3-colored name, comma-
+                         separated wrap. Hidden on empty servers. -->
+                    <div
+                        v-if="pendingServer && (pendingServer.online_players?.length ?? 0) > 0"
+                        class="flex flex-wrap gap-x-3 gap-y-1 text-xs pt-1 border-t border-white/[0.04]"
+                    >
+                        <span class="text-neutral-500 uppercase text-[10px] tracking-wider w-full">Players online</span>
+                        <span
+                            v-for="(p, idx) in (pendingServer.online_players ?? [])"
+                            :key="`pending-player-${idx}`"
+                            class="flex items-center gap-1.5 min-w-0"
+                        >
+                            <img
+                                v-if="flagUrlOf(p.country)"
+                                :src="flagUrlOf(p.country)!"
+                                :alt="p.country || ''"
+                                class="w-3 h-2 rounded flex-shrink-0"
+                                @error="($event.target as HTMLImageElement).style.display='none'"
+                            />
+                            <span
+                                class="truncate max-w-[8rem]"
+                                :title="stripQ3Colors(p.name)"
+                                v-html="q3ToHtml(p.name)"
+                            ></span>
+                        </span>
+                    </div>
+
+                    <!-- Fallback: server not in live list. -->
+                    <div v-if="!pendingServer" class="text-sm">
                         <div class="text-neutral-300 mb-1">Connect to</div>
                         <div class="font-mono text-brand-300 text-base">{{ pendingDeepLink.address }}</div>
                         <div class="text-xs text-neutral-500 mt-1">
@@ -436,7 +536,7 @@
                         </div>
                     </div>
 
-                    <div class="text-xs">
+                    <div class="text-xs pt-1">
                         <button
                             class="hover:underline text-neutral-400 hover:text-neutral-200"
                             @click="openAutoConnectSetting"
