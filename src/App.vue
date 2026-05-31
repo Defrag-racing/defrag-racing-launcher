@@ -6,11 +6,13 @@
     import { q3ToHtml } from './lib/q3color';
     import { useConfigStore } from './stores/config';
     import { useNotificationsStore } from './stores/notifications';
+    import { useUpdaterStore } from './stores/updater';
 
     const router = useRouter();
     const route = useRoute();
     const config = useConfigStore();
     const notifStore = useNotificationsStore();
+    const updaterStore = useUpdaterStore();
 
     // Top nav is hidden during the bootstrap flows (onboarding,
     // version-mismatch screen) - those are full-screen forms that
@@ -167,6 +169,14 @@
         await notifStore.refresh();
         notifPollTimer = window.setInterval(() => notifStore.refresh(), 90_000);
 
+        // Updater: boot check + recurring interval. Lives at App
+        // level so a tab switch doesn't reset the cadence and both
+        // Settings (countdown UI) + Dashboard (banner) read the same
+        // shared state.
+        if (config.config.auto_update_enabled) {
+            void updaterStore.start();
+        }
+
         // Pending defrag:// listeners. Live event for "user clicked a
         // forum link while launcher is open"; cold-start path for "the
         // launcher just spawned because of that click".
@@ -219,6 +229,7 @@
         if (unlistenPending) unlistenPending();
         if (unlistenResult) unlistenResult();
         window.clearTimeout(deepLinkErrorTimer);
+        updaterStore.stop();
     });
 </script>
 

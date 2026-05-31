@@ -104,6 +104,17 @@ pub fn app_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+/// Append a message to startup.log. Surfaced to the frontend so the
+/// updater can leave a breadcrumb trail of "check started / no update /
+/// found vX.Y.Z / network error" in the same log file as Rust-side
+/// startup events. Users can then check %APPDATA%\defrag\launcher\
+/// startup.log to see exactly when the launcher tried to update and
+/// what came back, without needing DevTools.
+#[tauri::command]
+pub fn log_to_file(msg: String) {
+    crate::log_startup(&msg);
+}
+
 // ---- Token -----------------------------------------------------------------
 
 #[tauri::command]

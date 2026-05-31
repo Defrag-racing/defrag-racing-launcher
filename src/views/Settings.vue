@@ -1,13 +1,33 @@
 <script setup lang="ts">
-    import { onMounted, ref } from 'vue';
+    import { computed, onMounted, onUnmounted, ref } from 'vue';
     import { useRouter } from 'vue-router';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
     import { openUrl } from '@tauri-apps/plugin-opener';
     import { tauri, type EngineCandidate } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
+    import { useUpdaterStore } from '../stores/updater';
 
     const router = useRouter();
     const config = useConfigStore();
+    const updater = useUpdaterStore();
+
+    // Ticking now-ref so the countdown re-renders each second without
+    // forcing the updater store to tick its own clock.
+    const nowMs = ref(Date.now());
+    let nowTimer: number | undefined;
+    onMounted(() => { nowTimer = window.setInterval(() => { nowMs.value = Date.now(); }, 1000); });
+    onUnmounted(() => { if (nowTimer !== undefined) window.clearInterval(nowTimer); });
+
+    const countdownLabel = computed(() => {
+        if (!updater.lastCheckAt) return '';
+        const nextAt = updater.lastCheckAt + updater.intervalMs;
+        const s = Math.max(0, Math.ceil((nextAt - nowMs.value) / 1000));
+        const m = Math.floor(s / 60);
+        const ss = s % 60;
+        return `${m}:${ss.toString().padStart(2, '0')}`;
+    });
+
+    const manualCheck = () => updater.runCheck('manual');
 
     const engines = ref<EngineCandidate[]>([]);
     const tokenInput = ref('');
@@ -337,16 +357,41 @@
             </section>
             -->
             <!-- Auto-update status (read-only, informational) -->
-            <section class="bg-neutral-900 border border-white/10 rounded-lg p-4">
+            <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
                 <div class="flex items-center gap-2">
                     <span class="text-emerald-400">●</span>
                     <div class="font-semibold">Automatic updates: on</div>
                 </div>
-                <div class="text-xs text-neutral-500 mt-1.5 leading-relaxed">
+                <div class="text-xs text-neutral-500 leading-relaxed">
                     The launcher checks `defrag.racing` and GitHub for a newer signed release
                     on every startup. Required to keep security fixes flowing - cannot be
                     disabled. When an update is available the dashboard shows an "Install &amp; restart"
                     banner.
+                </div>
+                <!-- Manual check + next-check countdown. Lives here
+                     (not on the main dashboard) because it's a setting-
+                     adjacent diagnostic, not something the user needs to
+                     see every time the launcher opens. -->
+                <div class="flex items-center justify-between gap-3 pt-2 border-t border-white/[0.04]">
+                    <div class="text-xs">
+                        <span v-if="updater.state.kind === 'checking'" class="text-neutral-300">Checking…</span>
+                        <span v-else-if="updater.upToDateToast" class="text-emerald-400">✓ You're on the latest version</span>
+                        <span v-else-if="updater.state.kind === 'available'" class="text-brand-300">
+                            Update v{{ updater.state.version }} is available - see Dashboard.
+                        </span>
+                        <span v-else-if="updater.state.kind === 'error'" class="text-red-300">
+                            Last check failed: {{ updater.state.message }}
+                        </span>
+                        <span v-else-if="countdownLabel" class="text-neutral-500">
+                            Next check in <span class="font-mono text-neutral-300">{{ countdownLabel }}</span>
+                        </span>
+                        <span v-else class="text-neutral-500">Idle</span>
+                    </div>
+                    <button
+                        class="btn-ghost text-xs disabled:opacity-50"
+                        :disabled="updater.manualBusy"
+                        @click="manualCheck"
+                    >{{ updater.manualBusy ? 'Checking…' : 'Check now' }}</button>
                 </div>
             </section>
 

@@ -180,6 +180,7 @@ pub fn run() {
             commands::previous_version,
             commands::acknowledge_version,
             commands::app_version,
+            commands::log_to_file,
             commands::save_token,
             commands::has_token,
             commands::clear_token,

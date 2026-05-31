@@ -71,6 +71,10 @@ export const tauri = {
     previousVersion: () => invoke<string | null>('previous_version'),
     acknowledgeVersion: () => invoke<void>('acknowledge_version'),
     appVersion: () => invoke<string>('app_version'),
+    /** Append a line to %APPDATA%\defrag\launcher\startup.log. Used by
+     *  the updater + any other frontend code that wants its trace to
+     *  survive across runs / show up next to Rust startup breadcrumbs. */
+    logToFile: (msg: string) => invoke<void>('log_to_file', { msg }),
 
     saveToken: (token: string) => invoke<void>('save_token', { token }),
     hasToken: () => invoke<boolean>('has_token'),

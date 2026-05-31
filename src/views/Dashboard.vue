@@ -2,13 +2,13 @@
     import { computed, onMounted, onUnmounted, ref } from 'vue';
     import { useRouter } from 'vue-router';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import type { Update } from '@tauri-apps/plugin-updater';
     import { tauri, type UploadStateSnapshot, type PendingUpload } from '../lib/tauri';
-    import { checkForUpdate, runUpdate, type UpdateState } from '../lib/updater';
     import { useConfigStore } from '../stores/config';
+    import { useUpdaterStore } from '../stores/updater';
 
     const router = useRouter();
     const config = useConfigStore();
+    const updater = useUpdaterStore();
 
     const queue = ref<UploadStateSnapshot>({
         items: [],
@@ -153,44 +153,10 @@
     // defrag:// pending modal lives in App.vue so it floats above
     // every tab. Dashboard no longer owns that state.
 
-    // Auto-update banner. Quiet on success (just shows "up to date" for
-    // a beat); persistent on "Update available" until the user installs.
-    //
-    // We can't store the Update object inside `ref` - its private field
-    // doesn't survive Vue's reactive proxy and breaks the TS type. Keep
-    // the class instance in a plain `let` and have the ref carry only
-    // serializable data needed for the template.
-    const updateState = ref<UpdateState>({ kind: 'idle' });
-    let pendingUpdate: Update | null = null;
-
+    // Update state + install action are owned by useUpdaterStore;
+    // App.vue starts the boot check + 15-min interval. Dashboard just
+    // renders the banner sourced from the store.
     let unlisten: UnlistenFn | null = null;
-    let updateCheckTimer: number | undefined;
-
-    // Re-check for updates every 6h while the launcher is alive. The
-    // interval keeps firing even when the main window is hidden in the
-    // tray - JS lifecycle is bound to the process, not the OS window -
-    // so the "set and forget" user who installed once and stays in
-    // tray for weeks still gets caught up on security patches.
-    const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
-
-    const checkUpdate = async () => {
-        // Auto-update is always on (the Settings toggle was retired -
-        // security fixes have to reach every install without depending
-        // on a user remembering to flip a switch). We still read the
-        // config flag for forward compatibility in case an expert-mode
-        // escape hatch reappears, but the default is true and the UI
-        // exposes no way to flip it off.
-        if (!config.config.auto_update_enabled) return;
-        try {
-            const update = await checkForUpdate();
-            if (update) {
-                pendingUpdate = update;
-                updateState.value = { kind: 'available', version: update.version };
-            }
-        } catch {
-            // Network blip; the next interval will retry.
-        }
-    };
 
     const refreshPaused = async () => {
         try {
@@ -215,35 +181,15 @@
         unlisten = await listen<UploadStateSnapshot>('upload_state_changed', (ev) => {
             queue.value = ev.payload;
         });
-
-        if (config.config.auto_update_enabled) {
-            try {
-                updateState.value = { kind: 'checking' };
-                const update = await checkForUpdate();
-                if (update) {
-                    pendingUpdate = update;
-                    updateState.value = { kind: 'available', version: update.version };
-                } else {
-                    updateState.value = { kind: 'idle' };
-                }
-            } catch {
-                updateState.value = { kind: 'idle' };
-            }
-            updateCheckTimer = window.setInterval(checkUpdate, UPDATE_CHECK_INTERVAL_MS);
-        }
     });
 
     onUnmounted(() => {
         if (unlisten) unlisten();
-        if (updateCheckTimer !== undefined) window.clearInterval(updateCheckTimer);
         if (rateLimitPollTimer !== undefined) window.clearInterval(rateLimitPollTimer);
         if (nowTickTimer !== undefined) window.clearInterval(nowTickTimer);
     });
 
-    const installUpdate = async () => {
-        if (!pendingUpdate) return;
-        await runUpdate(pendingUpdate, (s) => { updateState.value = s; });
-    };
+    const installUpdate = () => updater.install();
 
     const toggle = async () => {
         toggleError.value = null;
@@ -559,31 +505,31 @@
         </div>
 
         <div
-            v-if="updateState.kind === 'available'"
+            v-if="updater.state.kind === 'available'"
             class="px-5 py-2 border-b border-brand-500/20 bg-brand-500/10 text-xs text-brand-300 flex items-center gap-3"
         >
-            <span>Update <strong>v{{ updateState.version }}</strong> is available.</span>
+            <span>Update <strong>v{{ updater.state.version }}</strong> is available.</span>
             <button class="ml-auto px-2 py-0.5 rounded bg-brand-500/20 hover:bg-brand-500/30 font-semibold" @click="installUpdate">
                 Install &amp; restart
             </button>
         </div>
         <div
-            v-else-if="updateState.kind === 'downloading'"
+            v-else-if="updater.state.kind === 'downloading'"
             class="px-5 py-2 border-b border-brand-500/20 bg-brand-500/10 text-xs text-brand-300"
         >
-            Downloading update… {{ updateState.percent }}%
+            Downloading update… {{ updater.state.percent }}%
         </div>
         <div
-            v-else-if="updateState.kind === 'installing'"
+            v-else-if="updater.state.kind === 'installing'"
             class="px-5 py-2 border-b border-brand-500/20 bg-brand-500/10 text-xs text-brand-300"
         >
             Installing… the launcher will restart in a moment.
         </div>
         <div
-            v-else-if="updateState.kind === 'error'"
+            v-else-if="updater.state.kind === 'error'"
             class="px-5 py-2 border-b border-red-500/20 bg-red-500/10 text-xs text-red-300"
         >
-            Update failed: {{ updateState.message }}
+            Update failed: {{ updater.state.message }}
         </div>
 
         <!-- Queue summary strip. The "uploaded / backed up / errors"
