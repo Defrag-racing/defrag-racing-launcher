@@ -80,6 +80,42 @@ jobs:
       - name: Install npm deps
         run: npm ci
 
+      # Pull this version's section out of CHANGELOG.md and stash it
+      # so the next step can use it as the release body. The launcher's
+      # "What's new" panel fetches CHANGELOG.md directly so it can show
+      # the full multi-version diff for a user on an older build - but
+      # the GH release page still wants a sensible one-version body.
+      - name: Extract changelog section
+        id: changelog
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#launcher-v}"
+          # Slice from `## VERSION` up to the next `## ` heading, exclusive.
+          SECTION=$(awk -v ver="$VERSION" '
+            $0 ~ "^## " ver "([^0-9]|$)" { capture=1; next }
+            capture && /^## / { exit }
+            capture { print }
+          ' CHANGELOG.md)
+          if [ -z "$(echo "$SECTION" | tr -d "[:space:]")" ]; then
+            SECTION="Release ${VERSION}. See https://github.com/Defrag-racing/defrag-racing-launcher/blob/main/CHANGELOG.md for the full changelog."
+          fi
+          {
+            echo "body<<DRL_EOF"
+            echo "$SECTION"
+            echo ""
+            echo "---"
+            echo ""
+            echo "Download the installer for your platform below."
+            echo ""
+            echo "- **Windows**: \`.msi\` or \`.exe\` installer"
+            echo "- **macOS**: \`.dmg\` (pick Apple Silicon for M1/M2/M3 Macs, Intel for older ones)"
+            echo "- **Linux**: \`.AppImage\` (portable) or \`.deb\`"
+            echo ""
+            echo "The launcher's auto-updater will pick this up automatically on v0.1.0+ installs."
+            echo "DRL_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build + publish
         uses: tauri-apps/tauri-action@v0
         env:
@@ -94,14 +130,7 @@ jobs:
         with:
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
           releaseName: 'Defrag Racing Launcher ${{ github.event.inputs.tag || github.ref_name }}'
-          releaseBody: |
-            Download the installer for your platform below.
-
-            - **Windows**: `.msi` or `.exe` installer
-            - **macOS**: `.dmg` (pick Apple Silicon for M1/M2/M3 Macs, Intel for older ones)
-            - **Linux**: `.AppImage` (portable) or `.deb`
-
-            Tauri updater will pick up future releases automatically once you have v0.1.0+ installed.
+          releaseBody: ${{ steps.changelog.outputs.body }}
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}

@@ -2,9 +2,11 @@
     import { computed, onMounted, onUnmounted, ref } from 'vue';
     import { useRouter } from 'vue-router';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+    import { getVersion } from '@tauri-apps/api/app';
     import { tauri, type UploadStateSnapshot, type PendingUpload } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
     import { useUpdaterStore } from '../stores/updater';
+    import { fetchChangelogSince, renderMarkdown, type ChangelogSection } from '../lib/changelog';
 
     const router = useRouter();
     const config = useConfigStore();
@@ -33,6 +35,38 @@
         try {
             currentThrottlePct.value = await tauri.getCpuThrottlePct();
         } catch { /* watcher not running */ }
+    };
+
+    // "What's new" panel. Fetched once on demand from CHANGELOG.md and
+    // filtered down to sections strictly newer than the installed
+    // version. Lazy on click so we don't hit raw.githubusercontent on
+    // every Dashboard mount.
+    const whatsNewOpen = ref(false);
+    const whatsNewLoading = ref(false);
+    const whatsNewError = ref<string | null>(null);
+    const whatsNewSections = ref<ChangelogSection[]>([]);
+    const whatsNewInstalled = ref<string>('');
+
+    const renderedBody = (body: string) => renderMarkdown(body);
+
+    const toggleWhatsNew = async () => {
+        if (whatsNewOpen.value) {
+            whatsNewOpen.value = false;
+            return;
+        }
+        whatsNewOpen.value = true;
+        if (whatsNewSections.value.length > 0) return;
+        whatsNewLoading.value = true;
+        whatsNewError.value = null;
+        try {
+            const installed = await getVersion();
+            whatsNewInstalled.value = installed;
+            whatsNewSections.value = await fetchChangelogSince(installed);
+        } catch (e: any) {
+            whatsNewError.value = e?.toString?.() ?? 'Failed to load changelog';
+        } finally {
+            whatsNewLoading.value = false;
+        }
     };
 
     // Rate-limit countdown. Backend stores a unix-epoch-ms timestamp at
@@ -506,12 +540,38 @@
 
         <div
             v-if="updater.state.kind === 'available'"
-            class="px-5 py-2 border-b border-brand-500/20 bg-brand-500/10 text-xs text-brand-300 flex items-center gap-3"
+            class="border-b border-brand-500/20 bg-brand-500/10 text-xs text-brand-300"
         >
-            <span>Update <strong>v{{ updater.state.version }}</strong> is available.</span>
-            <button class="ml-auto px-2 py-0.5 rounded bg-brand-500/20 hover:bg-brand-500/30 font-semibold" @click="installUpdate">
-                Install &amp; restart
-            </button>
+            <div class="px-5 py-2 flex items-center gap-3">
+                <span>Update <strong>v{{ updater.state.version }}</strong> is available.</span>
+                <button
+                    class="ml-auto px-2 py-0.5 rounded bg-white/5 hover:bg-white/10"
+                    @click="toggleWhatsNew"
+                >
+                    {{ whatsNewOpen ? 'Hide changes' : 'View changes' }}
+                </button>
+                <button class="px-2 py-0.5 rounded bg-brand-500/20 hover:bg-brand-500/30 font-semibold" @click="installUpdate">
+                    Install &amp; restart
+                </button>
+            </div>
+            <div
+                v-if="whatsNewOpen"
+                class="px-5 py-3 border-t border-brand-500/20 bg-black/30 max-h-72 overflow-y-auto"
+            >
+                <div v-if="whatsNewLoading" class="text-neutral-400">Loading changelog…</div>
+                <div v-else-if="whatsNewError" class="text-red-300">
+                    {{ whatsNewError }}
+                </div>
+                <div v-else-if="whatsNewSections.length === 0" class="text-neutral-400">
+                    Nothing newer than v{{ whatsNewInstalled }} in the changelog yet.
+                </div>
+                <div v-else class="space-y-4">
+                    <section v-for="s in whatsNewSections" :key="s.version">
+                        <h3 class="text-sm font-semibold text-brand-200 mb-1">v{{ s.version }}</h3>
+                        <div class="text-xs text-neutral-200" v-html="renderedBody(s.body)"></div>
+                    </section>
+                </div>
+            </div>
         </div>
         <div
             v-else-if="updater.state.kind === 'downloading'"
