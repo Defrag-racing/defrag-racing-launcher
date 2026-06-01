@@ -645,6 +645,21 @@ pub async fn request_render(file_hash: String) -> Result<serde_json::Value, Stri
         .json::<serde_json::Value>()
         .await
         .map_err(err_to_string)?;
+    // Render is the one launcher action with no silent fallback, so log
+    // every non-2xx with the server's own JSON message. A 401 here means
+    // auth:sanctum rejected the token (vs 403 = token lacks the
+    // launcher:upload ability) - the body text ("Unauthenticated." vs the
+    // controller's own error) is what tells the two apart in a bug report.
+    if !(200..=299).contains(&status) {
+        log::warn!(
+            "render-video: http {} for hash {} - body={}",
+            status,
+            file_hash,
+            body
+        );
+    } else {
+        log::info!("render-video: http {} for hash {}", status, file_hash);
+    }
     if let Some(obj) = body.as_object_mut() {
         obj.insert("_http_status".into(), serde_json::Value::from(status));
     }
@@ -707,7 +722,15 @@ pub async fn get_render_status(file_hash: String) -> Result<serde_json::Value, S
         .map_err(err_to_string)?
         .ok_or_else(|| "No token saved".to_string())?;
     let client = crate::api::Client::new(config::api_base_url(), token).map_err(err_to_string)?;
-    client.render_status(&file_hash).await.map_err(err_to_string)
+    // The Library warmup swallows errors from this call (it fires for up
+    // to 100 rows on mount), so without a log here a token/auth problem
+    // on the render endpoints is completely invisible. Log the failure
+    // reason once per call - that's how we caught the render-video 401.
+    client.render_status(&file_hash).await.map_err(|e| {
+        let msg = err_to_string(e);
+        log::warn!("render-status: failed for hash {} - {}", file_hash, msg);
+        msg
+    })
 }
 
 /// "Who am I" lookup for the Profile button. Token-locked. Frontend

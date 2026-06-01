@@ -11,7 +11,9 @@ const router = createRouter({
         { path: '/servers', name: 'servers', component: () => import('./views/Servers.vue') },
         { path: '/records', name: 'records', component: () => import('./views/Records.vue') },
         { path: '/maps', name: 'maps', component: () => import('./views/Maps.vue') },
-        { path: '/library', name: 'library', component: () => import('./views/Library.vue') },
+        // Library merged into the Demos (dashboard) view - keep the path
+        // as a redirect so any lingering deep link / nav still lands somewhere.
+        { path: '/library', redirect: '/dashboard' },
         { path: '/notifications', name: 'notifications', component: () => import('./views/Notifications.vue') },
         { path: '/history', name: 'history', component: () => import('./views/History.vue') },
         { path: '/settings', name: 'settings', component: () => import('./views/Settings.vue') },

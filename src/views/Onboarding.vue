@@ -156,7 +156,7 @@
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
-                            <span><strong>Library</strong> - browse every local demo and queue YouTube renders from one click.</span>
+                            <span><strong>Demos</strong> - browse every local demo and queue YouTube renders from one click, right next to the live auto-backup status.</span>
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>

@@ -1,13 +1,30 @@
 <script setup lang="ts">
     import { computed, onMounted, onUnmounted, ref } from 'vue';
-    import { useRouter } from 'vue-router';
+    import { useRoute, useRouter } from 'vue-router';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
     import { openUrl } from '@tauri-apps/plugin-opener';
     import { tauri, type EngineCandidate } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
     import { useUpdaterStore } from '../stores/updater';
+    import { displayPath } from '../lib/path';
 
     const router = useRouter();
+    const route = useRoute();
+
+    // When the Demos / Library "Change in Settings" chip navigates here it
+    // passes ?highlight=demos. Pulse + scroll the demos-folder card into
+    // view so the user lands looking straight at the field they came to
+    // change, instead of having to hunt for it in the settings list.
+    const highlightDemos = ref(false);
+    const demosSection = ref<HTMLElement | null>(null);
+    onMounted(async () => {
+        if (route.query.highlight === 'demos') {
+            highlightDemos.value = true;
+            await new Promise((r) => requestAnimationFrame(() => r(null)));
+            demosSection.value?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            window.setTimeout(() => { highlightDemos.value = false; }, 2600);
+        }
+    });
     const config = useConfigStore();
     const updater = useUpdaterStore();
 
@@ -148,8 +165,8 @@
                     </div>
                     <button class="btn-ghost" @click="pickEngine">Change</button>
                 </div>
-                <div class="text-sm text-neutral-300 break-all">
-                    {{ config.config.engine_path || '(not set)' }}
+                <div class="text-sm text-neutral-300 break-all" :title="config.config.engine_path || ''">
+                    {{ displayPath(config.config.engine_path) || '(not set)' }}
                 </div>
 
                 <!-- Auto-connect bypass. Off by default so an accidental
@@ -181,16 +198,25 @@
             </section>
 
             <!-- Demos path -->
-            <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
+            <section
+                ref="demosSection"
+                class="bg-neutral-900 border rounded-lg p-4 space-y-3 transition-all duration-500"
+                :class="highlightDemos
+                    ? 'border-brand-500/70 ring-2 ring-brand-500/40 shadow-lg shadow-brand-500/10'
+                    : 'border-white/10'"
+            >
                 <div class="flex items-start justify-between gap-3">
                     <div>
                         <div class="font-semibold">Demos folder</div>
                         <div class="text-xs text-neutral-500 mt-0.5">The launcher watches this folder for new demos.</div>
+                        <div class="text-[11px] text-brand-400/80 mt-1">
+                            Drives the <strong>Demos</strong> tab: auto-backup, the on-disk demo list, and YouTube renders.
+                        </div>
                     </div>
                     <button class="btn-ghost" @click="pickDemos">Change</button>
                 </div>
-                <div class="text-sm text-neutral-300 break-all">
-                    {{ config.config.demos_path || '(not set)' }}
+                <div class="text-sm text-neutral-300 break-all" :title="config.config.demos_path || ''">
+                    {{ displayPath(config.config.demos_path) || '(not set)' }}
                 </div>
                 <div class="flex items-center justify-between gap-3 pt-2 border-t border-white/[0.05]">
                     <div>

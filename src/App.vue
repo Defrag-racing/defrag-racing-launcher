@@ -24,7 +24,6 @@
             || r === 'servers'
             || r === 'records'
             || r === 'maps'
-            || r === 'library'
             || r === 'notifications'
             || r === 'history'
             || r === 'settings';
@@ -287,13 +286,6 @@
                         ? 'bg-white/10 text-neutral-100 font-semibold'
                         : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
                 >Demos</RouterLink>
-                <RouterLink
-                    :to="{ name: 'library' }"
-                    class="px-3 py-1.5 text-sm rounded transition-colors"
-                    :class="route.name === 'library'
-                        ? 'bg-white/10 text-neutral-100 font-semibold'
-                        : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
-                >Library</RouterLink>
                 <RouterLink
                     :to="{ name: 'servers' }"
                     class="px-3 py-1.5 text-sm rounded transition-colors"
