@@ -1,11 +1,26 @@
 # Build and publish the launcher for Windows, macOS (Intel + Apple Silicon)
-# and Linux whenever a `launcher-v*` tag is pushed. Each platform matrix job
-# uploads its installer to the matching draft GitHub Release; after all
-# platforms finish the release is published automatically.
+# and Linux whenever a `launcher-v*` tag is pushed.
 #
-# Triggering: `git tag launcher-v0.1.0 && git push --tags`.
-# The `launcher-` prefix keeps the tag namespace clean in case this repo
-# later grows other taggable artifacts.
+# Architecture (per tauri-apps/tauri-action#914 race-condition workaround):
+#   1. `create-release` runs FIRST and creates the draft GH release exactly
+#      once, exposing its release_id as an output.
+#   2. `build` is a 4-job matrix that `needs: create-release` and passes
+#      that release_id into tauri-action via the `releaseId` input, which
+#      switches the action into upload-only mode (no listReleases TOCTOU,
+#      no second draft can ever be created).
+#   3. `publish` runs after the matrix and flips the draft to published
+#      via gh CLI, so we never leave releases lingering as drafts. If any
+#      matrix job failed, the release stays a draft for manual recovery.
+#
+# Why the previous single-job matrix broke: each job called tauri-action
+# with `releaseDraft: true` and the same tagName. The action paginates
+# listReleases to find an existing draft, and "draft not found" → create
+# one. With 4 jobs racing, two of them could simultaneously hit the
+# not-found path and both POST createRelease, producing duplicate drafts
+# with identical tags; assets scattered between them.
+#
+# Triggering: `git tag launcher-v0.1.0 && git push --follow-tags`.
+# The `launcher-` prefix keeps the tag namespace clean.
 
 name: Release launcher
 
@@ -25,7 +40,76 @@ permissions:
   contents: write
 
 jobs:
+  create-release:
+    runs-on: ubuntu-22.04
+    outputs:
+      release_id: ${{ steps.create.outputs.result }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Resolve tag + extract changelog section
+        id: meta
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#launcher-v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # Slice the matching `## X.Y.Z` section from CHANGELOG.md so the
+          # GitHub release body carries the one-version notes. The
+          # launcher's in-app "What's new" panel fetches CHANGELOG.md
+          # directly and stacks every section newer than the user's
+          # installed version, so users on old builds still see the full
+          # diff - this body just covers what the GH release page shows.
+          SECTION=$(awk -v ver="$VERSION" '
+            $0 ~ "^## " ver "([^0-9]|$)" { capture=1; next }
+            capture && /^## / { exit }
+            capture { print }
+          ' CHANGELOG.md)
+          if [ -z "$(echo "$SECTION" | tr -d "[:space:]")" ]; then
+            SECTION="Release ${VERSION}. See https://github.com/Defrag-racing/defrag-racing-launcher/blob/main/CHANGELOG.md for the full changelog."
+          fi
+          {
+            echo "body<<DRL_EOF"
+            echo "$SECTION"
+            echo ""
+            echo "---"
+            echo ""
+            echo "Download the installer for your platform below."
+            echo ""
+            echo "- **Windows**: \`.msi\` or \`.exe\` installer"
+            echo "- **macOS**: \`.dmg\` (pick Apple Silicon for M1/M2/M3 Macs, Intel for older ones)"
+            echo "- **Linux**: \`.AppImage\` (portable) or \`.deb\`"
+            echo ""
+            echo "The launcher's auto-updater will pick this up automatically on v0.1.0+ installs."
+            echo "DRL_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create draft release
+        id: create
+        uses: actions/github-script@v7
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          BODY: ${{ steps.meta.outputs.body }}
+        with:
+          script: |
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: process.env.TAG,
+              name: `Defrag Racing Launcher ${process.env.TAG}`,
+              body: process.env.BODY,
+              draft: true,
+              prerelease: false,
+            });
+            return data.id;
+
   build:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -80,43 +164,7 @@ jobs:
       - name: Install npm deps
         run: npm ci
 
-      # Pull this version's section out of CHANGELOG.md and stash it
-      # so the next step can use it as the release body. The launcher's
-      # "What's new" panel fetches CHANGELOG.md directly so it can show
-      # the full multi-version diff for a user on an older build - but
-      # the GH release page still wants a sensible one-version body.
-      - name: Extract changelog section
-        id: changelog
-        shell: bash
-        run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          VERSION="${TAG#launcher-v}"
-          # Slice from `## VERSION` up to the next `## ` heading, exclusive.
-          SECTION=$(awk -v ver="$VERSION" '
-            $0 ~ "^## " ver "([^0-9]|$)" { capture=1; next }
-            capture && /^## / { exit }
-            capture { print }
-          ' CHANGELOG.md)
-          if [ -z "$(echo "$SECTION" | tr -d "[:space:]")" ]; then
-            SECTION="Release ${VERSION}. See https://github.com/Defrag-racing/defrag-racing-launcher/blob/main/CHANGELOG.md for the full changelog."
-          fi
-          {
-            echo "body<<DRL_EOF"
-            echo "$SECTION"
-            echo ""
-            echo "---"
-            echo ""
-            echo "Download the installer for your platform below."
-            echo ""
-            echo "- **Windows**: \`.msi\` or \`.exe\` installer"
-            echo "- **macOS**: \`.dmg\` (pick Apple Silicon for M1/M2/M3 Macs, Intel for older ones)"
-            echo "- **Linux**: \`.AppImage\` (portable) or \`.deb\`"
-            echo ""
-            echo "The launcher's auto-updater will pick this up automatically on v0.1.0+ installs."
-            echo "DRL_EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Build + publish
+      - name: Build + upload to existing draft
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -128,11 +176,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.event.inputs.tag || github.ref_name }}
-          releaseName: 'Defrag Racing Launcher ${{ github.event.inputs.tag || github.ref_name }}'
-          releaseBody: ${{ steps.changelog.outputs.body }}
-          releaseDraft: true
-          prerelease: false
+          # releaseId switches tauri-action into upload-only mode: no
+          # listReleases/createRelease pair, so the 4 parallel matrix jobs
+          # cannot race each other into duplicate drafts (see #914).
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
 
       # Diagnostic step: tauri-action swallows light.exe stderr, so when the
@@ -177,3 +224,22 @@ jobs:
           & "$wix\light.exe" -v -sval -ext WixUtilExtension -ext WixUIExtension -cultures:en-US `
             -out "$outDir\debug-sval.msi" "$outDir\main.wixobj" "$outDir\cleanup.wixobj"
           Write-Host "`n=== light -sval exit: $LASTEXITCODE ==="
+
+  publish:
+    # Auto-flip the draft to published once all 4 matrix jobs succeeded.
+    # If any matrix job failed, this step is skipped and the release stays
+    # a draft for manual inspection / cleanup. Removes the "remember to
+    # click Publish" step from the human release flow.
+    needs: [create-release, build]
+    if: success()
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          gh api -X PATCH "/repos/${{ github.repository }}/releases/${RELEASE_ID}" \
+            -f draft=false \
+            -f make_latest=true
