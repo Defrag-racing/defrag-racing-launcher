@@ -512,7 +512,7 @@
                             </div>
 
                             <!-- Timestamp + read toggle -->
-                            <div class="flex flex-col items-end gap-1 flex-shrink-0">
+                            <div class="flex flex-row items-center gap-2 flex-shrink-0">
                                 <div class="text-[11px] text-neutral-500 whitespace-nowrap">
                                     {{ formatRelative(parseSqlAt(n.date_set ?? n.created_at)) }}
                                 </div>
@@ -632,7 +632,7 @@
                             </div>
 
                             <!-- Timestamp + read toggle -->
-                            <div class="flex flex-col items-end gap-1 flex-shrink-0">
+                            <div class="flex flex-row items-center gap-2 flex-shrink-0">
                                 <div class="text-[11px] text-neutral-500 whitespace-nowrap">
                                     {{ formatRelative(parseSqlAt(n.created_at)) }}
                                 </div>

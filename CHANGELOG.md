@@ -4,6 +4,10 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.12
+
+- Notifications layout: the per-row timestamp and the read/unread dot are now on the same line (right-aligned), so each notification fits more cleanly on one row instead of stacking.
+
 ## 0.1.11
 
 - Release workflow rebuilt so multi-platform tag builds no longer race themselves. A `create-release` job now opens the draft once before any builder runs, the 4-platform matrix uploads into that draft by id, and a final `publish` job auto-flips it to published when every platform succeeds.
