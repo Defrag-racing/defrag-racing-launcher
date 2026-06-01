@@ -194,9 +194,17 @@
 
         // Bell badge poll. First call goes through immediately so the
         // badge isn't blank on first render; subsequent ticks every
-        // 90s keep it warm without hammering the browse bucket.
+        // 180s hit the lightweight unread-count endpoint (~30B). The
+        // poll skips ticks when the window is hidden (launcher in tray)
+        // - we still refresh once on `visibilitychange` -> visible so
+        // returning users see fresh counts without waiting up to 3min.
         await notifStore.refresh();
-        notifPollTimer = window.setInterval(() => notifStore.refresh(), 90_000);
+        notifPollTimer = window.setInterval(() => {
+            if (!document.hidden) notifStore.refresh();
+        }, 180_000);
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) notifStore.refresh();
+        });
 
         // Updater: boot check + recurring interval. Lives at App
         // level so a tab switch doesn't reset the cadence and both

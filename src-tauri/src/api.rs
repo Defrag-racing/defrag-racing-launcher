@@ -76,8 +76,13 @@ pub struct Client {
 
 impl Client {
     pub fn new(base_url: String, token: String) -> Result<Self> {
+        // UA shape: "defrag-launcher/0.1.9 (windows)". The web profile's
+        // Launcher Tokens UI parses this to show "Launcher 0.1.9 -
+        // windows" next to the IP. Anything that doesn't match falls
+        // through as raw UA so a curl/python-requests caller stands out.
+        let platform = std::env::consts::OS;
         let http = reqwest::Client::builder()
-            .user_agent(format!("defrag-racing-launcher/{}", env!("CARGO_PKG_VERSION")))
+            .user_agent(format!("defrag-launcher/{} ({})", env!("CARGO_PKG_VERSION"), platform))
             // Upload of a 50 MB demo over a slow link can easily exceed the
             // default 30s. Give it a generous ceiling but keep the
             // connection timeout tight so a dead server fails fast.
@@ -276,6 +281,22 @@ impl Client {
         let resp = self
             .http
             .get(self.url("/api/launcher/notifications"))
+            .bearer_auth(&self.token)
+            .header("Accept", "application/json")
+            .send()
+            .await?;
+        self.check_status(&resp).await?;
+        Ok(resp.json::<serde_json::Value>().await?)
+    }
+
+    /// GET /api/launcher/notifications/unread-count - bell-badge only.
+    /// Returns `{records, system, total}`. Used by the App-level 180s
+    /// poll so we don't pull 50 records + 50 system rows just to keep
+    /// the badge fresh.
+    pub async fn fetch_notifications_unread_count(&self) -> ApiResult<serde_json::Value> {
+        let resp = self
+            .http
+            .get(self.url("/api/launcher/notifications/unread-count"))
             .bearer_auth(&self.token)
             .header("Accept", "application/json")
             .send()

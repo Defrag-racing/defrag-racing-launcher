@@ -79,7 +79,7 @@
     });
 
     const setPage = (p: number) => {
-        if (p < 1 || (data.value && p > data.value.last_page)) return;
+        if (p < 1 || (data.value?.last_page && p > data.value.last_page)) return;
         page.value = p;
         void load();
     };
@@ -192,7 +192,7 @@
             </div>
 
             <footer
-                v-if="data && data.last_page > 1"
+                v-if="data && (data.last_page ?? 1) > 1"
                 class="px-5 py-2 border-t border-white/10 flex items-center justify-between text-xs"
             >
                 <button
@@ -203,7 +203,7 @@
                 <span class="text-neutral-500">page {{ data.current_page }} / {{ data.last_page }}</span>
                 <button
                     class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-30"
-                    :disabled="data.current_page >= data.last_page || loading"
+                    :disabled="data.current_page >= (data.last_page ?? 1) || loading"
                     @click="setPage(data!.current_page + 1)"
                 >Next →</button>
             </footer>

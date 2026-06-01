@@ -1,5 +1,5 @@
 <script setup lang="ts">
-    import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
+    import { computed, onActivated, onMounted, onUnmounted, ref } from 'vue';
     import { tauri, type NotificationsFeed, type SystemNotificationRow, type RecordNotificationRow } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
     import { useNotificationsStore } from '../stores/notifications';
@@ -142,34 +142,22 @@
         }
     };
 
-    const POLL_MS = 60_000;
-    let pollTimer: number | undefined;
-    const startPolling = () => {
-        stopPolling();
-        pollTimer = window.setInterval(() => {
-            if (!document.hidden) refresh();
-        }, POLL_MS);
-    };
-    const stopPolling = () => {
-        if (pollTimer !== undefined) { window.clearInterval(pollTimer); pollTimer = undefined; }
-    };
+    // No view-level poller. The store-level bell poll (App.vue) already
+    // keeps unread counts fresh in the background; we just pull the full
+    // feed once on mount / re-activation. A focus-driven refresh covers
+    // "user came back to this tab after a while".
     const onVisibility = () => {
-        if (document.hidden) stopPolling();
-        else { refresh(); startPolling(); }
+        if (!document.hidden) refresh();
     };
 
     onMounted(() => {
         refresh();
-        startPolling();
         document.addEventListener('visibilitychange', onVisibility);
     });
     onActivated(() => {
         refresh();
-        startPolling();
     });
-    onDeactivated(() => stopPolling());
     onUnmounted(() => {
-        stopPolling();
         document.removeEventListener('visibilitychange', onVisibility);
     });
 

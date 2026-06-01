@@ -18,9 +18,20 @@ export const useNotificationsStore = defineStore('notifications', () => {
         total.value = r + s;
     };
 
+    // Bell-badge refresh - hits the lightweight unread-count endpoint
+    // (~30B JSON). Falls back to the full /notifications endpoint when
+    // the user's web is still on the old build that doesn't have the
+    // new route. Once everyone upgrades the fallback can go.
     const refresh = async () => {
         const config = useConfigStore();
         if (!config.hasToken) { set(0, 0); return; }
+        try {
+            const counts = await tauri.getNotificationsUnreadCount();
+            set(counts.records, counts.system);
+            return;
+        } catch {
+            // fall through to full fetch
+        }
         try {
             const feed = await tauri.getNotifications();
             set(feed.unread.records, feed.unread.system);

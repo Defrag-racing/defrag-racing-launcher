@@ -75,12 +75,12 @@
     });
 
     const setVq3Page = (p: number) => {
-        if (p < 1 || (vq3.value && p > vq3.value.last_page)) return;
+        if (p < 1) return;
         vq3Page.value = p;
         void load('vq3', p);
     };
     const setCpmPage = (p: number) => {
-        if (p < 1 || (cpm.value && p > cpm.value.last_page)) return;
+        if (p < 1) return;
         cpmPage.value = p;
         void load('cpm', p);
     };
@@ -157,7 +157,7 @@
                     <header class="px-3 py-2 border-b border-white/10 flex items-center justify-between">
                         <div class="text-sm font-semibold text-neutral-200">VQ3</div>
                         <div class="text-xs text-neutral-500" v-if="vq3">
-                            page {{ vq3.current_page }} / {{ vq3.last_page }} · {{ vq3.total }} total
+                            page {{ vq3.current_page }}
                         </div>
                     </header>
                     <div class="flex-1 overflow-auto">
@@ -214,7 +214,7 @@
                         </table>
                     </div>
                     <footer
-                        v-if="vq3 && vq3.last_page > 1"
+                        v-if="vq3 && (vq3.current_page > 1 || vq3.next_page_url)"
                         class="px-3 py-1.5 border-t border-white/10 flex items-center justify-between text-xs"
                     >
                         <button
@@ -225,7 +225,7 @@
                         <span class="text-neutral-500">page {{ vq3.current_page }}</span>
                         <button
                             class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-30"
-                            :disabled="vq3.current_page >= vq3.last_page || vq3Loading"
+                            :disabled="!vq3.next_page_url || vq3Loading"
                             @click="setVq3Page(vq3!.current_page + 1)"
                         >Next →</button>
                     </footer>
@@ -236,7 +236,7 @@
                     <header class="px-3 py-2 border-b border-white/10 flex items-center justify-between">
                         <div class="text-sm font-semibold text-neutral-200">CPM</div>
                         <div class="text-xs text-neutral-500" v-if="cpm">
-                            page {{ cpm.current_page }} / {{ cpm.last_page }} · {{ cpm.total }} total
+                            page {{ cpm.current_page }}
                         </div>
                     </header>
                     <div class="flex-1 overflow-auto">
@@ -293,7 +293,7 @@
                         </table>
                     </div>
                     <footer
-                        v-if="cpm && cpm.last_page > 1"
+                        v-if="cpm && (cpm.current_page > 1 || cpm.next_page_url)"
                         class="px-3 py-1.5 border-t border-white/10 flex items-center justify-between text-xs"
                     >
                         <button
@@ -304,7 +304,7 @@
                         <span class="text-neutral-500">page {{ cpm.current_page }}</span>
                         <button
                             class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-30"
-                            :disabled="cpm.current_page >= cpm.last_page || cpmLoading"
+                            :disabled="!cpm.next_page_url || cpmLoading"
                             @click="setCpmPage(cpm!.current_page + 1)"
                         >Next →</button>
                     </footer>

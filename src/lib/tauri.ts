@@ -150,6 +150,11 @@ export const tauri = {
      *  plus unread counts. */
     getNotifications: () => invoke<NotificationsFeed>('get_notifications'),
 
+    /** Lightweight bell-badge poll target. ~30B JSON; used by the
+     *  App-level 180s poll instead of the full /notifications. */
+    getNotificationsUnreadCount: () =>
+        invoke<{ records: number; system: number; total: number }>('get_notifications_unread_count'),
+
     /** Per-row toggle / bulk mark-read mutations. Each returns the
      *  fresh `unread` block so the bell badge stays in sync with what
      *  the server just changed - the frontend uses that to avoid an
@@ -267,15 +272,19 @@ export interface ConnectionEntry {
     source: string;
 }
 
-/** Laravel paginator wrapper. Same shape Laravel emits via
- *  Eloquent::paginate(); only the fields the launcher actually reads
- *  are typed. */
+/** Laravel paginator wrapper. The records endpoint now uses
+ *  simplePaginate() so last_page / total are absent - presence of
+ *  next_page_url decides whether "Next" is enabled. last_page + total
+ *  remain optional so the older /api/launcher/maps endpoint (still
+ *  paginate()) keeps typing. */
 export interface Paginated<T> {
     data: T[];
     current_page: number;
-    last_page: number;
     per_page: number;
-    total: number;
+    next_page_url?: string | null;
+    prev_page_url?: string | null;
+    last_page?: number;
+    total?: number;
 }
 
 /** One record row from /api/launcher/records. mdd_id links to a

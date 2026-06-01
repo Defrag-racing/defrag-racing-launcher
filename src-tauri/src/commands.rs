@@ -612,6 +612,17 @@ pub async fn get_notifications() -> Result<serde_json::Value, String> {
     client.fetch_notifications().await.map_err(err_to_string)
 }
 
+/// Bell-badge-only fetch. Returns `{records, system, total}`. The App
+/// bell poll calls this every 180s instead of pulling the full feed.
+#[tauri::command]
+pub async fn get_notifications_unread_count() -> Result<serde_json::Value, String> {
+    let token = token::load()
+        .map_err(err_to_string)?
+        .ok_or_else(|| "No token saved".to_string())?;
+    let client = crate::api::Client::new(config::api_base_url(), token).map_err(err_to_string)?;
+    client.fetch_notifications_unread_count().await.map_err(err_to_string)
+}
+
 /// Queue a YouTube render for a local demo. Caller passes the file
 /// hash from uploaded.json. Returns the server's response unchanged
 /// so the frontend can react to all four cases (queued / already
