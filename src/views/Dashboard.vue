@@ -437,13 +437,37 @@
         !!d.hash && renderState.value[d.hash]?.status === 'completed';
 
     const renderClickFor = (d: DemoLibraryEntry) => {
-        if (!d.hash) return renderDemo(d);
+        if (!d.hash) return; // render button is disabled without a hash anyway
         const st = renderState.value[d.hash];
         if (st?.status === 'completed' && st.youtube_url) {
             return openUrl(st.youtube_url).catch(() => {});
         }
+        // pending / rendering / uploading: clicking again is a no-op.
         if (st && (st.status === 'pending' || st.status === 'rendering' || st.status === 'uploading')) return;
-        return renderDemo(d);
+        // No render yet (or a failed one): confirm first. The launcher hits
+        // the same paid render farm as the website, so we gate every render
+        // behind the same cost + etiquette acknowledgement the web shows.
+        askRender(d);
+    };
+
+    // -- Render confirmation modal ------------------------------------
+    const showRenderConfirm = ref(false);
+    const renderTarget = ref<DemoLibraryEntry | null>(null);
+    const etiquetteAccepted = ref(false);
+    const askRender = (d: DemoLibraryEntry) => {
+        renderTarget.value = d;
+        etiquetteAccepted.value = false;
+        showRenderConfirm.value = true;
+    };
+    const cancelRenderConfirm = () => {
+        showRenderConfirm.value = false;
+        renderTarget.value = null;
+    };
+    const confirmRender = () => {
+        const d = renderTarget.value;
+        showRenderConfirm.value = false;
+        renderTarget.value = null;
+        if (d) void renderDemo(d);
     };
 
     // -- retry / context menu -----------------------------------------
@@ -811,6 +835,49 @@
                 >Copy /demo command</button>
                 <div class="my-1 border-t border-white/10"></div>
                 <button class="w-full text-left px-3 py-1.5 hover:bg-red-500/10 text-red-300" @click="ctxDeleteDemo">Delete demo</button>
+            </div>
+        </template>
+
+        <!-- Render confirmation. Same cost + etiquette acknowledgement the
+             website shows - the launcher queues onto the same paid render
+             farm, so it gets the same gate. -->
+        <template v-if="showRenderConfirm">
+            <div class="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" @click.self="cancelRenderConfirm">
+                <div class="bg-neutral-900 border border-white/10 rounded-xl p-5 shadow-2xl max-w-md w-full">
+                    <div class="flex items-center gap-3 mb-3">
+                        <div class="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center flex-shrink-0">
+                            <svg class="w-5 h-5 text-red-400" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"/><path d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#fff"/></svg>
+                        </div>
+                        <h3 class="text-sm font-bold text-neutral-100">Render to YouTube?</h3>
+                    </div>
+                    <p class="text-xs text-neutral-400 mb-3">This queues your demo to be rendered into a video and uploaded to the defrag.racing YouTube channel. Rendering can take several minutes.</p>
+
+                    <div class="border border-red-500/30 bg-red-500/[0.06] rounded-lg p-3 mb-3">
+                        <p class="text-[11px] text-neutral-300 leading-relaxed">
+                            <span class="font-bold text-red-300">Renders cost real money.</span>
+                            The render farm time and storage are paid for by defrag.racing out of the project's own pocket, and YouTube caps how many videos demome can upload per day. Every render you queue spends part of that shared, limited budget - so please only render runs that are worth keeping.
+                        </p>
+                    </div>
+
+                    <div class="border border-white/10 bg-white/[0.02] rounded-lg p-3 mb-3">
+                        <h4 class="text-xs font-bold text-neutral-100 mb-2">Render etiquette</h4>
+                        <ul class="text-[11px] text-neutral-400 space-y-1.5 list-disc pl-4">
+                            <li>Render your best run. Don't queue your whole time history when you already have - or will beat in minutes or hours - a faster time.</li>
+                            <li>Several near-identical times on the same map, a few ms apart? Pick one.</li>
+                            <li>Slower time but a genuinely cool trick or something worth showing off? That's totally fine, go for it.</li>
+                        </ul>
+                    </div>
+
+                    <label class="flex items-start gap-2 mb-4 cursor-pointer select-none">
+                        <input type="checkbox" v-model="etiquetteAccepted" class="mt-0.5 w-3.5 h-3.5 rounded border-white/20 bg-white/5 accent-red-600" />
+                        <span class="text-xs text-neutral-300">I won't render my whole time history - just the runs actually worth keeping.</span>
+                    </label>
+
+                    <div class="flex gap-2 justify-end">
+                        <button @click="cancelRenderConfirm" class="px-3 py-1.5 text-xs font-medium text-neutral-300 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors">Cancel</button>
+                        <button @click="confirmRender" :disabled="!etiquetteAccepted" class="px-3 py-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors">Render</button>
+                    </div>
+                </div>
             </div>
         </template>
     </div>
