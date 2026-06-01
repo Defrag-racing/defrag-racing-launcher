@@ -1,5 +1,5 @@
 <script setup lang="ts">
-    import { computed, onMounted, onUnmounted, ref } from 'vue';
+    import { computed, onActivated, onMounted, onUnmounted, ref } from 'vue';
     import { useRoute, useRouter } from 'vue-router';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
     import { openUrl } from '@tauri-apps/plugin-opener';
@@ -15,15 +15,22 @@
     // passes ?highlight=demos. Pulse + scroll the demos-folder card into
     // view so the user lands looking straight at the field they came to
     // change, instead of having to hunt for it in the settings list.
+    // onActivated (not onMounted): this view is cached by <KeepAlive>, so
+    // onMounted fires only on the first visit - every later click of the
+    // chip would re-enter the cached instance without re-running it. We
+    // also clear the query right after so the highlight is a one-shot
+    // tied to the chip click, not to merely landing on Settings.
     const highlightDemos = ref(false);
     const demosSection = ref<HTMLElement | null>(null);
-    onMounted(async () => {
-        if (route.query.highlight === 'demos') {
-            highlightDemos.value = true;
-            await new Promise((r) => requestAnimationFrame(() => r(null)));
-            demosSection.value?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            window.setTimeout(() => { highlightDemos.value = false; }, 2600);
-        }
+    let highlightTimer: number | undefined;
+    onActivated(async () => {
+        if (route.query.highlight !== 'demos') return;
+        highlightDemos.value = true;
+        router.replace({ name: 'settings', query: {} });
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        demosSection.value?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (highlightTimer !== undefined) window.clearTimeout(highlightTimer);
+        highlightTimer = window.setTimeout(() => { highlightDemos.value = false; }, 2600);
     });
     const config = useConfigStore();
     const updater = useUpdaterStore();

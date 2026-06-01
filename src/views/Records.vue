@@ -6,7 +6,7 @@
     // merge. The launcher's job is the quick browse; users who want
     // the full rating UI click a map or nickname through to the web.
 
-    import { onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
+    import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
     import { tauri, type RecordRow, type Paginated } from '../lib/tauri';
     import { q3ToHtml } from '../lib/q3color';
     import { useConfigStore } from '../stores/config';
@@ -21,6 +21,7 @@
     const vq3Loading = ref(false);
     const cpmLoading = ref(false);
     const error = ref<string | null>(null);
+    const lastFetchedAt = ref<Date | null>(null);
 
     const load = async (physics: 'vq3' | 'cpm', page: number) => {
         const loadingRef = physics === 'vq3' ? vq3Loading : cpmLoading;
@@ -29,6 +30,7 @@
         error.value = null;
         try {
             dataRef.value = await tauri.getRecords(physics, page);
+            lastFetchedAt.value = new Date();
         } catch (e: any) {
             error.value = e?.toString?.() ?? 'Failed to load records';
         } finally {
@@ -59,9 +61,24 @@
         else { refreshBoth(); startPolling(); }
     };
 
+    // Tick a re-render every 5s so the "Updated Xs ago" label stays
+    // fresh without a network call.
+    const _now = ref(Date.now());
+    let labelTimer: number | undefined;
+    const lastFetchedLabel = computed(() => {
+        void _now.value; // re-evaluate every tick
+        if (!lastFetchedAt.value) return '';
+        const sec = Math.round((Date.now() - lastFetchedAt.value.getTime()) / 1000);
+        if (sec < 5) return 'just now';
+        if (sec < 60) return `${sec}s ago`;
+        const m = Math.floor(sec / 60);
+        return `${m}m ago`;
+    });
+
     onMounted(() => {
         refreshBoth();
         startPolling();
+        labelTimer = window.setInterval(() => { _now.value = Date.now(); }, 5000);
         document.addEventListener('visibilitychange', onVisibility);
     });
     onActivated(() => {
@@ -71,6 +88,7 @@
     onDeactivated(() => stopPolling());
     onUnmounted(() => {
         stopPolling();
+        if (labelTimer !== undefined) window.clearInterval(labelTimer);
         document.removeEventListener('visibilitychange', onVisibility);
     });
 
@@ -132,6 +150,14 @@
                     Recent records from defrag.racing, newest first. Click a name or
                     map to open the full page on the web.
                 </div>
+            </div>
+            <div class="flex items-center gap-2 text-xs text-neutral-500 flex-shrink-0">
+                <span v-if="lastFetchedAt">Updated {{ lastFetchedLabel }}</span>
+                <button
+                    class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-50"
+                    :disabled="vq3Loading || cpmLoading || !config.hasToken"
+                    @click="refreshBoth"
+                >{{ (vq3Loading || cpmLoading) ? 'Loading…' : 'Refresh' }}</button>
             </div>
         </header>
 

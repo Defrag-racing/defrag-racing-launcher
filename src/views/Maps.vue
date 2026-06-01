@@ -4,7 +4,7 @@
     // toggle / item filtering) stays on the web's /maps page, which
     // any thumbnail / name click jumps to with the full filter UI.
 
-    import { onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
+    import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
     import { tauri, type MapRow, type Paginated } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
     import { openUrl } from '@tauri-apps/plugin-opener';
@@ -16,6 +16,7 @@
     const data = ref<Paginated<MapRow> | null>(null);
     const loading = ref(false);
     const error = ref<string | null>(null);
+    const lastFetchedAt = ref<Date | null>(null);
 
     const load = async () => {
         if (!config.hasToken) return;
@@ -23,6 +24,7 @@
         error.value = null;
         try {
             data.value = await tauri.getMaps(page.value, search.value);
+            lastFetchedAt.value = new Date();
         } catch (e: any) {
             error.value = e?.toString?.() ?? 'Failed to load maps';
         } finally {
@@ -62,9 +64,24 @@
         else { void load(); startPolling(); }
     };
 
+    // Tick a re-render every 5s so the "Updated Xs ago" label stays
+    // fresh without a network call.
+    const _now = ref(Date.now());
+    let labelTimer: number | undefined;
+    const lastFetchedLabel = computed(() => {
+        void _now.value; // re-evaluate every tick
+        if (!lastFetchedAt.value) return '';
+        const sec = Math.round((Date.now() - lastFetchedAt.value.getTime()) / 1000);
+        if (sec < 5) return 'just now';
+        if (sec < 60) return `${sec}s ago`;
+        const m = Math.floor(sec / 60);
+        return `${m}m ago`;
+    });
+
     onMounted(() => {
         void load();
         startPolling();
+        labelTimer = window.setInterval(() => { _now.value = Date.now(); }, 5000);
         document.addEventListener('visibilitychange', onVisibility);
     });
     onActivated(() => {
@@ -74,6 +91,7 @@
     onDeactivated(() => stopPolling());
     onUnmounted(() => {
         stopPolling();
+        if (labelTimer !== undefined) window.clearInterval(labelTimer);
         document.removeEventListener('visibilitychange', onVisibility);
         if (searchTimer !== undefined) window.clearTimeout(searchTimer);
     });
@@ -112,6 +130,14 @@
                     Browse maps from defrag.racing, newest first. Click a map to
                     open its full page on the web for weapons / records / demos.
                 </div>
+            </div>
+            <div class="flex items-center gap-2 text-xs text-neutral-500 flex-shrink-0">
+                <span v-if="lastFetchedAt">Updated {{ lastFetchedLabel }}</span>
+                <button
+                    class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-50"
+                    :disabled="loading || !config.hasToken"
+                    @click="load"
+                >{{ loading ? 'Loading…' : 'Refresh' }}</button>
             </div>
         </header>
 
