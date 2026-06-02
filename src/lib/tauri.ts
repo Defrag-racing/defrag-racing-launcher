@@ -183,6 +183,12 @@ export const tauri = {
     getRenderStatus: (fileHash: string) =>
         invoke<RenderStatusResponse>('get_render_status', { fileHash }),
 
+    /** Bulk reconcile of completed renders: { hash: youtube_video_id }
+     *  map (+ removed + synced_at cursor). since=0 = full sync, else a
+     *  cheap delta. Replaces the per-row render-status warmup. */
+    renderedIndex: (since: number) =>
+        invoke<RenderedIndexResponse>('rendered_index', { since }),
+
     /** Re-queue a single demo that failed upload. Requires the watcher
      *  to be running - the Tauri side returns an error otherwise. */
     retryUpload: (path: string) => invoke<void>('retry_upload', { path }),
@@ -448,4 +454,14 @@ export interface RenderStatusResponse {
     status?: string;
     youtube_url?: string | null;
     youtube_video_id?: string | null;
+}
+
+/** Response from rendered_index: compact reconcile of completed renders.
+ *  `map` is { file_hash: youtube_video_id } (rebuild the watch URL from
+ *  the id), `removed` lists hashes whose render is no longer
+ *  completed/visible, `synced_at` is the cursor to pass as `since` next. */
+export interface RenderedIndexResponse {
+    map: Record<string, string>;
+    removed: string[];
+    synced_at: number;
 }

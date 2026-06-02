@@ -274,6 +274,24 @@ impl Client {
         Ok(resp.json::<serde_json::Value>().await?)
     }
 
+    /// GET /api/launcher/rendered-index?since=<unix ts> - bulk reconcile
+    /// of completed YouTube renders as a compact { hash: video_id } map
+    /// (+ `removed` + `synced_at` cursor). Pass since=0 for a full sync,
+    /// then the returned synced_at for cheap deltas - replaces the old
+    /// per-row warmup that fired up to 100 render-status calls on mount.
+    pub async fn rendered_index(&self, since: i64) -> ApiResult<serde_json::Value> {
+        let resp = self
+            .http
+            .get(self.url("/api/launcher/rendered-index"))
+            .bearer_auth(&self.token)
+            .header("Accept", "application/json")
+            .query(&[("since", since.to_string())])
+            .send()
+            .await?;
+        self.check_status(&resp).await?;
+        Ok(resp.json::<serde_json::Value>().await?)
+    }
+
     /// GET /api/launcher/notifications - records + system feeds plus
     /// unread counts. Returned shape forwarded unchanged to the
     /// frontend.

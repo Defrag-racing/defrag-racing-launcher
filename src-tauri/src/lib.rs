@@ -214,6 +214,7 @@ pub fn run() {
             commands::get_notifications_unread_count,
             commands::request_render,
             commands::get_render_status,
+            commands::rendered_index,
             commands::retry_upload,
             commands::delete_demo,
             commands::notification_record_toggle,

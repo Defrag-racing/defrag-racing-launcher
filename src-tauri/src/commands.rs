@@ -733,6 +733,23 @@ pub async fn get_render_status(file_hash: String) -> Result<serde_json::Value, S
     })
 }
 
+/// Bulk reconcile of completed renders for the Demos list - one call
+/// returns a { hash: youtube_video_id } map (+ removed + synced_at) for
+/// all demos, replacing the old per-row warmup. since=0 = full sync,
+/// otherwise a cheap delta from the last synced_at cursor.
+#[tauri::command]
+pub async fn rendered_index(since: i64) -> Result<serde_json::Value, String> {
+    let token = token::load()
+        .map_err(err_to_string)?
+        .ok_or_else(|| "No token saved".to_string())?;
+    let client = crate::api::Client::new(config::api_base_url(), token).map_err(err_to_string)?;
+    client.rendered_index(since).await.map_err(|e| {
+        let msg = err_to_string(e);
+        log::warn!("rendered-index: failed (since={}) - {}", since, msg);
+        msg
+    })
+}
+
 /// "Who am I" lookup for the Profile button. Token-locked. Frontend
 /// calls this once at app boot and caches the result so the button
 /// works without a re-fetch on every render.

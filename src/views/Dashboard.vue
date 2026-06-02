@@ -15,7 +15,7 @@
     //   - `renderState`: per-hash render status, lazily warmed + updated
     //                   on Render click.
 
-    import { computed, onActivated, onMounted, onUnmounted, ref } from 'vue';
+    import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
     import { useRouter } from 'vue-router';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { getVersion } from '@tauri-apps/api/app';
@@ -88,32 +88,114 @@
     };
 
     // -- render state -------------------------------------------------
+    // renderState maps a demo's file hash -> its render status. Two sources
+    // feed it: (1) the bulk "rendered index" reconcile, which fills every
+    // COMPLETED render in one call (cached in localStorage so a restart
+    // starts from a cheap delta, not a full re-pull), and (2) a small
+    // in-progress poll for the handful of renders queued this session, so
+    // they flip to "View ▶" live. Replaces the old warmup that fired up to
+    // 100 per-row render-status calls on every launch.
     const renderState = ref<Record<string, RenderStatusResponse>>({});
     const rendering = ref<Set<string>>(new Set());
-    let warmupCancelled = false;
 
-    const warmupRenderStates = async () => {
-        if (!config.hasToken) return;
-        const sample = demos.value
-            .filter((d) => d.hash && d.upload_status)
-            .slice(0, 100);
-        for (const d of sample) {
-            if (warmupCancelled) return;
-            try {
-                const s = await tauri.getRenderStatus(d.hash!);
-                renderState.value = { ...renderState.value, [d.hash!]: s };
-            } catch {
-                // ignore - real errors surface on click
+    const INDEX_MAP_KEY = 'dt_render_index_map';       // { hash: video_id }
+    const INDEX_CURSOR_KEY = 'dt_render_index_cursor';  // unix ts cursor
+    const SYNC_COOLDOWN_MS = 30_000;                    // anti-spam for rapid tab toggling
+    let lastIndexSyncMs = 0;
+    let indexSyncing = false;
+    let active = false; // is the Demos tab the active view (KeepAlive)
+
+    const readIndexMap = (): Record<string, string> => {
+        try { return JSON.parse(localStorage.getItem(INDEX_MAP_KEY) || '{}'); } catch { return {}; }
+    };
+    const writeIndexMap = (m: Record<string, string>) => {
+        try { localStorage.setItem(INDEX_MAP_KEY, JSON.stringify(m)); } catch { /* quota - non-fatal */ }
+    };
+
+    const applyVideoId = (hash: string, videoId: string) => {
+        renderState.value = {
+            ...renderState.value,
+            [hash]: {
+                has_render: true,
+                status: 'completed',
+                youtube_video_id: videoId,
+                youtube_url: `https://www.youtube.com/watch?v=${videoId}`,
+            },
+        };
+    };
+
+    // Instant: paint completed renders from the persisted cache before any
+    // network call, so the list shows "View ▶" the moment Demos opens.
+    const hydrateRenderIndex = () => {
+        for (const [hash, videoId] of Object.entries(readIndexMap())) applyVideoId(hash, videoId);
+    };
+
+    // Bulk delta reconcile. Throttled (cooldown) so rapid tab toggling can't
+    // spam it; force=true (initial load) bypasses the cooldown.
+    const syncRenderIndex = async (force = false) => {
+        if (!config.hasToken || indexSyncing) return;
+        if (!force && Date.now() - lastIndexSyncMs < SYNC_COOLDOWN_MS) return;
+        indexSyncing = true;
+        try {
+            const since = Number(localStorage.getItem(INDEX_CURSOR_KEY) || '0');
+            const res = await tauri.renderedIndex(since);
+            const m = readIndexMap();
+            for (const [hash, videoId] of Object.entries(res.map || {})) {
+                m[hash] = videoId;
+                applyVideoId(hash, videoId);
             }
+            for (const hash of res.removed || []) {
+                delete m[hash];
+                if (renderState.value[hash]?.status === 'completed') {
+                    const next = { ...renderState.value };
+                    delete next[hash];
+                    renderState.value = next;
+                }
+            }
+            writeIndexMap(m);
+            if (res.synced_at) localStorage.setItem(INDEX_CURSOR_KEY, String(res.synced_at));
+            lastIndexSyncMs = Date.now();
+        } catch {
+            // ignore - real errors surface on render click; next sync retries
+        } finally {
+            indexSyncing = false;
         }
     };
 
+    // Live poll for the few renders that are mid-flight (queued this
+    // session). Completed/none are left to the bulk index. Only runs while
+    // the Demos tab is the active, visible view.
+    let inProgressTimer: number | undefined;
+    const pollInProgress = async () => {
+        if (!config.hasToken || document.hidden || !active) return;
+        const hashes = Object.entries(renderState.value)
+            .filter(([, s]) => s.status === 'pending' || s.status === 'rendering' || s.status === 'uploading')
+            .map(([h]) => h);
+        for (const h of hashes) {
+            try {
+                const s = await tauri.getRenderStatus(h);
+                renderState.value = { ...renderState.value, [h]: s };
+                if (s.status === 'completed' && s.youtube_video_id) {
+                    const m = readIndexMap(); m[h] = s.youtube_video_id; writeIndexMap(m);
+                }
+            } catch { /* ignore */ }
+        }
+    };
+
+    const onDemosVisibility = () => {
+        if (!document.hidden && active) void syncRenderIndex();
+    };
+
+    // Demos with a completed YouTube render (drives the "has video" sort/filter).
+    const hasYoutube = (d: DemoLibraryEntry): boolean =>
+        !!d.hash && renderState.value[d.hash]?.status === 'completed';
+
     // -- search / sort / filter ---------------------------------------
-    type SortKey = 'date_desc' | 'date_asc' | 'name_asc' | 'name_desc';
+    type SortKey = 'date_desc' | 'date_asc' | 'name_asc' | 'name_desc' | 'render_first';
     const sortKey = ref<SortKey>('date_desc');
     const search = ref('');
 
-    type RowFilter = 'all' | 'in_progress' | 'uploaded' | 'not_uploaded' | 'error';
+    type RowFilter = 'all' | 'in_progress' | 'uploaded' | 'not_uploaded' | 'error' | 'rendered';
     const rowFilter = ref<RowFilter>('all');
 
     type StatusKind = 'inprogress' | 'done' | 'duplicate' | 'error' | 'none';
@@ -174,6 +256,7 @@
                     case 'uploaded':     return k === 'done' || k === 'duplicate';
                     case 'not_uploaded': return k === 'none';
                     case 'error':        return k === 'error';
+                    case 'rendered':     return hasYoutube(d);
                 }
             });
         }
@@ -183,6 +266,12 @@
                 case 'date_asc':  return a.mtime - b.mtime;
                 case 'name_asc':  return a.filename.localeCompare(b.filename);
                 case 'name_desc': return b.filename.localeCompare(a.filename);
+                case 'render_first': {
+                    // Demos with a YouTube video first, newest within each group.
+                    const av = hasYoutube(a) ? 0 : 1;
+                    const bv = hasYoutube(b) ? 0 : 1;
+                    return av !== bv ? av - bv : b.mtime - a.mtime;
+                }
             }
         });
         return result;
@@ -285,10 +374,16 @@
         await refreshThrottle();
         await pollRateLimit();
         await refreshList();
-        void warmupRenderStates();
+
+        // Paint completed renders from cache instantly, then reconcile via a
+        // bulk delta (replaces the old 100-row per-demo warmup).
+        hydrateRenderIndex();
+        void syncRenderIndex(true);
 
         rateLimitPollTimer = window.setInterval(pollRateLimit, 1000);
         nowTickTimer = window.setInterval(() => { nowMs.value = Date.now(); }, 250);
+        inProgressTimer = window.setInterval(() => { void pollInProgress(); }, 10_000);
+        document.addEventListener('visibilitychange', onDemosVisibility);
 
         unlisten = await listen<UploadStateSnapshot>('upload_state_changed', (ev) => {
             queue.value = ev.payload;
@@ -308,16 +403,25 @@
     // already listed - so we don't double-list on initial load.
     let activatedOnce = false;
     onActivated(() => {
+        active = true;
+        // Re-entering Demos: reconcile render videos (throttled) so a video
+        // that completed while you were elsewhere shows up without a restart.
+        void syncRenderIndex();
         if (!activatedOnce) { activatedOnce = true; return; }
         void refreshList();
     });
 
+    onDeactivated(() => {
+        active = false;
+    });
+
     onUnmounted(() => {
-        warmupCancelled = true;
         if (unlisten) unlisten();
         if (rateLimitPollTimer !== undefined) window.clearInterval(rateLimitPollTimer);
         if (nowTickTimer !== undefined) window.clearInterval(nowTickTimer);
+        if (inProgressTimer !== undefined) window.clearInterval(inProgressTimer);
         if (relistTimer !== undefined) window.clearTimeout(relistTimer);
+        document.removeEventListener('visibilitychange', onDemosVisibility);
     });
 
     const installUpdate = () => updater.install();
@@ -709,6 +813,7 @@
                         { v: 'uploaded',     label: 'Backed up' },
                         { v: 'not_uploaded', label: 'Not uploaded' },
                         { v: 'error',        label: 'Errors' },
+                        { v: 'rendered',     label: 'Rendered' },
                     ] as const)"
                     :key="opt.v"
                     class="px-2.5 py-1 transition-colors whitespace-nowrap"
@@ -724,6 +829,7 @@
                         { v: 'date_asc',  label: 'Oldest' },
                         { v: 'name_asc',  label: 'A→Z' },
                         { v: 'name_desc', label: 'Z→A' },
+                        { v: 'render_first', label: 'Has video' },
                     ] as const)"
                     :key="opt.v"
                     class="px-2.5 py-1 transition-colors"
