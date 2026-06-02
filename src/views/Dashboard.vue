@@ -295,7 +295,12 @@
         }
         return { hashing, uploading, pending, remaining: hashing + uploading + pending };
     });
-    const backupActive = computed(() => backupCounts.value.remaining > 0);
+    // Only call it "backing up" when the watcher is actually running and not
+    // paused - otherwise a leftover Pending row would show a misleading
+    // "Backing up 0/1" with nothing able to move it.
+    const backupActive = computed(
+        () => config.autoUploadRunning && !paused.value && backupCounts.value.remaining > 0,
+    );
     // Moving denominator: done-this-session + whatever is still queued.
     const backupTotal = computed(() => queue.value.processed_count + backupCounts.value.remaining);
     const backupPct = computed(() => {

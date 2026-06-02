@@ -557,7 +557,14 @@ pub fn start(
         folder: demos_path.clone(),
         recursive: include_subfolders,
     });
-    crate::log_startup("watcher::start: rescan message queued");
+    // Then redrive anything restored from queue.json still in Pending. The
+    // rescan walks disk paths; a persisted Pending row keyed by a slightly
+    // different (e.g. normalised) path can be missed by it and otherwise
+    // hang forever ("Backing up 0/1" with nothing happening) until a manual
+    // Stop+Start. RedrivePending re-processes by the queue rows' own paths,
+    // and is idempotent (Done/Duplicate rows early-return in handle_file).
+    let _ = tx.send(Message::RedrivePending);
+    crate::log_startup("watcher::start: rescan + redrive messages queued");
 
     let state_worker = state.clone();
     let app_worker = app.clone();
