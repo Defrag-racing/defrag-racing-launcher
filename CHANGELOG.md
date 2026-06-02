@@ -4,6 +4,13 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.13
+
+- Demos tab no longer freezes for a few seconds on launch when you have a lot of rendered videos, and your YouTube render links now survive a restart instead of being re-fetched from scratch every time you open the launcher.
+- Live backup progress: a strip now shows the demo being backed up right now (with speed), an X/Y count and a progress bar, so a slow CPU-throttled pass reads as "working" instead of looking frozen.
+- Fixed a demo that could get stuck on "Backing up 0/1" at launch and never move until you hit Stop then Start.
+- "Force re-check" no longer disables the Render buttons or drops the YouTube links on your demos, and it now has a short cooldown so it can't be fired off repeatedly by accident.
+
 ## 0.1.12
 
 - Notifications layout: the per-row timestamp and the read/unread dot are now on the same line (right-aligned), so each notification fits more cleanly on one row instead of stacking.
