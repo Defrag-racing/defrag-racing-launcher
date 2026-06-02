@@ -20,6 +20,7 @@
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { getVersion } from '@tauri-apps/api/app';
     import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
+    import { LazyStore } from '@tauri-apps/plugin-store';
     import {
         tauri,
         type UploadStateSnapshot,
@@ -90,7 +91,7 @@
     // -- render state -------------------------------------------------
     // renderState maps a demo's file hash -> its render status. Two sources
     // feed it: (1) the bulk "rendered index" reconcile, which fills every
-    // COMPLETED render in one call (cached in localStorage so a restart
+    // COMPLETED render in one call (cached in a plugin-store file so a restart
     // starts from a cheap delta, not a full re-pull), and (2) a small
     // in-progress poll for the handful of renders queued this session, so
     // they flip to "View ▶" live. Replaces the old warmup that fired up to
@@ -98,36 +99,41 @@
     const renderState = ref<Record<string, RenderStatusResponse>>({});
     const rendering = ref<Set<string>>(new Set());
 
-    const INDEX_MAP_KEY = 'dt_render_index_map';       // { hash: video_id }
-    const INDEX_CURSOR_KEY = 'dt_render_index_cursor';  // unix ts cursor
-    const SYNC_COOLDOWN_MS = 30_000;                    // anti-spam for rapid tab toggling
+    // Persisted in a plugin-store JSON file (appDataDir), NOT localStorage:
+    // the webview's localStorage was not surviving restarts, so the YouTube
+    // links were re-fetched from scratch every launch. The store file is the
+    // same mechanism the rest of the app relies on for durable state.
+    const indexStore = new LazyStore('render-index.json');
+    const MAP_FIELD = 'map';          // { hash: video_id }
+    const CURSOR_FIELD = 'cursor';    // unix ts cursor
+    const SYNC_COOLDOWN_MS = 30_000;  // anti-spam for rapid tab toggling
     let lastIndexSyncMs = 0;
     let indexSyncing = false;
     let active = false; // is the Demos tab the active view (KeepAlive)
 
-    const readIndexMap = (): Record<string, string> => {
-        try { return JSON.parse(localStorage.getItem(INDEX_MAP_KEY) || '{}'); } catch { return {}; }
+    const readIndexMap = async (): Promise<Record<string, string>> => {
+        try { return (await indexStore.get<Record<string, string>>(MAP_FIELD)) ?? {}; } catch { return {}; }
     };
-    const writeIndexMap = (m: Record<string, string>) => {
-        try { localStorage.setItem(INDEX_MAP_KEY, JSON.stringify(m)); } catch { /* quota - non-fatal */ }
+    const writeIndexMap = async (m: Record<string, string>) => {
+        try { await indexStore.set(MAP_FIELD, m); await indexStore.save(); } catch { /* non-fatal */ }
     };
 
-    const applyVideoId = (hash: string, videoId: string) => {
-        renderState.value = {
-            ...renderState.value,
-            [hash]: {
-                has_render: true,
-                status: 'completed',
-                youtube_video_id: videoId,
-                youtube_url: `https://www.youtube.com/watch?v=${videoId}`,
-            },
-        };
-    };
+    const completedEntry = (videoId: string): RenderStatusResponse => ({
+        has_render: true,
+        status: 'completed',
+        youtube_video_id: videoId,
+        youtube_url: `https://www.youtube.com/watch?v=${videoId}`,
+    });
 
     // Instant: paint completed renders from the persisted cache before any
     // network call, so the list shows "View ▶" the moment Demos opens.
-    const hydrateRenderIndex = () => {
-        for (const [hash, videoId] of Object.entries(readIndexMap())) applyVideoId(hash, videoId);
+    // Builds the whole map in one plain object and assigns renderState ONCE -
+    // a per-hash spread here is O(n^2) and froze the UI with a large cache.
+    const hydrateRenderIndex = async () => {
+        const cached = await readIndexMap();
+        const next = { ...renderState.value };
+        for (const [hash, videoId] of Object.entries(cached)) next[hash] = completedEntry(videoId);
+        renderState.value = next;
     };
 
     // Bulk delta reconcile. Throttled (cooldown) so rapid tab toggling can't
@@ -137,23 +143,21 @@
         if (!force && Date.now() - lastIndexSyncMs < SYNC_COOLDOWN_MS) return;
         indexSyncing = true;
         try {
-            const since = Number(localStorage.getItem(INDEX_CURSOR_KEY) || '0');
+            const since = (await indexStore.get<number>(CURSOR_FIELD)) ?? 0;
             const res = await tauri.renderedIndex(since);
-            const m = readIndexMap();
+            const m = await readIndexMap();
+            const next = { ...renderState.value };
             for (const [hash, videoId] of Object.entries(res.map || {})) {
                 m[hash] = videoId;
-                applyVideoId(hash, videoId);
+                next[hash] = completedEntry(videoId);
             }
             for (const hash of res.removed || []) {
                 delete m[hash];
-                if (renderState.value[hash]?.status === 'completed') {
-                    const next = { ...renderState.value };
-                    delete next[hash];
-                    renderState.value = next;
-                }
+                if (next[hash]?.status === 'completed') delete next[hash];
             }
-            writeIndexMap(m);
-            if (res.synced_at) localStorage.setItem(INDEX_CURSOR_KEY, String(res.synced_at));
+            renderState.value = next; // single reactive assignment for the whole delta
+            await writeIndexMap(m);
+            if (res.synced_at) { await indexStore.set(CURSOR_FIELD, res.synced_at); await indexStore.save(); }
             lastIndexSyncMs = Date.now();
         } catch {
             // ignore - real errors surface on render click; next sync retries
@@ -176,7 +180,7 @@
                 const s = await tauri.getRenderStatus(h);
                 renderState.value = { ...renderState.value, [h]: s };
                 if (s.status === 'completed' && s.youtube_video_id) {
-                    const m = readIndexMap(); m[h] = s.youtube_video_id; writeIndexMap(m);
+                    const m = await readIndexMap(); m[h] = s.youtube_video_id; await writeIndexMap(m);
                 }
             } catch { /* ignore */ }
         }
@@ -375,9 +379,9 @@
         await pollRateLimit();
         await refreshList();
 
-        // Paint completed renders from cache instantly, then reconcile via a
-        // bulk delta (replaces the old 100-row per-demo warmup).
-        hydrateRenderIndex();
+        // Paint completed renders from the persisted store instantly, then
+        // reconcile via a bulk delta (replaces the old 100-row per-demo warmup).
+        await hydrateRenderIndex();
         void syncRenderIndex(true);
 
         rateLimitPollTimer = window.setInterval(pollRateLimit, 1000);
