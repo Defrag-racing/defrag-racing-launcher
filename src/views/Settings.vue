@@ -61,6 +61,8 @@
 
     const appVersion = ref('');
     const reCheckBusy = ref(false);
+    const reCheckCooldown = ref(0); // seconds left before the button re-arms
+    let reCheckTimer: number | undefined;
     const autostart = ref(false);
 
     onMounted(async () => {
@@ -138,14 +140,30 @@
     const runOnboarding = () => router.push({ name: 'onboarding' });
 
     const forceRecheck = async () => {
-        if (! confirm('Forget which demos have been uploaded? Next Start will re-hash and re-check every demo with the server.')) return;
+        if (reCheckBusy.value || reCheckCooldown.value > 0) return;
+        if (! confirm('Re-check every demo against the server? This re-hashes the whole folder and can take a while - watch the progress bar on the Demos tab.')) return;
         reCheckBusy.value = true;
         try {
             await tauri.clearUploadCache();
         } finally {
             reCheckBusy.value = false;
         }
+        // Cooldown: each click kicks a full re-hash + server re-verify of the
+        // whole folder, so block repeat clicks for a bit (was spammable).
+        reCheckCooldown.value = 20;
+        if (reCheckTimer !== undefined) window.clearInterval(reCheckTimer);
+        reCheckTimer = window.setInterval(() => {
+            reCheckCooldown.value -= 1;
+            if (reCheckCooldown.value <= 0 && reCheckTimer !== undefined) {
+                window.clearInterval(reCheckTimer);
+                reCheckTimer = undefined;
+            }
+        }, 1000);
     };
+
+    onUnmounted(() => {
+        if (reCheckTimer !== undefined) window.clearInterval(reCheckTimer);
+    });
 
     const resetLauncher = async () => {
         if (! confirm('Clear all launcher settings and the stored token? This cannot be undone. Demos on your PC are not affected.')) return;
@@ -335,8 +353,8 @@
                         to re-upload it.
                     </div>
                 </div>
-                <button class="btn-ghost flex-shrink-0" :disabled="reCheckBusy" @click="forceRecheck">
-                    {{ reCheckBusy ? '…' : 'Force re-check' }}
+                <button class="btn-ghost flex-shrink-0" :disabled="reCheckBusy || reCheckCooldown > 0" @click="forceRecheck">
+                    {{ reCheckBusy ? 'Re-checking…' : (reCheckCooldown > 0 ? `Started - wait ${reCheckCooldown}s` : 'Force re-check') }}
                 </button>
             </section>
 

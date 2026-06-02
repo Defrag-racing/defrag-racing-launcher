@@ -281,6 +281,39 @@
         return result;
     });
 
+    // -- live backup progress -----------------------------------------
+    // The session summary counts terminal results, but while a big (or
+    // CPU-throttled) hash is in flight nothing changes for seconds and the
+    // UI looks frozen. This drives a live strip with the current file +
+    // a spinner so "working slowly" reads differently from "stuck".
+    const backupCounts = computed(() => {
+        let hashing = 0, uploading = 0, pending = 0;
+        for (const it of queue.value.items) {
+            if (it.status === 'hashing') hashing++;
+            else if (it.status === 'uploading') uploading++;
+            else if (it.status === 'pending') pending++;
+        }
+        return { hashing, uploading, pending, remaining: hashing + uploading + pending };
+    });
+    const backupActive = computed(() => backupCounts.value.remaining > 0);
+    // Moving denominator: done-this-session + whatever is still queued.
+    const backupTotal = computed(() => queue.value.processed_count + backupCounts.value.remaining);
+    const backupPct = computed(() => {
+        const total = backupTotal.value;
+        return total > 0 ? Math.round((queue.value.processed_count / total) * 100) : 0;
+    });
+    const backupCurrent = computed(() =>
+        queue.value.items.find((i) => i.status === 'hashing' || i.status === 'uploading') ?? null,
+    );
+    const backupCurrentLabel = computed(() => {
+        const c = backupCurrent.value;
+        if (!c) return backupCounts.value.pending > 0 ? 'Queued…' : '';
+        const verb = c.status === 'uploading' ? 'Uploading' : 'Hashing';
+        const bps = c.status === 'uploading' ? c.upload_throughput_bps : c.hash_throughput_bps;
+        const speed = bps && bps > 0 ? ` · ${(bps / 1_000_000).toFixed(1)} MB/s` : '';
+        return `${verb} ${c.filename}${speed}`;
+    });
+
     // -- CPU throttle / speed -----------------------------------------
     const currentThrottlePct = ref(15);
     const refreshThrottle = async () => {
@@ -790,6 +823,27 @@
             Update failed: {{ updater.state.message }}
         </div>
 
+        <!-- live backup progress -->
+        <div
+            v-if="backupActive"
+            class="px-5 py-2 border-b border-white/[0.06] bg-brand-500/[0.06]"
+        >
+            <div class="flex items-center gap-2 text-xs">
+                <svg class="w-3.5 h-3.5 animate-spin text-brand-400 flex-shrink-0" viewBox="0 0 24 24" fill="none">
+                    <circle class="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                    <path class="opacity-90" d="M22 12a10 10 0 0 1-10 10" stroke="currentColor" stroke-width="4" stroke-linecap="round" />
+                </svg>
+                <span class="text-brand-200 font-semibold flex-shrink-0">
+                    Backing up {{ queue.processed_count }}/{{ backupTotal }}
+                </span>
+                <span class="text-neutral-400 truncate min-w-0">{{ backupCurrentLabel }}</span>
+                <span class="text-neutral-500 ml-auto flex-shrink-0 whitespace-nowrap">{{ backupCounts.remaining }} left</span>
+            </div>
+            <div class="mt-1.5 h-1 rounded-full bg-white/10 overflow-hidden">
+                <div class="h-full bg-brand-500 transition-all duration-300" :style="{ width: backupPct + '%' }"></div>
+            </div>
+        </div>
+
         <!-- session summary strip -->
         <div
             v-if="queue.processed_count"
@@ -922,7 +976,11 @@
                             ? 'bg-red-500/20 hover:bg-red-500/30 text-red-300'
                             : 'bg-brand-500/20 hover:bg-brand-500/30 text-brand-300'"
                         :disabled="!d.hash || (!!d.hash && rendering.has(d.hash))"
-                        :title="!d.hash ? 'Back this demo up first (auto-backup uploads it), then you can render it' : 'Queue a YouTube render'"
+                        :title="d.hash
+                            ? 'Queue a YouTube render'
+                            : ((d.upload_status === 'done' || d.upload_status === 'duplicate')
+                                ? 'Backed up, but its fingerprint is missing locally - turn on auto-backup (Start) to recompute it, then you can render'
+                                : 'Back this demo up first (turn on auto-backup), then you can render it')"
                         @click="renderClickFor(d)"
                     >{{ renderLabelFor(d) }}</button>
                 </li>
