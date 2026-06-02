@@ -120,10 +120,8 @@ impl UploadCache {
         Ok(())
     }
 
-    /// Wipe the cache from disk. Called from the "Force re-check" UI
-    /// button when the user wants the next rescan to re-verify every
-    /// file against the server (e.g. after an admin deleted a demo
-    /// server-side and the user wants to re-upload).
+    /// Wipe the cache from disk. Called on a full launcher reset (new
+    /// account) where even the hashes should go.
     pub fn clear() -> Result<()> {
         let path = Self::path()?;
         if path.exists() {
@@ -132,12 +130,30 @@ impl UploadCache {
         Ok(())
     }
 
+    /// Blank every entry's upload status while KEEPING its hash + demo_id.
+    /// Used by "Force re-check": a blanked status makes get_if_fresh miss,
+    /// so the next rescan re-hashes + re-verifies with the server - but the
+    /// hashes survive, so the Demos list keeps the hash its Render / YouTube
+    /// buttons need. (Deleting the cache outright left every row hash-less,
+    /// which disabled the render buttons and dropped the YouTube links.)
+    pub fn reset_statuses(&mut self) {
+        for entry in self.files.values_mut() {
+            entry.status.clear();
+        }
+    }
+
     /// Returns Some(entry) only if the entry exists AND its recorded
     /// (size, mtime) match the file at `path` right now. Any mismatch
     /// is treated as a cache miss; the caller will re-hash and either
     /// upload or confirm-duplicate, and overwrite the cache entry.
     pub fn get_if_fresh(&self, path: &Path) -> Option<&CachedEntry> {
         let entry = self.files.get(&normalize(path))?;
+        // Only a terminal status counts as a usable hit. A blanked status
+        // (set by Force re-check) falls through to a full re-hash + server
+        // lookup, even though the hash itself is still cached for the UI.
+        if entry.status != "done" && entry.status != "duplicate" {
+            return None;
+        }
         let meta = fs::metadata(path).ok()?;
         let size = meta.len();
         let mtime = meta

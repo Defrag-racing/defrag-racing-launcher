@@ -447,6 +447,11 @@ pub enum Message {
     /// Without this, paused-mid-hash files would stay Pending forever
     /// until a new filesystem event happened to nudge the queue.
     RedrivePending,
+    /// Force re-check: blank every cached upload status (keeping hashes)
+    /// in the worker's in-memory cache and persist it, so the RescanFolder
+    /// that follows actually re-verifies with the server instead of hitting
+    /// stale in-memory entries. Must be sent BEFORE the RescanFolder.
+    ResetCacheStatuses,
 }
 
 pub struct WatcherHandle {
@@ -727,6 +732,10 @@ async fn worker_loop(
                     }
                     handle_file(&client, &state, &app, &mut cache, p).await;
                 }
+            }
+            Message::ResetCacheStatuses => {
+                cache.reset_statuses();
+                let _ = cache.save();
             }
             Message::RescanFolder { folder, recursive } => {
                 // Two scan modes by user choice. Recursive uses walkdir

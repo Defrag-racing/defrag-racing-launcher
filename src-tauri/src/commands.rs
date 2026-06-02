@@ -156,18 +156,19 @@ pub fn reset_launcher(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
-/// "Force re-check" in Settings - means exactly what it says on the
-/// label: forget every uploaded-hash record and re-process the entire
-/// demos folder from scratch. Three coordinated wipes + an immediate
+/// "Force re-check" in Settings - re-verify every demo's upload status
+/// against the server from scratch. Coordinated resets + an immediate
 /// rescan are needed because the cache, the queue items, and the
 /// already_present early-return in handle_file all independently keep
 /// state that would otherwise cause "Force re-check" to silently do
 /// nothing:
 ///
-///   1. uploaded.json - the size+mtime → hash cache. If this isn't
-///      cleared, every file hits the cache on the next rescan and is
-///      marked Duplicate without a server call.
-///   2. queue.json + in-memory items. Even with cache empty,
+///   1. uploaded.json - blank each entry's status (keep its hash). A
+///      blanked status misses get_if_fresh, so the rescan re-hashes +
+///      re-checks the server; keeping the hash means the Demos list (and
+///      its Render / YouTube buttons) don't go dead. The running worker's
+///      in-memory copy is reset via Message::ResetCacheStatuses too.
+///   2. queue.json + in-memory items. Even with statuses blanked,
 ///      handle_file's early-return skips any path already in the
 ///      visible queue with Done/Duplicate status, so without this
 ///      wipe a returning user with 5000 cached queue rows would see
@@ -178,10 +179,24 @@ pub fn reset_launcher(state: State<'_, AppState>) -> Result<(), String> {
 ///      watcher isn't running - the next Start will rescan anyway.
 #[tauri::command]
 pub fn clear_upload_cache(state: State<'_, AppState>) -> Result<(), String> {
-    UploadCache::clear().map_err(err_to_string)?;
+    // Blank upload statuses but KEEP the hashes (load + reset + save). The
+    // old code deleted uploaded.json outright, which left list_demos with no
+    // hash for any file - and the Demos render buttons + YouTube links both
+    // key off the hash, so they all went dead after a Force re-check. A
+    // blanked status still forces a full re-hash + server re-verify on the
+    // next rescan (see UploadCache::get_if_fresh).
+    {
+        let mut cache = UploadCache::load();
+        cache.reset_statuses();
+        let _ = cache.save();
+    }
     let _ = watcher::UploadState::clear_persisted();
     state.upload_state.clear_items();
     if let Some(h) = state.watcher.lock().unwrap().as_ref() {
+        // The running worker has its own in-memory cache; reset it too (and
+        // BEFORE the rescan) so the rescan re-verifies instead of replaying
+        // stale hits and saving the old statuses back over our reset.
+        let _ = h.tx.send(watcher::Message::ResetCacheStatuses);
         let cfg = Config::load().map_err(err_to_string)?;
         if let Some(demos) = cfg.demos_path {
             let _ = h.tx.send(watcher::Message::RescanFolder {
