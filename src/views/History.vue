@@ -8,7 +8,7 @@
     import { computed, onActivated, onMounted, ref } from 'vue';
     import { tauri, type ConnectionEntry } from '../lib/tauri';
     import { q3ToHtml } from '../lib/q3color';
-    import { openUrl } from '@tauri-apps/plugin-opener';
+    import { openExternal } from '../lib/open';
 
     const entries = ref<ConnectionEntry[]>([]);
     const loading = ref(true);
@@ -66,7 +66,7 @@
 
     const openMap = (mapname: string | null) => {
         if (!mapname) return;
-        openUrl(`https://defrag.racing/maps/${encodeURIComponent(mapname)}`)
+        openExternal(`https://defrag.racing/maps/${encodeURIComponent(mapname)}`)
             .catch(() => { /* best effort */ });
     };
 

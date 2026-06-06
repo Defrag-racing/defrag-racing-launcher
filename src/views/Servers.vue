@@ -14,7 +14,7 @@
     import { tauri, type DefragServer } from '../lib/tauri';
     import { q3ToHtml } from '../lib/q3color';
     import { useConfigStore } from '../stores/config';
-    import { openUrl } from '@tauri-apps/plugin-opener';
+    import { openExternal } from '../lib/open';
 
     const config = useConfigStore();
 
@@ -243,7 +243,7 @@
 
     const openMap = (mapname: string) => {
         if (!mapname) return;
-        openUrl(`https://defrag.racing/maps/${encodeURIComponent(mapname)}`)
+        openExternal(`https://defrag.racing/maps/${encodeURIComponent(mapname)}`)
             .catch(() => { /* best effort */ });
     };
 

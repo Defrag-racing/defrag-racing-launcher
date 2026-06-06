@@ -18,7 +18,8 @@
     import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
     import { useRouter } from 'vue-router';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
+    import { revealItemInDir } from '@tauri-apps/plugin-opener';
+    import { openExternal } from '../lib/open';
     import { LazyStore } from '@tauri-apps/plugin-store';
     import {
         tauri,
@@ -545,7 +546,7 @@
     };
     const openMapPage = (filename: string) => {
         const map = mapNameFromFilename(filename);
-        if (map) openUrl(`https://defrag.racing/maps/${encodeURIComponent(map)}`).catch(() => {});
+        if (map) openExternal(`https://defrag.racing/maps/${encodeURIComponent(map)}`).catch(() => {});
     };
 
     // -- render --------------------------------------------------------
@@ -616,7 +617,7 @@
         if (!d.hash) return; // render button is disabled without a hash anyway
         const st = renderState.value[d.hash];
         if (st?.status === 'completed' && st.youtube_url) {
-            return openUrl(st.youtube_url).catch(() => {});
+            return openExternal(st.youtube_url).catch(() => {});
         }
         // pending / rendering / uploading: clicking again is a no-op.
         if (st && (st.status === 'pending' || st.status === 'rendering' || st.status === 'uploading')) return;

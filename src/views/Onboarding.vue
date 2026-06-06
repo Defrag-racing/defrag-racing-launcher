@@ -2,7 +2,7 @@
     import { computed, onMounted, ref } from 'vue';
     import { useRouter } from 'vue-router';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
-    import { openUrl } from '@tauri-apps/plugin-opener';
+    import { openExternal } from '../lib/open';
     import { tauri, type EngineCandidate } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
     import TokenFeatureList from '../components/TokenFeatureList.vue';
@@ -70,7 +70,7 @@
     };
 
     const openTokensPage = () =>
-        openUrl('https://defrag.racing/user/settings?tab=security');
+        openExternal('https://defrag.racing/user/settings?tab=security');
 
     // --- step 2: engine + demos -----------------------------------------
     const engines = ref<EngineCandidate[]>([]);
@@ -184,7 +184,7 @@
                     <h1 class="text-2xl font-bold">Welcome to Defrag Racing Launcher</h1>
                     <p class="text-sm text-neutral-400 leading-relaxed">
                         A small companion app for
-                        <a href="#" @click.prevent="openUrl('https://defrag.racing')" class="text-brand-400 hover:underline">defrag.racing</a>.
+                        <a href="#" @click.prevent="openExternal('https://defrag.racing')" class="text-brand-400 hover:underline">defrag.racing</a>.
                         Here's what's inside:
                     </p>
                     <ul class="text-sm text-neutral-300 space-y-1.5 pl-1">

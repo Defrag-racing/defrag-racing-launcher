@@ -2,7 +2,7 @@
     import { computed, onActivated, onMounted, onUnmounted, ref } from 'vue';
     import { useRoute, useRouter } from 'vue-router';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
-    import { openUrl } from '@tauri-apps/plugin-opener';
+    import { openExternal } from '../lib/open';
     import { tauri, type EngineCandidate, type HealthItem, type LaunchProfile } from '../lib/tauri';
     import TokenFeatureList from '../components/TokenFeatureList.vue';
     import UpdateBanner from '../components/UpdateBanner.vue';
@@ -445,7 +445,7 @@
                         <div class="text-xs text-neutral-500 mt-0.5">
                             Personal access token from the
                             <a href="#" class="text-brand-400 hover:underline"
-                               @click.prevent="openUrl('https://defrag.racing/user/settings?tab=security')">
+                               @click.prevent="openExternal('https://defrag.racing/user/settings?tab=security')">
                                 "Launcher Tokens" block on defrag.racing → Settings → Security
                             </a>.
                             Stored in your OS keyring. Unlocks:

@@ -8,6 +8,7 @@
     import { useNotificationsStore } from './stores/notifications';
     import { useUpdaterStore } from './stores/updater';
     import UpdateBanner from './components/UpdateBanner.vue';
+    import { openExternal } from './lib/open';
 
     const router = useRouter();
     const route = useRoute();
@@ -46,8 +47,7 @@
     const openProfile = async () => {
         const mddId = config.me?.mdd_id;
         if (!mddId) return;
-        const { openUrl } = await import('@tauri-apps/plugin-opener');
-        await openUrl(`https://defrag.racing/profile/${mddId}`).catch(() => {});
+        await openExternal(`https://defrag.racing/profile/${mddId}`).catch(() => {});
     };
 
     const launching = ref(false);
@@ -156,8 +156,7 @@
 
     const openServerMap = async (mapname: string | undefined) => {
         if (!mapname) return;
-        const { openUrl } = await import('@tauri-apps/plugin-opener');
-        openUrl(`https://defrag.racing/maps/${encodeURIComponent(mapname)}`).catch(() => {});
+        openExternal(`https://defrag.racing/maps/${encodeURIComponent(mapname)}`).catch(() => {});
     };
 
     const lookupPendingServer = async (address: string) => {

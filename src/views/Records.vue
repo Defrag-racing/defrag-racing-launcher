@@ -10,7 +10,7 @@
     import { tauri, type RecordRow, type Paginated } from '../lib/tauri';
     import { q3ToHtml } from '../lib/q3color';
     import { useConfigStore } from '../stores/config';
-    import { openUrl } from '@tauri-apps/plugin-opener';
+    import { openExternal } from '../lib/open';
 
     const config = useConfigStore();
 
@@ -130,13 +130,13 @@
     };
 
     const openMap = (name: string) => {
-        openUrl(`https://defrag.racing/maps/${encodeURIComponent(name)}`)
+        openExternal(`https://defrag.racing/maps/${encodeURIComponent(name)}`)
             .catch(() => { /* best effort */ });
     };
 
     const openProfile = (mddId: number | null) => {
         if (!mddId) return;
-        openUrl(`https://defrag.racing/profile/${mddId}`)
+        openExternal(`https://defrag.racing/profile/${mddId}`)
             .catch(() => { /* best effort */ });
     };
 </script>

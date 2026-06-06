@@ -840,6 +840,14 @@ pub fn launch_engine() -> Result<(), String> {
     protocol::launch_no_connect(cfg.engine_path.as_deref()).map_err(err_to_string)
 }
 
+/// Open an external URL in the user's browser. Routed through Rust (not
+/// the JS opener plugin directly) so the Linux/AppImage path can launch
+/// the browser with a clean environment - see protocol::open_external_url.
+#[tauri::command]
+pub fn open_url(app: AppHandle, url: String) -> Result<(), String> {
+    protocol::open_external_url(&app, &url)
+}
+
 /// Launch the engine with extra arguments (no `+connect`). Backs the
 /// developer-mode custom Quick launch and the named launch profiles - the
 /// frontend passes the relevant argument string and we split + spawn.

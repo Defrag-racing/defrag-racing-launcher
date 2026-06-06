@@ -4,6 +4,10 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.28
+
+- Linux: fixed external links (map pages, profiles, YouTube renders, the token page, etc.) not opening. Same root cause as the engine-launch fix - when the launcher runs as an AppImage, the browser was being spawned with the AppImage's mangled library environment and failed to start. Links now open through a system opener (xdg-open, with fallbacks to gio and common browsers) launched with a clean, shell-equivalent environment. Windows and macOS are unchanged.
+
 ## 0.1.27
 
 - New Developer mode toggle in Settings (off by default). When enabled it reveals two power-user launch options: a Custom launch arguments field whose flags get appended to the standard Quick launch, and named Launch profiles - each with its own arguments, as many as you want. Arguments are parsed like a command line, so quotes keep a spaced value (`"my mod"`) as one argument.

@@ -161,6 +161,58 @@ pub fn launch_with_args(engine: Option<&Path>, args: &[String]) -> Result<(), Pr
     })
 }
 
+/// Open an external URL in the user's browser.
+///
+/// Linux: we deliberately spawn the system opener ourselves instead of
+/// going through `tauri-plugin-opener`, for the same reason the engine
+/// launch needs special handling - when the launcher runs as an AppImage,
+/// the opener inherits the AppImage's mangled `LD_LIBRARY_PATH` and the
+/// browser it ultimately launches loads the bundle's libraries and fails
+/// to start. We strip the AppImage additions (`strip_appimage_env`) so the
+/// browser comes up with a clean, shell-equivalent environment, and walk a
+/// fallback chain (xdg-open -> gio -> common browsers) so it works across
+/// desktops. A spawn that starts the process is treated as success.
+#[cfg(target_os = "linux")]
+pub fn open_external_url(_app: &tauri::AppHandle, target: &str) -> Result<(), String> {
+    // (binary, leading args before the URL)
+    let candidates: &[(&str, &[&str])] = &[
+        ("xdg-open", &[]),
+        ("gio", &["open"]),
+        ("x-www-browser", &[]),
+        ("www-browser", &[]),
+        ("sensible-browser", &[]),
+        ("firefox", &[]),
+        ("google-chrome", &[]),
+        ("chromium", &[]),
+        ("chromium-browser", &[]),
+    ];
+
+    let mut last_err = String::from("no opener found on PATH");
+    for (bin, pre) in candidates {
+        let mut cmd = Command::new(bin);
+        for p in *pre {
+            cmd.arg(p);
+        }
+        cmd.arg(target);
+        strip_appimage_env(&mut cmd);
+        match cmd.spawn() {
+            Ok(_) => return Ok(()),
+            Err(e) => last_err = format!("{bin}: {e}"),
+        }
+    }
+    Err(format!("could not open URL ({last_err})"))
+}
+
+/// Non-Linux: the opener plugin works fine (no AppImage env to undo), so
+/// defer to it.
+#[cfg(not(target_os = "linux"))]
+pub fn open_external_url(app: &tauri::AppHandle, target: &str) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(target.to_string(), None::<String>)
+        .map_err(|e| e.to_string())
+}
+
 /// Split a free-form argument string into individual arguments the way a
 /// shell would, honouring single and double quotes so a value containing
 /// a space (e.g. `+set fs_game "my mod"`) survives as one argument.

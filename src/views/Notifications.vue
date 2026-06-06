@@ -4,7 +4,7 @@
     import { useConfigStore } from '../stores/config';
     import { useNotificationsStore } from '../stores/notifications';
     import { q3ToHtml } from '../lib/q3color';
-    import { openUrl } from '@tauri-apps/plugin-opener';
+    import { openExternal } from '../lib/open';
 
     const config = useConfigStore();
     const notifStore = useNotificationsStore();
@@ -291,17 +291,17 @@
     // -- Click actions ------------------------------------------------
     const openSystemLink = (n: SystemNotificationRow) => {
         if (!n.url) return;
-        openUrl(n.url).catch(() => {});
+        openExternal(n.url).catch(() => {});
     };
 
     const openMap = (mapname: string | null) => {
         if (!mapname) return;
-        openUrl(`https://defrag.racing/maps/${encodeURIComponent(mapname)}`).catch(() => {});
+        openExternal(`https://defrag.racing/maps/${encodeURIComponent(mapname)}`).catch(() => {});
     };
 
     const openProfile = (mddId: number | null) => {
         if (!mddId) return;
-        openUrl(`https://defrag.racing/profile/${mddId}`).catch(() => {});
+        openExternal(`https://defrag.racing/profile/${mddId}`).catch(() => {});
     };
 
     const physicsTone = (physics: string | null): string => {
@@ -615,7 +615,7 @@
                                     <button
                                         v-if="n.subheadline"
                                         class="text-[11px] inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200"
-                                        @click.stop="openUrl(n.subheadline!).catch(() => {})"
+                                        @click.stop="openExternal(n.subheadline!).catch(() => {})"
                                     >📥 Demo</button>
                                     <button
                                         v-if="n.url"

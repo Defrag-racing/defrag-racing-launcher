@@ -7,7 +7,7 @@
     import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
     import { tauri, type MapRow, type Paginated } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
-    import { openUrl } from '@tauri-apps/plugin-opener';
+    import { openExternal } from '../lib/open';
 
     const config = useConfigStore();
 
@@ -110,7 +110,7 @@
     };
 
     const openMap = (name: string) => {
-        openUrl(`https://defrag.racing/maps/${encodeURIComponent(name)}`)
+        openExternal(`https://defrag.racing/maps/${encodeURIComponent(name)}`)
             .catch(() => { /* best effort */ });
     };
 

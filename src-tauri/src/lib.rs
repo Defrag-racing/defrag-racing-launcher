@@ -225,6 +225,7 @@ pub fn run() {
             commands::handle_protocol_url,
             commands::launch_engine,
             commands::launch_engine_args,
+            commands::open_url,
             commands::get_servers,
             commands::get_pending_deep_link,
             commands::confirm_pending_deep_link,
