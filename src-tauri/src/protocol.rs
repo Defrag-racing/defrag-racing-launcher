@@ -149,6 +149,60 @@ pub fn launch_no_connect(engine: Option<&Path>) -> Result<(), ProtocolError> {
     spawn_engine(engine, |_| {})
 }
 
+/// Spawns the engine with caller-supplied extra arguments (no
+/// `+connect`). Backs the developer-mode custom Quick launch + named
+/// launch profiles: the args come from the user's config, already split
+/// into tokens via `split_args`.
+pub fn launch_with_args(engine: Option<&Path>, args: &[String]) -> Result<(), ProtocolError> {
+    spawn_engine(engine, |cmd| {
+        for a in args {
+            cmd.arg(a);
+        }
+    })
+}
+
+/// Split a free-form argument string into individual arguments the way a
+/// shell would, honouring single and double quotes so a value containing
+/// a space (e.g. `+set fs_game "my mod"`) survives as one argument.
+/// Backslash escaping is intentionally not supported - Q3 engine args
+/// don't need it and it keeps the rule "what you'd type on a command
+/// line" easy to reason about. Empty / whitespace-only input yields an
+/// empty vec.
+pub fn split_args(input: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut cur = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut has_token = false;
+
+    for c in input.chars() {
+        match c {
+            '\'' if !in_double => {
+                in_single = !in_single;
+                has_token = true;
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+                has_token = true;
+            }
+            c if c.is_whitespace() && !in_single && !in_double => {
+                if has_token {
+                    args.push(std::mem::take(&mut cur));
+                    has_token = false;
+                }
+            }
+            c => {
+                cur.push(c);
+                has_token = true;
+            }
+        }
+    }
+    if has_token {
+        args.push(cur);
+    }
+    args
+}
+
 fn spawn_engine(
     engine: Option<&Path>,
     extra_args: impl FnOnce(&mut Command),
@@ -310,5 +364,29 @@ mod tests {
     fn rejects_empty_host() {
         assert!(matches!(parse_url("defrag://"), Err(ProtocolError::MissingHost(_))));
         assert!(matches!(parse_url("defrag://:27960"), Err(ProtocolError::BadAddress(_, _))));
+    }
+
+    #[test]
+    fn split_args_basic() {
+        assert_eq!(split_args("+set r_fullscreen 0"), vec!["+set", "r_fullscreen", "0"]);
+    }
+
+    #[test]
+    fn split_args_empty_and_whitespace() {
+        assert!(split_args("").is_empty());
+        assert!(split_args("   \t ").is_empty());
+    }
+
+    #[test]
+    fn split_args_respects_quotes() {
+        assert_eq!(
+            split_args(r#"+set fs_game "my mod" +exec 'cfg one'"#),
+            vec!["+set", "fs_game", "my mod", "+exec", "cfg one"],
+        );
+    }
+
+    #[test]
+    fn split_args_collapses_runs_of_spaces() {
+        assert_eq!(split_args("a    b\tc"), vec!["a", "b", "c"]);
     }
 }

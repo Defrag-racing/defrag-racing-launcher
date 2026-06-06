@@ -4,6 +4,11 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.27
+
+- New Developer mode toggle in Settings (off by default). When enabled it reveals two power-user launch options: a Custom launch arguments field whose flags get appended to the standard Quick launch, and named Launch profiles - each with its own arguments, as many as you want. Arguments are parsed like a command line, so quotes keep a spaced value (`"my mod"`) as one argument.
+- Launch profiles show up as a dropdown next to Quick launch in the top bar: click the caret to launch any profile (e.g. "Fullscreen", "Mod X") with just its own arguments, or the main button for your standard Quick launch. The menu only appears in developer mode with at least one profile defined, so nothing changes for normal users.
+
 ## 0.1.26
 
 - The "update available" banner now shows on every tab, not just Demos. It used to live only on the Demos page, so an update was invisible while you were on Servers, Records, Maps, History or Notifications. It's now app-level (with the same View changes / Install & restart actions and inline changelog) and appears wherever you are.

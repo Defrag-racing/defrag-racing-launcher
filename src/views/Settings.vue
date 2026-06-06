@@ -3,7 +3,7 @@
     import { useRoute, useRouter } from 'vue-router';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
     import { openUrl } from '@tauri-apps/plugin-opener';
-    import { tauri, type EngineCandidate, type HealthItem } from '../lib/tauri';
+    import { tauri, type EngineCandidate, type HealthItem, type LaunchProfile } from '../lib/tauri';
     import TokenFeatureList from '../components/TokenFeatureList.vue';
     import UpdateBanner from '../components/UpdateBanner.vue';
     import { useConfigStore } from '../stores/config';
@@ -28,6 +28,9 @@
     const tokenSection = ref<HTMLElement | null>(null);
     let highlightTimer: number | undefined;
     onActivated(async () => {
+        // Re-mirror developer-mode fields from the store on every entry so
+        // an external change (e.g. a Reset) is reflected.
+        syncDevFromConfig();
         const target = route.query.highlight;
         if (target !== 'demos' && target !== 'token') return;
         // Same one-shot pulse + scroll for the token card - the Servers /
@@ -83,6 +86,7 @@
     const autostart = ref(false);
 
     onMounted(async () => {
+        syncDevFromConfig();
         engines.value = await tauri.detectEngines();
         appVersion.value = await tauri.appVersion();
         // Read the OS-level autostart state, not just our config -
@@ -90,6 +94,54 @@
         // manually (Task Manager → Startup) outside the launcher.
         autostart.value = await tauri.isAutostartEnabled();
     });
+
+    // --- developer mode: custom launch args + named launch profiles -----
+    // Local editable copies of the config fields; text inputs and an array
+    // editor don't suit the "read store directly, save on @change" pattern
+    // the toggles use, so we mirror them here and persist on blur / on
+    // structural change. Re-synced from the store on every activation so a
+    // Reset or an external config change is reflected.
+    const customArgs = ref('');
+    const profiles = ref<LaunchProfile[]>([]);
+
+    const syncDevFromConfig = () => {
+        customArgs.value = config.config.custom_launch_args ?? '';
+        profiles.value = (config.config.launch_profiles ?? []).map((p) => ({ ...p }));
+    };
+
+    const toggleDeveloperMode = async (next: boolean) => {
+        await config.save({ developer_mode: next });
+        syncDevFromConfig();
+    };
+
+    const saveCustomArgs = async () => {
+        if (customArgs.value === config.config.custom_launch_args) return;
+        await config.save({ custom_launch_args: customArgs.value });
+    };
+
+    const persistProfiles = async () => {
+        // Strip blank rows (no name AND no args) so an abandoned "Add" row
+        // doesn't linger as a nameless launch button.
+        const cleaned = profiles.value
+            .map((p) => ({ id: p.id, name: p.name.trim(), args: p.args.trim() }))
+            .filter((p) => p.name !== '' || p.args !== '');
+        await config.save({ launch_profiles: cleaned });
+        profiles.value = cleaned.map((p) => ({ ...p }));
+    };
+
+    const newProfileId = () => {
+        // crypto.randomUUID is available in WebView2 / WKWebView / WebKitGTK.
+        try { return crypto.randomUUID(); } catch { return `p${profiles.value.length}-${customArgs.value.length}-${profiles.value.reduce((a, p) => a + p.id.length, 0)}`; }
+    };
+
+    const addProfile = () => {
+        profiles.value.push({ id: newProfileId(), name: '', args: '' });
+    };
+
+    const removeProfile = async (id: string) => {
+        profiles.value = profiles.value.filter((p) => p.id !== id);
+        await persistProfiles();
+    };
 
     const toggleAutostart = async (next: boolean) => {
         try {
@@ -584,6 +636,100 @@
                      stack with this one. -->
                 <div v-if="updater.state.kind === 'available' || updater.state.kind === 'downloading' || updater.state.kind === 'installing' || updater.state.kind === 'error'" class="-mx-4 -mb-4 mt-1 rounded-b-lg overflow-hidden">
                     <UpdateBanner />
+                </div>
+            </section>
+
+            <!-- Developer mode. Toggle reveals the advanced launch surface:
+                 custom args appended to Quick launch + named launch
+                 profiles that show as extra launch buttons in the top nav. -->
+            <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
+                <div class="flex items-center justify-between gap-3">
+                    <div>
+                        <div class="font-semibold flex items-center gap-2">
+                            <span>🛠️</span><span>Developer mode</span>
+                        </div>
+                        <div class="text-xs text-neutral-500 mt-0.5 leading-relaxed">
+                            Adds custom engine arguments and your own named Quick-launch
+                            profiles. For power users tweaking startup flags - leave off if
+                            you're not sure.
+                        </div>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                        <input
+                            type="checkbox"
+                            class="sr-only peer"
+                            :checked="config.config.developer_mode"
+                            @change="toggleDeveloperMode(($event.target as HTMLInputElement).checked)"
+                        />
+                        <div class="w-10 h-5 bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors"></div>
+                        <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+                    </label>
+                </div>
+
+                <div v-if="config.config.developer_mode" class="space-y-4 pt-2 border-t border-white/[0.06]">
+                    <!-- Custom args appended to the main Quick launch. -->
+                    <div class="space-y-1.5">
+                        <div class="text-xs uppercase tracking-wider text-neutral-500">Custom launch arguments</div>
+                        <input
+                            v-model="customArgs"
+                            type="text"
+                            spellcheck="false"
+                            placeholder='e.g. +set fs_game defrag +set r_fullscreen 0'
+                            class="w-full bg-black/60 border border-white/10 rounded px-3 py-2 text-sm font-mono text-neutral-200 placeholder:text-neutral-600 focus:border-brand-500/60 focus:outline-none"
+                            @blur="saveCustomArgs"
+                            @keydown.enter="saveCustomArgs"
+                        />
+                        <div class="text-[11px] text-neutral-500">
+                            Appended to the <strong>Quick launch</strong> button. Quotes are respected,
+                            so <span class="font-mono">"my mod"</span> stays one argument.
+                        </div>
+                    </div>
+
+                    <!-- Named launch profiles. Each becomes its own button in
+                         the top nav's launch menu. -->
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between">
+                            <div class="text-xs uppercase tracking-wider text-neutral-500">Launch profiles</div>
+                            <button class="btn-ghost text-xs" @click="addProfile">+ Add profile</button>
+                        </div>
+                        <p v-if="profiles.length === 0" class="text-[11px] text-neutral-500">
+                            No profiles yet. Add one to get an extra labelled launch button
+                            (e.g. "Fullscreen", "Mod X") next to Quick launch.
+                        </p>
+                        <div
+                            v-for="p in profiles"
+                            :key="p.id"
+                            class="flex items-center gap-2"
+                        >
+                            <input
+                                v-model="p.name"
+                                type="text"
+                                spellcheck="false"
+                                placeholder="Name (e.g. Fullscreen)"
+                                class="w-40 flex-shrink-0 bg-black/60 border border-white/10 rounded px-2 py-1.5 text-sm text-neutral-200 placeholder:text-neutral-600 focus:border-brand-500/60 focus:outline-none"
+                                @blur="persistProfiles"
+                            />
+                            <input
+                                v-model="p.args"
+                                type="text"
+                                spellcheck="false"
+                                placeholder="Arguments (e.g. +set r_fullscreen 1)"
+                                class="flex-1 min-w-0 bg-black/60 border border-white/10 rounded px-2 py-1.5 text-sm font-mono text-neutral-200 placeholder:text-neutral-600 focus:border-brand-500/60 focus:outline-none"
+                                @blur="persistProfiles"
+                                @keydown.enter="persistProfiles"
+                            />
+                            <button
+                                class="flex-shrink-0 px-2 py-1.5 rounded bg-red-500/10 hover:bg-red-500/20 text-red-300 text-xs"
+                                title="Remove profile"
+                                @click="removeProfile(p.id)"
+                            >Remove</button>
+                        </div>
+                        <p v-if="profiles.length > 0" class="text-[11px] text-neutral-500">
+                            Each profile launches the engine with just its own arguments and
+                            appears in the launch menu next to <strong>Quick launch</strong>.
+                            Needs an engine set above.
+                        </p>
+                    </div>
                 </div>
             </section>
 

@@ -840,6 +840,18 @@ pub fn launch_engine() -> Result<(), String> {
     protocol::launch_no_connect(cfg.engine_path.as_deref()).map_err(err_to_string)
 }
 
+/// Launch the engine with extra arguments (no `+connect`). Backs the
+/// developer-mode custom Quick launch and the named launch profiles - the
+/// frontend passes the relevant argument string and we split + spawn.
+/// Ignored-when-off is enforced on the frontend (the buttons only exist
+/// in developer mode); the engine path still comes from config here.
+#[tauri::command]
+pub fn launch_engine_args(extra_args: String) -> Result<(), String> {
+    let cfg = Config::load().map_err(err_to_string)?;
+    let args = protocol::split_args(&extra_args);
+    protocol::launch_with_args(cfg.engine_path.as_deref(), &args).map_err(err_to_string)
+}
+
 // ---- Server browser --------------------------------------------------------
 
 /// Fetch the live server list from defrag.racing. Token-locked endpoint -

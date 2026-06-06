@@ -52,11 +52,41 @@
 
     const launching = ref(false);
     const launchError = ref<string | null>(null);
+    const showLaunchMenu = ref(false);
+
+    // Developer-mode launch profiles surface as extra entries in a small
+    // dropdown next to Quick launch. Only when developer mode is on AND at
+    // least one profile exists - otherwise the plain button stands alone.
+    const launchProfiles = computed(() =>
+        config.config.developer_mode ? (config.config.launch_profiles ?? []) : [],
+    );
+    const hasLaunchMenu = computed(() => launchProfiles.value.length > 0);
+
     const launchGame = async () => {
         launchError.value = null;
         launching.value = true;
+        showLaunchMenu.value = false;
         try {
-            await tauri.launchEngine();
+            // Apply custom args to the standard Quick launch when developer
+            // mode is on; otherwise the plain no-args launch.
+            const extra = config.config.developer_mode
+                ? (config.config.custom_launch_args ?? '').trim()
+                : '';
+            if (extra) await tauri.launchEngineArgs(extra);
+            else await tauri.launchEngine();
+        } catch (e: any) {
+            launchError.value = e?.toString?.() ?? 'Failed to launch';
+        } finally {
+            launching.value = false;
+        }
+    };
+
+    const launchProfile = async (args: string) => {
+        launchError.value = null;
+        launching.value = true;
+        showLaunchMenu.value = false;
+        try {
+            await tauri.launchEngineArgs((args ?? '').trim());
         } catch (e: any) {
             launchError.value = e?.toString?.() ?? 'Failed to launch';
         } finally {
@@ -321,18 +351,52 @@
                 <!-- Play CTA. Big, green, labelled - this is the "I
                      want to launch the game right now" button. Disabled
                      with a tooltip when the engine path isn't set so
-                     the user knows where to go fix it. -->
-                <button
-                    class="px-3 py-1.5 rounded text-sm font-semibold flex items-center gap-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
-                    :disabled="!config.config.engine_path || launching"
-                    :title="!config.config.engine_path
-                        ? 'Pick an engine in Settings first'
-                        : `Quick launch ${config.config.engine_path}`"
-                    @click="launchGame"
-                >
-                    <span>▶</span>
-                    <span>{{ launching ? 'Launching…' : 'Quick launch' }}</span>
-                </button>
+                     the user knows where to go fix it. In developer mode
+                     with launch profiles, a caret opens a menu to launch
+                     a specific profile instead. -->
+                <div class="relative flex items-center">
+                    <button
+                        class="px-3 py-1.5 text-sm font-semibold flex items-center gap-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                        :class="hasLaunchMenu ? 'rounded-l' : 'rounded'"
+                        :disabled="!config.config.engine_path || launching"
+                        :title="!config.config.engine_path
+                            ? 'Pick an engine in Settings first'
+                            : `Quick launch ${config.config.engine_path}`"
+                        @click="launchGame"
+                    >
+                        <span>▶</span>
+                        <span>{{ launching ? 'Launching…' : 'Quick launch' }}</span>
+                    </button>
+                    <button
+                        v-if="hasLaunchMenu"
+                        class="px-1.5 py-1.5 rounded-r border-l border-emerald-300/20 text-sm bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                        :disabled="!config.config.engine_path || launching"
+                        title="Launch a profile"
+                        @click="showLaunchMenu = !showLaunchMenu"
+                    >▾</button>
+
+                    <!-- Click-away backdrop + dropdown. -->
+                    <div v-if="showLaunchMenu" class="fixed inset-0 z-40" @click="showLaunchMenu = false"></div>
+                    <div
+                        v-if="showLaunchMenu"
+                        class="absolute right-0 top-full mt-1 z-50 w-56 bg-neutral-900 border border-white/10 rounded-lg shadow-xl overflow-hidden py-1"
+                    >
+                        <button
+                            class="w-full text-left px-3 py-1.5 text-sm text-emerald-300 hover:bg-white/5 flex items-center gap-2"
+                            @click="launchGame"
+                        >
+                            <span>▶</span><span>Quick launch</span>
+                        </button>
+                        <div class="my-1 border-t border-white/[0.06]"></div>
+                        <button
+                            v-for="p in launchProfiles"
+                            :key="p.id"
+                            class="w-full text-left px-3 py-1.5 text-sm text-neutral-200 hover:bg-white/5 truncate"
+                            :title="p.args"
+                            @click="launchProfile(p.args)"
+                        >{{ p.name || '(unnamed profile)' }}</button>
+                    </div>
+                </div>
 
                 <!-- Notifications bell. Badge shows unread total
                      across record + system feeds; refreshed every

@@ -82,6 +82,38 @@ pub struct Config {
     /// Reset. None = config written before we added this field (pre-0.1.3).
     #[serde(default)]
     pub config_version: Option<String>,
+
+    /// Developer mode. Reveals the advanced launch surface in Settings:
+    /// custom engine arguments + named quick-launch profiles. Off by
+    /// default - it's power-user territory that would only clutter the
+    /// normal setup. When off, `custom_launch_args` and `launch_profiles`
+    /// are ignored even if present, so toggling it back off cleanly hides
+    /// the feature without discarding what the user typed.
+    #[serde(default)]
+    pub developer_mode: bool,
+
+    /// Extra arguments appended to the standard Quick launch, as a single
+    /// free-form, shell-style string (quotes respected so a value with a
+    /// space stays one argument). Empty = none. Only honoured in developer
+    /// mode.
+    #[serde(default)]
+    pub custom_launch_args: String,
+
+    /// User-defined named launch profiles, each carrying its own argument
+    /// string. Surfaced as extra quick-launch entries next to the main
+    /// one. Only honoured in developer mode.
+    #[serde(default)]
+    pub launch_profiles: Vec<LaunchProfile>,
+}
+
+/// A named engine launch configuration the user defined in developer
+/// mode. `id` is a stable client-generated key for list rendering / edits;
+/// `name` is the button label; `args` is the shell-style argument string.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LaunchProfile {
+    pub id: String,
+    pub name: String,
+    pub args: String,
 }
 
 impl Default for Config {
@@ -99,6 +131,9 @@ impl Default for Config {
             deep_link_auto_connect: false,
             onboarding_completed: false,
             config_version: None,
+            developer_mode: false,
+            custom_launch_args: String::new(),
+            launch_profiles: Vec::new(),
         }
     }
 }

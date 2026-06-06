@@ -4,6 +4,13 @@
 
 import { invoke } from '@tauri-apps/api/core';
 
+/** A named engine launch configuration the user defined in developer mode. */
+export interface LaunchProfile {
+    id: string;
+    name: string;
+    args: string;
+}
+
 export interface LauncherConfig {
     engine_path: string | null;
     demos_path: string | null;
@@ -18,6 +25,13 @@ export interface LauncherConfig {
     deep_link_auto_connect: boolean;
     onboarding_completed: boolean;
     config_version: string | null;
+    /** Developer mode: reveals custom launch args + launch profiles in
+     *  Settings. Off by default. */
+    developer_mode: boolean;
+    /** Extra args appended to the standard Quick launch (developer mode). */
+    custom_launch_args: string;
+    /** User-defined named launch profiles (developer mode). */
+    launch_profiles: LaunchProfile[];
 }
 
 export interface EngineCandidate {
@@ -141,6 +155,11 @@ export const tauri = {
             source: source ?? null,
         }),
     launchEngine: () => invoke<void>('launch_engine'),
+    /** Launch the engine with extra arguments (developer-mode custom Quick
+     *  launch + named profiles). `extraArgs` is the raw shell-style string;
+     *  the backend splits it (quotes respected). */
+    launchEngineArgs: (extraArgs: string) =>
+        invoke<void>('launch_engine_args', { extraArgs }),
     getPendingDeepLink: () => invoke<string | null>('get_pending_deep_link'),
     /** Optional enrichment is logged into history.json so the History
      *  tab can show map/server name alongside the IP. Pass whatever

@@ -224,6 +224,7 @@ pub fn run() {
             commands::get_rate_limit_resume_at_ms,
             commands::handle_protocol_url,
             commands::launch_engine,
+            commands::launch_engine_args,
             commands::get_servers,
             commands::get_pending_deep_link,
             commands::confirm_pending_deep_link,

@@ -18,6 +18,9 @@ export const useConfigStore = defineStore('config', () => {
         deep_link_auto_connect: false,
         onboarding_completed: false,
         config_version: null,
+        developer_mode: false,
+        custom_launch_args: '',
+        launch_profiles: [],
     });
     const hasToken = ref(false);
     const autoUploadRunning = ref(false);
