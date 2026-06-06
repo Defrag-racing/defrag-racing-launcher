@@ -4,6 +4,7 @@
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
     import { openUrl } from '@tauri-apps/plugin-opener';
     import { tauri, type EngineCandidate, type HealthItem } from '../lib/tauri';
+    import TokenFeatureList from '../components/TokenFeatureList.vue';
     import { useConfigStore } from '../stores/config';
     import { useUpdaterStore } from '../stores/updater';
     import { displayPath } from '../lib/path';
@@ -346,9 +347,7 @@
                             Stored in your OS keyring. Unlocks:
                         </div>
                         <ul class="text-xs text-neutral-400 mt-1 space-y-0.5 pl-1">
-                            <li>• Auto-backup of recorded demos</li>
-                            <li>• Server browser with your PB / rank per map</li>
-                            <li>• Record + system notifications from your account</li>
+                            <TokenFeatureList />
                         </ul>
                     </div>
                 </div>
@@ -359,7 +358,7 @@
                     <button class="btn-danger" @click="clearToken">Clear</button>
                 </div>
                 <div v-else class="text-sm text-amber-300">
-                    No token saved - all three features above are disabled. Only <code class="bg-black/40 px-1 rounded">defrag://</code> server-join links work.
+                    No token saved - the features above are disabled. Only <code class="bg-black/40 px-1 rounded">defrag://</code> server-join links work.
                 </div>
 
                 <div v-if="!config.hasToken || showTokenForm" class="flex gap-2">

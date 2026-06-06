@@ -4,6 +4,10 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.19
+
+- The "what a token unlocks" list is now consistent everywhere it shows (Dashboard banner, Settings, onboarding) and names every gated feature: auto-backup, YouTube renders, the server browser, and the Records and Maps tabs, plus notifications. It used to list a different subset in each place and omit Records/Maps. (The History tab works without a token - it's your local defrag:// join log - so it's intentionally not listed.)
+
 ## 0.1.18
 
 - "Processed this session" now reaches your real demo count instead of stalling a few hundred short (e.g. stuck at 4942 of 5409). On launch the activity list is restored from the last session with its demos already marked backed-up; the counter was skipping those rows when the startup re-scan re-confirmed them, so it never caught up. It now counts every demo the re-scan confirms, exactly once, so the number settles at your library size.

@@ -32,6 +32,7 @@
     import { useUpdaterStore } from '../stores/updater';
     import { fetchChangelogSince, renderMarkdown, type ChangelogSection } from '../lib/changelog';
     import DemosFolderChip from '../components/DemosFolderChip.vue';
+    import TokenFeatureList from '../components/TokenFeatureList.vue';
 
     const router = useRouter();
     const config = useConfigStore();
@@ -834,9 +835,7 @@
                 No token saved - most launcher features are disabled
             </div>
             <ul class="space-y-0.5 pl-1 mb-2">
-                <li>• Auto-backup of recorded demos</li>
-                <li>• YouTube renders straight from this list</li>
-                <li>• Server browser with your PB and rank per map</li>
+                <TokenFeatureList />
             </ul>
             <div class="flex items-center justify-between gap-2">
                 <span class="text-amber-100/80">

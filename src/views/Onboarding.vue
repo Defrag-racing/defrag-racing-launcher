@@ -5,6 +5,7 @@
     import { openUrl } from '@tauri-apps/plugin-opener';
     import { tauri, type EngineCandidate } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
+    import TokenFeatureList from '../components/TokenFeatureList.vue';
 
     const router = useRouter();
     const config = useConfigStore();
@@ -353,9 +354,7 @@
                     >
                         <div class="font-semibold text-amber-200">Without a token, these features stay disabled:</div>
                         <ul class="space-y-0.5 pl-1">
-                            <li>• Auto-backup of recorded demos</li>
-                            <li>• Server browser with your PB and rank per map</li>
-                            <li>• Record + system notifications from defrag.racing</li>
+                            <TokenFeatureList />
                         </ul>
                         <div class="pt-1">
                             Only <code class="bg-black/40 px-1 rounded">defrag://</code> server-join links will work.
