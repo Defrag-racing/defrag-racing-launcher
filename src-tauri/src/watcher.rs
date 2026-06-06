@@ -110,13 +110,18 @@ pub struct UploadStateSnapshot {
 /// independent of this number, so QUEUE_CAP only affects what the
 /// activity list shows, never what the worker actually does.
 ///
-/// Originally 500, defensive against the pre-emit-pump flood that
-/// killed the webview. With EMIT_MIN_GAP_MS capping emits at 20/sec
-/// the IPC bound is snapshot_size * 20Hz; at ~350 bytes per row that
-/// gives plenty of headroom up to mid-five-figure rows. 10000 covers
-/// huge demo collections (the largest single-user folder we've seen
-/// is ~5400) without forcing virtual-scroll yet.
-const QUEUE_CAP: usize = 10000;
+/// The activity feed is a "what happened recently" list, not the demo
+/// library (that comes from list_demos, which carries each file's status
+/// straight from the cache - so a row dropping out of this queue still
+/// shows "Backed up" / "Already backed up" in the UI). The snapshot is
+/// cloned and shipped over IPC on every emit (up to 20/sec) and the
+/// frontend rebuilds its derived state from it each time, so the cost is
+/// snapshot_size * emit_rate. 10000 let the whole library (~5400 rows)
+/// land in every emit - a multi-MB payload 20x/sec that pegged the
+/// webview at idle. 500 keeps the feed useful while bounding that cost;
+/// the session counters (processed/done/duplicate/error) stay uncapped
+/// so big rescans still report honest progress.
+const QUEUE_CAP: usize = 500;
 
 /// Minimum gap between two `upload_state_changed` emits. During a tight
 /// inner loop (rescan with pause-aborted hashing) the per-update emit
@@ -300,12 +305,70 @@ impl UploadState {
         let Ok(raw) = std::fs::read_to_string(&path) else { return };
         let Ok(snap) = serde_json::from_str::<UploadStateSnapshot>(&raw) else { return };
         let mut items = snap.items;
+
+        // Reconcile every persisted row against the upload cache before it
+        // ever reaches the UI. A row can be persisted non-terminal
+        // (Pending/Hashing/Uploading) when the app closed or crashed in
+        // the ~1s window between a successful upload (cache written
+        // immediately) and the next throttled queue.json save - the cache
+        // says "done", the queue still says "pending". Without this the
+        // row shows "Backing up 0/1" forever AND the worker keeps re-
+        // touching it on every rescan, melting CPU on an emit storm for a
+        // file that is already on the server. cache.get() matches on the
+        // NORMALISED path and ignores mtime drift, so it heals the row
+        // even when the file was touched after upload (which is exactly
+        // what makes the rescan's get_if_fresh freshness check miss it).
+        let cache = UploadCache::load();
+        let mut healed = 0usize;
         for item in &mut items {
-            if matches!(item.status, UploadStatus::Hashing | UploadStatus::Uploading) {
-                item.status = UploadStatus::Pending;
-                item.error = None;
+            // Bring legacy verbatim-prefixed (`\\?\`) paths into the same
+            // key space as the cache so the lookup below can hit.
+            item.path = crate::cache::normalize(&item.path);
+            if is_terminal(item.status) {
+                continue;
+            }
+            match cache.get(&item.path).map(|e| (e.status.clone(), e.demo_id)) {
+                Some((status, demo_id)) if status == "done" || status == "duplicate" => {
+                    item.status = if status == "done" {
+                        UploadStatus::Done
+                    } else {
+                        UploadStatus::Duplicate
+                    };
+                    item.demo_id = demo_id;
+                    item.duplicate_reason = Some("cache".to_string());
+                    item.error = None;
+                    healed += 1;
+                }
+                _ => {
+                    // Genuinely unfinished. Hashing/Uploading lose meaning
+                    // across a restart (no worker is mid-flight right now),
+                    // so drop them to Pending for a clean re-process on the
+                    // next Start.
+                    if matches!(item.status, UploadStatus::Hashing | UploadStatus::Uploading) {
+                        item.status = UploadStatus::Pending;
+                        item.error = None;
+                    }
+                }
             }
         }
+
+        // A pre-fix queue.json (or an old build) may hold the entire
+        // library; apply the same ceiling the live insert path enforces so
+        // we don't reload tens of thousands of rows into every snapshot.
+        if items.len() > QUEUE_CAP {
+            items.truncate(QUEUE_CAP);
+        }
+
+        let still_pending = items.iter().filter(|i| !is_terminal(i.status)).count();
+        if healed > 0 || still_pending > 0 {
+            crate::log_startup(&format!(
+                "load_persisted: {} rows; healed {} stale-pending from cache; {} still pending",
+                items.len(),
+                healed,
+                still_pending
+            ));
+        }
+
         *self.inner.lock().unwrap() = items;
     }
 
@@ -817,6 +880,15 @@ async fn handle_file(
     cache: &mut UploadCache,
     path: PathBuf,
 ) {
+    // Normalise FIRST so every downstream key (the already-present short
+    // circuit below, state.update's find-by-path, the queue rows we
+    // insert, and what we persist to queue.json) uses the SAME form the
+    // cache does. The watcher feeds verbatim `\\?\E:\…` paths on Windows
+    // while walkdir / list_demos feed bare `E:\…`; left unnormalised the
+    // two sides key the same file into different buckets, so a row could
+    // never be matched back to its cache entry - the root cause of demos
+    // stuck "Backing up 0/1" for a file already on the server.
+    let path = crate::cache::normalize(&path);
     let filename = path
         .file_name()
         .and_then(|n| n.to_str())
@@ -913,6 +985,34 @@ async fn handle_file(
     // files going up) but still enforces the target on the duplicate
     // path where lookup-by-hash returns immediately.
     state.wait_after_hash(hash_elapsed).await;
+
+    // Offline self-heal. get_if_fresh rejected this file on its size+mtime
+    // freshness check, but if the hash we just computed still matches the
+    // one we cached for it, the bytes are identical to what we already
+    // uploaded - the file was merely touched (mtime drift from a backup
+    // tool, antivirus, an editor re-save). Adopt the cached terminal
+    // status instead of a needless server round-trip, and rewrite the
+    // cache so the next rescan gets a clean freshness hit. This is what
+    // lets a stuck row recover even with no network / not logged in.
+    if let Some((cstatus, cdemo_id)) = cache
+        .get(&path)
+        .filter(|e| e.hash == md5 && (e.status == "done" || e.status == "duplicate"))
+        .map(|e| (e.status.clone(), e.demo_id))
+    {
+        let status = if cstatus == "done" {
+            UploadStatus::Done
+        } else {
+            UploadStatus::Duplicate
+        };
+        state.update(app, &path, &filename, |u| {
+            u.status = status;
+            u.demo_id = cdemo_id;
+            u.duplicate_reason = Some("cache".to_string());
+        });
+        cache.insert(&path, md5, &cstatus, cdemo_id);
+        let _ = cache.save();
+        return;
+    }
 
     // Pre-flight: is this already on the server?
     match client.lookup_by_hash(&md5).await {

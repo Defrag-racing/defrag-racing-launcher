@@ -281,6 +281,44 @@
         return result;
     });
 
+    // -- list virtualisation ------------------------------------------
+    // The library can be many thousands of rows. Rendering them all puts
+    // that many <li> in the DOM and makes every reactive update (a status
+    // change, a re-sort) walk the whole tree. We window it: only the rows
+    // intersecting the viewport (plus a small overscan) are rendered, held
+    // in place by a fixed row height and a spacer the full list's tall.
+    // ROW_H must match the rendered row height exactly or scrolling drifts.
+    const ROW_H = 53;
+    const OVERSCAN = 8;
+    const scrollEl = ref<HTMLElement | null>(null);
+    const scrollTop = ref(0);
+    const viewportH = ref(0);
+    const onListScroll = () => {
+        const el = scrollEl.value;
+        if (!el) return;
+        scrollTop.value = el.scrollTop;
+        viewportH.value = el.clientHeight;
+    };
+    const measureViewport = () => {
+        const el = scrollEl.value;
+        if (el) viewportH.value = el.clientHeight;
+    };
+    const startIndex = computed(() =>
+        Math.max(0, Math.floor(scrollTop.value / ROW_H) - OVERSCAN),
+    );
+    const endIndex = computed(() => {
+        const visibleCount = Math.ceil((viewportH.value || 600) / ROW_H) + OVERSCAN * 2;
+        return Math.min(filteredDemos.value.length, startIndex.value + visibleCount);
+    });
+    // Each rendered row carries its absolute offset so it sits at the right
+    // place inside the full-height spacer.
+    const visibleDemos = computed(() =>
+        filteredDemos.value.slice(startIndex.value, endIndex.value).map((d, i) => ({
+            d,
+            top: (startIndex.value + i) * ROW_H,
+        })),
+    );
+
     // -- live backup progress -----------------------------------------
     // The session summary counts terminal results, but while a big (or
     // CPU-throttled) hash is in flight nothing changes for seconds and the
@@ -409,6 +447,25 @@
         try { paused.value = await tauri.isAutoUploadPaused(); } catch { paused.value = false; }
     };
 
+    // Coalesce upload_state_changed bursts. The backend emits up to 20x/sec
+    // during a rescan; assigning queue.value each time would re-run the
+    // allRows + filteredDemos (sort over the whole library) + re-render on
+    // every emit. Stash the latest snapshot and apply at most once per
+    // animation frame, so a 20-emit burst costs one rebuild, not twenty.
+    let pendingSnapshot: UploadStateSnapshot | null = null;
+    let applyFrame = 0;
+    const applyPendingSnapshot = () => {
+        applyFrame = 0;
+        if (!pendingSnapshot) return;
+        const snap = pendingSnapshot;
+        pendingSnapshot = null;
+        queue.value = snap;
+        if (snap.processed_count > lastTerminalCount) {
+            lastTerminalCount = snap.processed_count;
+            scheduleRelist();
+        }
+    };
+
     onMounted(async () => {
         queue.value = await tauri.getUploadState();
         lastTerminalCount = queue.value.processed_count;
@@ -426,15 +483,14 @@
         nowTickTimer = window.setInterval(() => { nowMs.value = Date.now(); }, 250);
         inProgressTimer = window.setInterval(() => { void pollInProgress(); }, 10_000);
         document.addEventListener('visibilitychange', onDemosVisibility);
+        measureViewport();
+        window.addEventListener('resize', measureViewport);
 
         unlisten = await listen<UploadStateSnapshot>('upload_state_changed', (ev) => {
-            queue.value = ev.payload;
-            // Something finished hashing/uploading -> re-list soon so the
-            // row picks up its hash + persisted status.
-            if (ev.payload.processed_count > lastTerminalCount) {
-                lastTerminalCount = ev.payload.processed_count;
-                scheduleRelist();
-            }
+            // Keep only the freshest snapshot; apply on the next frame so a
+            // burst collapses into a single rebuild + re-list.
+            pendingSnapshot = ev.payload;
+            if (!applyFrame) applyFrame = requestAnimationFrame(applyPendingSnapshot);
         });
     });
 
@@ -446,6 +502,7 @@
     let activatedOnce = false;
     onActivated(() => {
         active = true;
+        measureViewport();
         // Re-entering Demos: reconcile render videos (throttled) so a video
         // that completed while you were elsewhere shows up without a restart.
         void syncRenderIndex();
@@ -459,11 +516,13 @@
 
     onUnmounted(() => {
         if (unlisten) unlisten();
+        if (applyFrame) cancelAnimationFrame(applyFrame);
         if (rateLimitPollTimer !== undefined) window.clearInterval(rateLimitPollTimer);
         if (nowTickTimer !== undefined) window.clearInterval(nowTickTimer);
         if (inProgressTimer !== undefined) window.clearInterval(inProgressTimer);
         if (relistTimer !== undefined) window.clearTimeout(relistTimer);
         document.removeEventListener('visibilitychange', onDemosVisibility);
+        window.removeEventListener('resize', measureViewport);
     });
 
     const installUpdate = () => updater.install();
@@ -909,7 +968,7 @@
         </div>
 
         <!-- the list -->
-        <div class="flex-1 overflow-auto queue-scroll">
+        <div ref="scrollEl" class="flex-1 overflow-auto queue-scroll" @scroll="onListScroll">
             <div v-if="listLoading && !allRows.length" class="p-8 text-center text-sm text-neutral-500">
                 Listing demos…
             </div>
@@ -935,11 +994,12 @@
                     </p>
                 </div>
             </div>
-            <ul v-else class="divide-y divide-white/[0.04]">
+            <ul v-else class="relative" :style="{ height: filteredDemos.length * ROW_H + 'px' }">
                 <li
-                    v-for="d in filteredDemos"
+                    v-for="{ d, top } in visibleDemos"
                     :key="d.path"
-                    class="px-5 py-2 flex items-center gap-3 hover:bg-white/[0.02]"
+                    class="absolute left-0 right-0 px-5 flex items-center gap-3 overflow-hidden border-b border-white/[0.04] hover:bg-white/[0.02]"
+                    :style="{ top: top + 'px', height: ROW_H + 'px' }"
                     @contextmenu="openContextMenu($event, d)"
                 >
                     <div class="flex-1 min-w-0">

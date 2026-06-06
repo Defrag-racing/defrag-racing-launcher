@@ -4,6 +4,12 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.14
+
+- Really fixed the demo stuck on "Backing up 0/1". The 0.1.13 fix missed the common case: a demo that was already uploaded but then touched on disk (mtime changed) would refuse to clear and the launcher would keep re-checking it, pegging CPU the whole time. The launcher now reconciles the backup queue against its upload cache at launch, so an already-backed-up demo is recognised instantly instead of spinning forever. It also self-heals offline: if a file's contents match what was already uploaded, it's cleared without needing the server.
+- Root cause behind it fixed too: on Windows the watcher and the cache could disagree on a file's path (verbatim "\\?\" prefix vs plain), keying the same demo into two buckets so it never matched its own backup record. Paths are now normalised everywhere they're compared.
+- Big CPU drop with large demo folders. The activity list is now virtualised (only the rows you can see are rendered), live backup updates are coalesced to one repaint per frame instead of up to 20 per second, and the in-memory queue is bounded so a multi-thousand-demo library no longer ships its whole contents on every update.
+
 ## 0.1.13
 
 - Demos tab no longer freezes for a few seconds on launch when you have a lot of rendered videos, and your YouTube render links now survive a restart instead of being re-fetched from scratch every time you open the launcher.
