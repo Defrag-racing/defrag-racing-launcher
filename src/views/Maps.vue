@@ -114,19 +114,27 @@
             .catch(() => { /* best effort */ });
     };
 
-    // Launch the engine to run a map offline in the chosen physics. Uses
-    // the same launch plumbing as developer-mode profiles - the engine
-    // reads `+vq3 <map>` / `+cpm <map>` as a startup console command. Map
-    // name is quoted so the arg splitter keeps it one token. Failures
-    // surface in the existing top-of-view error banner.
-    const runOffline = async (name: string, physics: 'vq3' | 'cpm') => {
+    // Run a map offline in the chosen physics. The backend first ensures
+    // the map's pk3 is in baseq3 (downloading it by its ORIGINAL pk3 name
+    // if missing - one pk3 can hold several maps), then launches
+    // `+vq3 <map>` / `+cpm <map>`. While a card is busy we show a spinner
+    // and block repeat clicks; failures surface in the top error banner.
+    const runningKey = ref<string | null>(null);
+    const keyOf = (id: number, physics: string) => `${id}:${physics}`;
+    const runOffline = async (m: MapRow, physics: 'vq3' | 'cpm') => {
+        const k = keyOf(m.id, physics);
+        if (runningKey.value) return;
+        runningKey.value = k;
         error.value = null;
         try {
-            await tauri.launchEngineArgs(`+${physics} "${name}"`);
+            await tauri.runMapOffline(m.name, physics, m.pk3);
         } catch (e: any) {
-            error.value = e?.toString?.() ?? 'Failed to launch the engine';
+            error.value = e?.toString?.() ?? 'Failed to run the map';
+        } finally {
+            runningKey.value = null;
         }
     };
+    const isRunning = (id: number, physics: string) => runningKey.value === keyOf(id, physics);
 
     const formatDate = (s: string | null): string => {
         if (!s) return '';
@@ -232,25 +240,27 @@
 
                             <!-- Run the map offline in the chosen physics. Both
                                  buttons appear on every card; the engine path
-                                 is required (same gating as Quick launch). -->
+                                 is required (same gating as Quick launch). The
+                                 backend auto-downloads the map's pk3 into
+                                 baseq3 first if it isn't installed. -->
                             <div class="flex items-center gap-1.5 mt-2 pt-2 border-t border-white/[0.06]">
                                 <span class="text-[10px] uppercase tracking-wider text-neutral-600 mr-0.5">Run offline</span>
                                 <button
                                     class="flex-1 px-2 py-1 rounded text-[11px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
-                                    :disabled="!config.config.engine_path"
+                                    :disabled="!config.config.engine_path || !!runningKey"
                                     :title="config.config.engine_path
-                                        ? `Run ${m.name} offline in VQ3`
+                                        ? `Run ${m.name} offline in VQ3 (downloads the map if missing)`
                                         : 'Pick an engine in Settings first'"
-                                    @click="runOffline(m.name, 'vq3')"
-                                >VQ3</button>
+                                    @click="runOffline(m, 'vq3')"
+                                >{{ isRunning(m.id, 'vq3') ? '…' : 'VQ3' }}</button>
                                 <button
                                     class="flex-1 px-2 py-1 rounded text-[11px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
-                                    :disabled="!config.config.engine_path"
+                                    :disabled="!config.config.engine_path || !!runningKey"
                                     :title="config.config.engine_path
-                                        ? `Run ${m.name} offline in CPM`
+                                        ? `Run ${m.name} offline in CPM (downloads the map if missing)`
                                         : 'Pick an engine in Settings first'"
-                                    @click="runOffline(m.name, 'cpm')"
-                                >CPM</button>
+                                    @click="runOffline(m, 'cpm')"
+                                >{{ isRunning(m.id, 'cpm') ? '…' : 'CPM' }}</button>
                             </div>
                         </div>
                     </li>

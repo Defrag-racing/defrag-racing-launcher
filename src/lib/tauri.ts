@@ -160,6 +160,10 @@ export const tauri = {
      *  the backend splits it (quotes respected). */
     launchEngineArgs: (extraArgs: string) =>
         invoke<void>('launch_engine_args', { extraArgs }),
+    /** Run a map offline: download its pk3 into baseq3 if missing (keyed by
+     *  the original pk3 filename), then launch `+vq3`/`+cpm <map>`. */
+    runMapOffline: (mapName: string, physics: 'vq3' | 'cpm', pk3: string | null) =>
+        invoke<MapRunResult>('run_map_offline', { mapName, physics, pk3 }),
     getPendingDeepLink: () => invoke<string | null>('get_pending_deep_link'),
     /** Optional enrichment is logged into history.json so the History
      *  tab can show map/server name alongside the IP. Pass whatever
@@ -385,6 +389,14 @@ export interface MapRow {
     gametype: string | null;
     is_nsfw: boolean;
     date_added: string | null;
+    /** Original pk3 filename/path. One pk3 can hold several maps, so the
+     *  offline-run download keys off this, not the map name. */
+    pk3: string | null;
+}
+
+export interface MapRunResult {
+    /** True if the pk3 was downloaded this run, false if already present. */
+    downloaded: boolean;
 }
 
 /** Token owner identity for the Profile button. mdd_id is the public

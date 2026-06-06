@@ -855,6 +855,89 @@ pub fn launch_engine() -> Result<(), String> {
     protocol::launch_no_connect(cfg.engine_path.as_deref()).map_err(err_to_string)
 }
 
+/// Base URL for map pk3 downloads. defrag.racing's web redirects
+/// `/maps/download/<name>` here; since the launcher knows the exact pk3
+/// filename from the maps API it hits this directly.
+const MAP_DL_BASE: &str = "https://dl.defrag.racing/downloads/maps/";
+
+#[derive(serde::Serialize)]
+pub struct MapRunResult {
+    /// True if we fetched the pk3 this run; false if it was already in
+    /// baseq3 (or there was nothing to download).
+    pub downloaded: bool,
+}
+
+/// Run a map offline: make sure its pk3 is in the engine's `baseq3`
+/// folder (download it if missing), then launch the engine straight into
+/// the map in the chosen physics.
+///
+/// Important: the pk3 is keyed by its ORIGINAL filename (`pk3`, from the
+/// maps API), NOT the map name - one pk3 can contain several maps that the
+/// site lists separately, so checking/saving by map name would re-download
+/// and duplicate. The engine argument, however, uses the MAP name
+/// (`+vq3 <map>` / `+cpm <map>`).
+#[tauri::command]
+pub async fn run_map_offline(
+    map_name: String,
+    physics: String,
+    pk3: Option<String>,
+) -> Result<MapRunResult, String> {
+    if physics != "vq3" && physics != "cpm" {
+        return Err(format!("unknown physics '{physics}'"));
+    }
+
+    let cfg = Config::load().map_err(err_to_string)?;
+    let engine = cfg
+        .engine_path
+        .clone()
+        .ok_or_else(|| "No engine configured - pick one in Settings first.".to_string())?;
+    let engine_dir = engine
+        .parent()
+        .ok_or_else(|| "Engine path has no parent directory.".to_string())?;
+    let baseq3 = engine_dir.join("baseq3");
+
+    // Derive a safe pk3 filename from the original pk3 path. Strip any
+    // directory components and reject traversal so a bad value can't write
+    // outside baseq3.
+    let pk3_name = pk3
+        .as_deref()
+        .map(|p| p.rsplit(['/', '\\']).next().unwrap_or(p).trim().to_string())
+        .filter(|n| !n.is_empty() && !n.contains("..") && n.ends_with(".pk3"));
+
+    let mut downloaded = false;
+    if let Some(name) = &pk3_name {
+        let target = baseq3.join(name);
+        if !target.exists() {
+            std::fs::create_dir_all(&baseq3)
+                .map_err(|e| format!("could not create {}: {e}", baseq3.display()))?;
+            let url = format!("{MAP_DL_BASE}{name}");
+            let bytes = reqwest::Client::new()
+                .get(&url)
+                .send()
+                .await
+                .and_then(|r| r.error_for_status())
+                .map_err(|e| format!("download failed ({url}): {e}"))?
+                .bytes()
+                .await
+                .map_err(|e| format!("download read failed: {e}"))?;
+            // Atomic-ish: write to a temp file then rename into place so a
+            // half-downloaded pk3 can't be mistaken for a complete one.
+            let tmp = baseq3.join(format!("{name}.part"));
+            std::fs::write(&tmp, &bytes).map_err(|e| format!("write {}: {e}", tmp.display()))?;
+            std::fs::rename(&tmp, &target)
+                .map_err(|e| format!("rename to {}: {e}", target.display()))?;
+            downloaded = true;
+        }
+    }
+    // pk3 unknown (None / not a .pk3): skip download and just try to
+    // launch - the engine may already have the map, or will report it
+    // missing itself.
+
+    let args = vec![format!("+{physics}"), map_name];
+    protocol::launch_with_args(Some(engine.as_path()), &args).map_err(err_to_string)?;
+    Ok(MapRunResult { downloaded })
+}
+
 /// Open an external URL in the user's browser. Routed through Rust (not
 /// the JS opener plugin directly) so the Linux/AppImage path can launch
 /// the browser with a clean environment - see protocol::open_external_url.

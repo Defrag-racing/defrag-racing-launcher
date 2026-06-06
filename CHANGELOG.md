@@ -4,6 +4,10 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.30
+
+- Maps tab "Run offline" now auto-installs the map first. Clicking VQ3 / CPM downloads the map's pk3 into the engine's `baseq3` folder if it isn't already there, then launches straight into it - no more "map not found" when you don't have it locally. The download is keyed by the map's original pk3 filename (not the map name), so maps that share a pk3 aren't downloaded twice, while the engine still loads the specific map you clicked. The button shows a spinner while it works.
+
 ## 0.1.29
 
 - Maps tab: every map card now has **VQ3** and **CPM** "Run offline" buttons that launch the engine straight into that map in the chosen physics (e.g. `+vq3 cityrocket` / `+cpm cityrocket`). Disabled with a hint until an engine is set in Settings.
