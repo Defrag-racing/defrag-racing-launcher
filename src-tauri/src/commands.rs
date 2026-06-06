@@ -527,7 +527,15 @@ pub fn list_demos(state: State<'_, AppState>) -> Result<Vec<DemoLibraryEntry>, S
             })
         });
         entries.push(DemoLibraryEntry {
-            path: p.to_string_lossy().into_owned(),
+            // Emit the NORMALISED path so the row keys the frontend builds
+            // (allRows dedupes the disk catalog against the live queue by
+            // path) match the queue's paths, which the watcher normalises.
+            // demos_path is stored verbatim ("\\?\E:\…") on Windows, so an
+            // un-normalised path here would never equal a queue entry -
+            // every queued demo would then spawn a second, synthetic row
+            // with no hash, showing a greyed-out (un-clickable) Render
+            // button next to the real one.
+            path: crate::cache::normalize(&p).to_string_lossy().into_owned(),
             filename,
             size_bytes: meta.len(),
             mtime,
