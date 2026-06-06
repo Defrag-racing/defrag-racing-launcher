@@ -130,6 +130,18 @@
                 auto_upload_enabled: false,
                 onboarding_completed: true,
             });
+            // Turn on launch-at-login by default. The launcher is a
+            // background companion: the demo watcher and - especially -
+            // the defrag:// join handler are only useful if it's actually
+            // running, and a fresh user shouldn't have to discover the
+            // Settings toggle to get "click Join on the site -> it
+            // connects" to work. It starts hidden in the tray (HIDDEN_FLAG),
+            // so this is invisible until needed, and the same Settings
+            // toggle turns it back off for anyone who'd rather opt out.
+            // Best-effort: a failure here must not block finishing setup.
+            try {
+                await tauri.setAutostartEnabled(true);
+            } catch { /* non-fatal - user can toggle it in Settings */ }
             router.replace({ name: 'dashboard' });
         } finally {
             finishing.value = false;

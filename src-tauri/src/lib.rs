@@ -94,10 +94,12 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        // Autostart is opt-in; the plugin only enables itself when the
-        // user flips the Settings toggle (which calls plugin.enable()).
-        // We pass HIDDEN_FLAG so the autostart-spawned launcher starts
-        // in the tray instead of stealing focus on every login.
+        // Autostart is on by default - onboarding's finish step calls
+        // setAutostartEnabled(true) so the watcher + defrag:// handler
+        // work without the user discovering the Settings toggle. The
+        // toggle stays the single source of truth and turns it off for
+        // anyone who opts out. We pass HIDDEN_FLAG so the autostart-spawned
+        // launcher starts in the tray instead of stealing focus on login.
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec![HIDDEN_FLAG]),
@@ -148,6 +150,25 @@ pub fn run() {
                         handle_deep_link_url(&app_handle, url.as_str());
                     }
                 });
+
+                // Cold start: when the launcher wasn't running and the OS
+                // spawned it *because of* a defrag:// click, on_open_url
+                // does not fire for that launch URL on Windows/Linux - the
+                // URL only lives in our argv, exposed here via
+                // get_current(). Without reading it the launcher opened but
+                // never offered Connect. We pull it explicitly so the
+                // pending-deep-link state is set before the webview mounts
+                // and App.vue's get_pending_deep_link() picks it up. The
+                // dedup guard in handle_deep_link_url stops this from
+                // double-firing with on_open_url on platforms that deliver
+                // the cold-start URL through both.
+                if let Ok(Some(urls)) = app.deep_link().get_current() {
+                    let h = app.handle().clone();
+                    for url in urls {
+                        log_startup(&format!("deep-link: cold-start url {}", url.as_str()));
+                        handle_deep_link_url(&h, url.as_str());
+                    }
+                }
             }
 
             // Auto-resume the watcher on launch if the user's last
@@ -368,6 +389,24 @@ fn show_main_window(app: &tauri::AppHandle) {
 #[cfg(desktop)]
 fn handle_deep_link_url(app: &tauri::AppHandle, url: &str) {
     use tauri::{Emitter, Manager};
+
+    // Drop a duplicate delivery of the same URL. On a cold start the OS
+    // hands us the launch URL through both our explicit `get_current()`
+    // read in setup() and (on some platforms) the plugin's `on_open_url`
+    // callback; without this guard the auto-connect path would launch the
+    // engine twice for one click. 1.5s is comfortably longer than the gap
+    // between the two deliveries and shorter than any intentional reclick.
+    {
+        let state: tauri::State<AppState> = app.state();
+        let mut last = state.last_deep_link.lock().unwrap();
+        if let Some((prev_url, at)) = last.as_ref() {
+            if prev_url == url && at.elapsed() < std::time::Duration::from_millis(1500) {
+                log_startup(&format!("deep-link: dropping duplicate {}", url));
+                return;
+            }
+        }
+        *last = Some((url.to_string(), std::time::Instant::now()));
+    }
 
     match protocol::parse_url(url) {
         Ok(addr) => {

@@ -4,6 +4,11 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.23
+
+- Start with system is now on by default after setup. The launcher is a background companion - the demo watcher and the `defrag://` join handler only do anything while it's running - so it now enables launch-at-login when you finish onboarding instead of waiting for you to find the Settings toggle. It still starts hidden in the tray, and the same toggle turns it off if you'd rather launch it by hand.
+- Fixed: clicking a `defrag://` join link while the launcher was closed opened the launcher but never offered Connect. On a cold start the launch URL only arrives in the process arguments (the in-app event that the running launcher listens for doesn't fire), and the launcher wasn't reading it - so it booted to the dashboard and dropped the link. It now reads the cold-start URL on launch and shows the Connect prompt (or auto-connects, if you enabled that), exactly as it does when it's already running. A dedup guard makes sure a single click can't connect twice.
+
 ## 0.1.22
 
 - Setup steps reordered: the engine and demos folder (the required base) now come before the account token, so you clear the must-haves first and only then reach the one optional step. The token used to come first, which made the mandatory part feel like an afterthought.

@@ -31,6 +31,13 @@ pub struct AppState {
     pub watcher: Mutex<Option<WatcherHandle>>,
     pub upload_state: Arc<UploadState>,
     pub pending_deep_link: Mutex<Option<String>>,
+    /// Last defrag:// URL we processed + when. Cold start delivers the
+    /// launch URL through two channels on some platforms (our explicit
+    /// `get_current()` read at setup AND the plugin's `on_open_url`), so
+    /// we drop an identical URL seen within a short window to avoid
+    /// handling it - and on the auto-connect path, launching the engine -
+    /// twice for a single click.
+    pub last_deep_link: Mutex<Option<(String, std::time::Instant)>>,
     /// Connection history (defrag:// log). Lives in AppState so a
     /// single load happens at boot and subsequent log() calls touch
     /// the same in-memory copy.
@@ -48,6 +55,7 @@ impl Default for AppState {
             watcher: Mutex::new(None),
             upload_state,
             pending_deep_link: Mutex::new(None),
+            last_deep_link: Mutex::new(None),
             history: Arc::new(ConnectionHistory::default()),
         }
     }
