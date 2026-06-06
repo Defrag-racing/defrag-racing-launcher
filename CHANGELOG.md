@@ -4,6 +4,10 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.18
+
+- "Processed this session" now reaches your real demo count instead of stalling a few hundred short (e.g. stuck at 4942 of 5409). On launch the activity list is restored from the last session with its demos already marked backed-up; the counter was skipping those rows when the startup re-scan re-confirmed them, so it never caught up. It now counts every demo the re-scan confirms, exactly once, so the number settles at your library size.
+
 ## 0.1.17
 
 - Updates no longer pop a Windows admin (UAC) prompt. The launcher now installs per-user (like Discord or VS Code) instead of into Program Files, so the auto-updater applies new versions silently in the background - no more elevation dialog that only blinked in the taskbar and wouldn't come to the foreground. One-time step for existing users: this update may install alongside the old version; if you see two "Defrag Racing Launcher" entries in Add/Remove Programs, uninstall the older one. The Windows download is now a single `.exe` (the `.msi` is gone).

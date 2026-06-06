@@ -477,20 +477,21 @@ impl UploadState {
         filename: &str,
         f: impl FnOnce(&mut PendingUpload),
     ) {
-        // Returns Some((status, fresh_upload)) when the item just
-        // transitioned from a non-terminal status into a terminal one -
-        // the caller then bumps the matching session counter. fresh_upload
-        // is true only for a real upload this run (Done with no
-        // duplicate_reason); a Done that carries a duplicate_reason came
-        // from the cache or a load-time reconcile (uploaded in an EARLIER
-        // session, only re-confirmed now). None means the status didn't
-        // change kind, or it was already terminal / already counted.
-        let became_terminal = self.with_mut(|items| {
+        // Returns Some((status, fresh_upload, was_terminal)) whenever the
+        // item is terminal after applying `f`, regardless of whether it
+        // just transitioned or was already terminal. The COUNTING decision
+        // is made below against the session `handled` set, not on the
+        // transition - because load_persisted pre-loads queue rows as
+        // terminal (to heal stuck "Backing up 0/1"), and the old
+        // "non-terminal -> terminal" check silently skipped those, leaving
+        // "processed this session" stuck a few hundred below the real
+        // library size forever (4942/5409 and never moving).
+        let terminal = self.with_mut(|items| {
             if let Some(existing) = items.iter_mut().find(|i| i.path == path) {
                 let was_terminal = is_terminal(existing.status);
                 f(existing);
-                if !was_terminal && is_terminal(existing.status) {
-                    Some((existing.status, existing.duplicate_reason.is_none()))
+                if is_terminal(existing.status) {
+                    Some((existing.status, existing.duplicate_reason.is_none(), was_terminal))
                 } else {
                     None
                 }
@@ -504,26 +505,43 @@ impl UploadState {
                     items.truncate(QUEUE_CAP);
                 }
                 if is_terminal(final_status) {
-                    Some((final_status, fresh_upload))
+                    Some((final_status, fresh_upload, false))
                 } else {
                     None
                 }
             }
         });
-        if let Some((status, fresh_upload)) = became_terminal {
-            self.processed_count.fetch_add(1, Ordering::AcqRel);
+        if let Some((status, fresh_upload, was_terminal)) = terminal {
             match status {
-                // Only a real, this-session upload counts as "uploaded".
-                UploadStatus::Done if fresh_upload => { self.done_count.fetch_add(1, Ordering::AcqRel); }
-                UploadStatus::Error => { self.error_count.fetch_add(1, Ordering::AcqRel); }
-                // Duplicate, or a Done re-confirmed from cache: "already
-                // backed up" - it did not touch the network this run.
-                _ => { self.duplicate_count.fetch_add(1, Ordering::AcqRel); }
-            }
-            // Remember successful confirmations so the periodic rescan
-            // skips them next time round (Errors stay eligible for retry).
-            if matches!(status, UploadStatus::Done | UploadStatus::Duplicate) {
-                self.handled.lock().unwrap().insert(path.to_path_buf());
+                UploadStatus::Error => {
+                    // Count an error only on the first failure this touch,
+                    // not on every rescan re-confirmation. Errors are NOT
+                    // added to `handled`, so a later rescan / retry can
+                    // still pick them up.
+                    if !was_terminal {
+                        self.processed_count.fetch_add(1, Ordering::AcqRel);
+                        self.error_count.fetch_add(1, Ordering::AcqRel);
+                    }
+                }
+                _ => {
+                    // Done / Duplicate: count once per file per session,
+                    // keyed by the `handled` set (HashSet::insert returns
+                    // true only the first time). This also catches the
+                    // load_persisted pre-loaded rows, so the count reaches
+                    // the real library size; and it doubles as the
+                    // periodic-rescan skip set so we never re-count.
+                    if self.handled.lock().unwrap().insert(path.to_path_buf()) {
+                        self.processed_count.fetch_add(1, Ordering::AcqRel);
+                        // Only a real, this-session upload counts as
+                        // "uploaded"; a Done re-confirmed from cache (it
+                        // carries a duplicate_reason) is "already backed up".
+                        if matches!(status, UploadStatus::Done) && fresh_upload {
+                            self.done_count.fetch_add(1, Ordering::AcqRel);
+                        } else {
+                            self.duplicate_count.fetch_add(1, Ordering::AcqRel);
+                        }
+                    }
+                }
             }
         }
         self.dirty.store(true, Ordering::Release);
