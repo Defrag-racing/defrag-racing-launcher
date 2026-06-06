@@ -48,6 +48,15 @@ export interface PendingUpload {
     upload_throughput_bps: number | null;
 }
 
+export interface HealthItem {
+    id: string;
+    title: string;
+    status: 'ok' | 'warn' | 'error';
+    detail: string;
+    /** Repair action id to pass to healthRepair(), or null if not auto-fixable. */
+    fix: string | null;
+}
+
 export interface UploadStateSnapshot {
     items: PendingUpload[];
     /** Cumulative number of demos that have reached a terminal status
@@ -92,6 +101,11 @@ export const tauri = {
     isAutoUploadPaused: () => invoke<boolean>('is_auto_upload_paused'),
     getUploadState: () => invoke<UploadStateSnapshot>('get_upload_state'),
     clearUploadCache: () => invoke<void>('clear_upload_cache'),
+    /** Diagnose local launcher state (config, login, demos folder, cache/queue
+     *  files, watcher, engine). The token row makes a network call. */
+    healthCheck: () => invoke<HealthItem[]>('health_check'),
+    /** Apply a repair action returned in a HealthItem.fix (e.g. reset_queue). */
+    healthRepair: (action: string) => invoke<void>('health_repair', { action }),
     getCpuThrottlePct: () => invoke<number>('get_cpu_throttle_pct'),
     /** Runtime override; does not persist to config. */
     setCpuThrottlePctRuntime: (pct: number) => invoke<void>('set_cpu_throttle_pct_runtime', { pct }),

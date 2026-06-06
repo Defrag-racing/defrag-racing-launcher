@@ -4,6 +4,11 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.17
+
+- Updates no longer pop a Windows admin (UAC) prompt. The launcher now installs per-user (like Discord or VS Code) instead of into Program Files, so the auto-updater applies new versions silently in the background - no more elevation dialog that only blinked in the taskbar and wouldn't come to the foreground. One-time step for existing users: this update may install alongside the old version; if you see two "Defrag Racing Launcher" entries in Add/Remove Programs, uninstall the older one. The Windows download is now a single `.exe` (the `.msi` is gone).
+- New "Check & repair" in Settings. Runs a quick scan of the launcher's local state - login/token, demos folder (exists + writable), backup cache and activity-list files, the watcher, and the engine path - and shows a green/amber/red line for each. Corrupt cache or queue files get a one-click Fix that safely resets them (your demos on the server are never touched). Handy for diagnosing a stuck install without digging through %APPDATA%.
+
 ## 0.1.16
 
 - The session summary no longer claims demos were uploaded when they weren't. "X uploaded" now counts only real uploads this run; a demo re-confirmed from the local cache (already on the server from a previous run) correctly counts as "already backed up". Before, a demo that was only re-checked could be tallied as a fresh upload.

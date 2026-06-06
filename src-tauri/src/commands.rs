@@ -208,6 +208,149 @@ pub fn clear_upload_cache(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+// ---- Health check / repair -------------------------------------------------
+
+/// One row in the Settings "Check & repair" panel. `status` is
+/// "ok" | "warn" | "error"; `fix`, when present, is the action id the
+/// frontend passes back to `health_repair` to auto-resolve the issue.
+#[derive(serde::Serialize)]
+pub struct HealthItem {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub detail: String,
+    pub fix: Option<String>,
+}
+
+fn health_config_dir() -> Option<PathBuf> {
+    directories::ProjectDirs::from("racing", "defrag", "launcher")
+        .map(|d| d.config_dir().to_path_buf())
+}
+
+/// Validate one on-disk JSON state file: missing is fine, present-and-
+/// parseable is OK, present-and-broken is an error the user can reset.
+fn health_json_file(items: &mut Vec<HealthItem>, id: &str, title: &str, path: &std::path::Path, fix: &str) {
+    if !path.exists() {
+        items.push(HealthItem { id: id.into(), title: title.into(), status: "ok".into(), detail: "Not created yet (fine).".into(), fix: None });
+        return;
+    }
+    match std::fs::read_to_string(path).map_err(|e| e.to_string()).and_then(|raw| {
+        serde_json::from_str::<serde_json::Value>(&raw).map(|_| ()).map_err(|e| e.to_string())
+    }) {
+        Ok(()) => items.push(HealthItem { id: id.into(), title: title.into(), status: "ok".into(), detail: "Valid.".into(), fix: None }),
+        Err(e) => items.push(HealthItem { id: id.into(), title: title.into(), status: "error".into(), detail: format!("Corrupt or unreadable ({e}). Can be reset safely - your demos on the server are untouched."), fix: Some(fix.into()) }),
+    }
+}
+
+/// Inspect the launcher's local state and report what's healthy, degraded,
+/// or auto-repairable. Surfaced in Settings as "Check & repair" so a stuck
+/// install can be diagnosed (and often fixed) without DevTools or a manual
+/// %APPDATA% dig. The token check makes a network call to confirm login.
+#[tauri::command]
+pub async fn health_check(state: State<'_, AppState>) -> Result<Vec<HealthItem>, String> {
+    let mut items: Vec<HealthItem> = Vec::new();
+
+    let cfg = match Config::load() {
+        Ok(c) => {
+            items.push(HealthItem { id: "config".into(), title: "Settings file".into(), status: "ok".into(), detail: "Readable.".into(), fix: None });
+            Some(c)
+        }
+        Err(e) => {
+            items.push(HealthItem { id: "config".into(), title: "Settings file".into(), status: "error".into(), detail: format!("config.json unreadable: {e}"), fix: Some("reset_config".into()) });
+            None
+        }
+    };
+
+    // Demos folder: set? exists? writable?
+    match cfg.as_ref().and_then(|c| c.demos_path.clone()) {
+        None => items.push(HealthItem { id: "demos_path".into(), title: "Demos folder".into(), status: "warn".into(), detail: "Not set. Pick it in Settings to enable backup.".into(), fix: None }),
+        Some(p) if !p.is_dir() => items.push(HealthItem { id: "demos_path".into(), title: "Demos folder".into(), status: "error".into(), detail: format!("Folder is gone: {}", p.display()), fix: None }),
+        Some(p) => {
+            let probe = p.join(".drl_write_test");
+            let writable = std::fs::write(&probe, b"x").is_ok();
+            let _ = std::fs::remove_file(&probe);
+            if writable {
+                items.push(HealthItem { id: "demos_path".into(), title: "Demos folder".into(), status: "ok".into(), detail: format!("{} (writable)", p.display()), fix: None });
+            } else {
+                items.push(HealthItem { id: "demos_path".into(), title: "Demos folder".into(), status: "warn".into(), detail: format!("{} exists but is not writable.", p.display()), fix: None });
+            }
+        }
+    }
+
+    // Login token: present + accepted by the server.
+    match token::load() {
+        Ok(Some(tok)) => match crate::api::Client::new(config::api_base_url(), tok) {
+            Ok(client) => match client.fetch_me().await {
+                Ok(_) => items.push(HealthItem { id: "token".into(), title: "Account / login".into(), status: "ok".into(), detail: "Token valid - signed in.".into(), fix: None }),
+                Err(e) => items.push(HealthItem { id: "token".into(), title: "Account / login".into(), status: "error".into(), detail: format!("Token rejected ({e}). Sign in again from Settings."), fix: None }),
+            },
+            Err(e) => items.push(HealthItem { id: "token".into(), title: "Account / login".into(), status: "error".into(), detail: format!("HTTP client error: {e}"), fix: None }),
+        },
+        Ok(None) => items.push(HealthItem { id: "token".into(), title: "Account / login".into(), status: "warn".into(), detail: "Not signed in. Upload and render need a token.".into(), fix: None }),
+        Err(e) => items.push(HealthItem { id: "token".into(), title: "Account / login".into(), status: "error".into(), detail: format!("Token store unreadable: {e}"), fix: None }),
+    }
+
+    // State files on disk.
+    if let Some(dir) = health_config_dir() {
+        health_json_file(&mut items, "cache", "Backup cache (uploaded.json)", &dir.join("uploaded.json"), "reset_cache");
+        health_json_file(&mut items, "queue", "Activity list (queue.json)", &dir.join("queue.json"), "reset_queue");
+    }
+
+    // Watcher: running vs. should-be-running.
+    let running = state.watcher.lock().unwrap().is_some();
+    if running {
+        items.push(HealthItem { id: "watcher".into(), title: "Auto-backup watcher".into(), status: "ok".into(), detail: "Running.".into(), fix: None });
+    } else if cfg.as_ref().map(|c| c.auto_upload_enabled).unwrap_or(false) {
+        items.push(HealthItem { id: "watcher".into(), title: "Auto-backup watcher".into(), status: "warn".into(), detail: "Enabled in settings but not running. Press Start on the Demos tab.".into(), fix: None });
+    } else {
+        items.push(HealthItem { id: "watcher".into(), title: "Auto-backup watcher".into(), status: "ok".into(), detail: "Off (auto-backup disabled).".into(), fix: None });
+    }
+
+    // Game engine path.
+    match cfg.as_ref().and_then(|c| c.engine_path.clone()) {
+        Some(p) if p.exists() => items.push(HealthItem { id: "engine".into(), title: "Game engine".into(), status: "ok".into(), detail: format!("{}", p.display()), fix: None }),
+        Some(p) => items.push(HealthItem { id: "engine".into(), title: "Game engine".into(), status: "warn".into(), detail: format!("Configured path is missing: {}", p.display()), fix: None }),
+        None => items.push(HealthItem { id: "engine".into(), title: "Game engine".into(), status: "warn".into(), detail: "Not set. defrag:// quick-launch needs it.".into(), fix: None }),
+    }
+
+    Ok(items)
+}
+
+/// Back up `path` to `<name>.bak.<unix-ts>` and remove the original, so a
+/// fresh one regenerates. Best-effort: a missing file is a no-op success.
+fn health_backup_and_remove(path: &std::path::Path) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("state");
+    let bak = path.with_file_name(format!("{name}.bak.{ts}"));
+    std::fs::rename(path, &bak).map_err(err_to_string)
+}
+
+/// Apply one repair action from `health_check`. All actions are
+/// non-destructive to the user's actual demos (the server keeps those) -
+/// they only reset local bookkeeping that's corrupt or stuck.
+#[tauri::command]
+pub fn health_repair(state: State<'_, AppState>, action: String) -> Result<(), String> {
+    let dir = health_config_dir().ok_or_else(|| "Could not resolve config directory".to_string())?;
+    match action.as_str() {
+        "reset_queue" => {
+            health_backup_and_remove(&dir.join("queue.json"))?;
+            // Drop the in-memory copy too so the UI clears without a restart;
+            // the next rescan rebuilds it from the (intact) cache.
+            state.upload_state.clear_items();
+            Ok(())
+        }
+        "reset_cache" => health_backup_and_remove(&dir.join("uploaded.json")),
+        "reset_config" => health_backup_and_remove(&dir.join("config.json")),
+        other => Err(format!("Unknown repair action: {other}")),
+    }
+}
+
 // ---- Autostart -------------------------------------------------------------
 
 /// Returns whether the OS has the launcher registered to autostart on

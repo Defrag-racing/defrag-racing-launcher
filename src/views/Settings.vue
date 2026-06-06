@@ -3,7 +3,7 @@
     import { useRoute, useRouter } from 'vue-router';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
     import { openUrl } from '@tauri-apps/plugin-opener';
-    import { tauri, type EngineCandidate } from '../lib/tauri';
+    import { tauri, type EngineCandidate, type HealthItem } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
     import { useUpdaterStore } from '../stores/updater';
     import { displayPath } from '../lib/path';
@@ -171,6 +171,39 @@
         await config.refresh();
         router.replace({ name: 'onboarding' });
     };
+
+    // -- Check & repair -----------------------------------------------
+    const healthItems = ref<HealthItem[]>([]);
+    const healthBusy = ref(false);
+    const healthRan = ref(false);
+    const healthFixing = ref<string | null>(null);
+    const runHealthCheck = async () => {
+        if (healthBusy.value) return;
+        healthBusy.value = true;
+        try {
+            healthItems.value = await tauri.healthCheck();
+            healthRan.value = true;
+        } catch (e) {
+            healthItems.value = [{ id: 'error', title: 'Check failed', status: 'error', detail: String(e), fix: null }];
+            healthRan.value = true;
+        } finally {
+            healthBusy.value = false;
+        }
+    };
+    const runHealthRepair = async (item: HealthItem) => {
+        if (!item.fix || healthFixing.value) return;
+        healthFixing.value = item.id;
+        try {
+            await tauri.healthRepair(item.fix);
+            await runHealthCheck(); // re-scan so the row flips to OK
+        } catch (e) {
+            item.detail = `Repair failed: ${e}`;
+        } finally {
+            healthFixing.value = null;
+        }
+    };
+    const healthDot = (status: string) =>
+        status === 'ok' ? 'bg-emerald-400' : status === 'warn' ? 'bg-amber-400' : 'bg-red-400';
 </script>
 
 <template>
@@ -356,6 +389,43 @@
                 <button class="btn-ghost flex-shrink-0" :disabled="reCheckBusy || reCheckCooldown > 0" @click="forceRecheck">
                     {{ reCheckBusy ? 'Re-checking…' : (reCheckCooldown > 0 ? `Started - wait ${reCheckCooldown}s` : 'Force re-check') }}
                 </button>
+            </section>
+
+            <!-- Check & repair -->
+            <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
+                <div class="flex items-center justify-between gap-3">
+                    <div>
+                        <div class="font-semibold">Check &amp; repair</div>
+                        <div class="text-xs text-neutral-500 mt-0.5">
+                            Scan the launcher's local state - login, demos folder, backup cache,
+                            activity list, watcher - and fix anything corrupt. Your demos on the
+                            server are never touched.
+                        </div>
+                    </div>
+                    <button class="btn-ghost flex-shrink-0" :disabled="healthBusy" @click="runHealthCheck">
+                        {{ healthBusy ? 'Checking…' : (healthRan ? 'Re-run' : 'Run check') }}
+                    </button>
+                </div>
+
+                <ul v-if="healthRan" class="space-y-1.5 pt-1">
+                    <li
+                        v-for="item in healthItems"
+                        :key="item.id"
+                        class="flex items-start gap-3 text-sm border-t border-white/[0.05] pt-2 first:border-t-0 first:pt-0"
+                    >
+                        <span class="mt-1.5 w-2 h-2 rounded-full flex-shrink-0" :class="healthDot(item.status)"></span>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-neutral-200 font-medium">{{ item.title }}</div>
+                            <div class="text-xs text-neutral-500 break-words">{{ item.detail }}</div>
+                        </div>
+                        <button
+                            v-if="item.fix"
+                            class="btn-ghost flex-shrink-0 text-xs"
+                            :disabled="healthFixing === item.id"
+                            @click="runHealthRepair(item)"
+                        >{{ healthFixing === item.id ? 'Fixing…' : 'Fix' }}</button>
+                    </li>
+                </ul>
             </section>
 
             <!-- Autostart -->

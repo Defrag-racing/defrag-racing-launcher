@@ -81,7 +81,7 @@ jobs:
             echo ""
             echo "Download the installer for your platform below."
             echo ""
-            echo "- **Windows**: \`.msi\` or \`.exe\` installer"
+            echo "- **Windows**: \`.exe\` installer (per-user - no admin prompt, updates apply silently)"
             echo "- **macOS**: \`.dmg\` (pick Apple Silicon for M1/M2/M3 Macs, Intel for older ones)"
             echo "- **Linux**: \`.AppImage\` (portable) or \`.deb\`"
             echo ""
@@ -121,7 +121,12 @@ jobs:
           - platform: 'ubuntu-22.04'
             args: ''
           - platform: 'windows-latest'
-            args: ''
+            # NSIS only: it installs per-user (currentUser), so the
+            # auto-updater never needs admin/UAC. The MSI (WiX) is
+            # per-machine, which forced a UAC prompt on every update that
+            # the updater-spawned installer couldn't even bring to the
+            # foreground - it just blinked in the taskbar.
+            args: '--bundles nsis'
 
     runs-on: ${{ matrix.platform }}
     steps:

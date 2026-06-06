@@ -195,6 +195,8 @@ pub fn run() {
             commands::is_auto_upload_paused,
             commands::get_upload_state,
             commands::clear_upload_cache,
+            commands::health_check,
+            commands::health_repair,
             commands::get_cpu_throttle_pct,
             commands::set_cpu_throttle_pct_runtime,
             commands::get_rate_limit_resume_at_ms,
