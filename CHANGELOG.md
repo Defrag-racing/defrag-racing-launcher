@@ -4,6 +4,11 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.22
+
+- Setup steps reordered: the engine and demos folder (the required base) now come before the account token, so you clear the must-haves first and only then reach the one optional step. The token used to come first, which made the mandatory part feel like an afterthought.
+- Skipping the token is no longer a one-tap accident. The "Skip - defrag:// only" button now opens a confirmation that names every feature that stays disabled (auto-backup, YouTube renders, server browser, Records and Maps, notifications) and makes you actively choose "Skip anyway". The wizard's last screen still shows the same warning with a one-click way back.
+
 ## 0.1.21
 
 - Setup wizard no longer lets you skip the engine and demos folder. They're required - without an engine even `defrag://` join links can't open, and without a demos folder there's nothing to back up. Only the account token stays optional (you can still go `defrag://`-only).

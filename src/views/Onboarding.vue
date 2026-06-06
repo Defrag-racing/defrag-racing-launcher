@@ -10,14 +10,21 @@
     const router = useRouter();
     const config = useConfigStore();
 
-    // 1 = intro, 2 = token, 3 = engine picker, 4 = finish
+    // 1 = intro, 2 = engine picker, 3 = token, 4 = finish.
+    // Engine + demos come before the token now: they're the mandatory
+    // base (without them the launcher can't open join links or back
+    // anything up), so the user clears the must-haves first and only
+    // then meets the optional token step.
     const step = ref<1 | 2 | 3 | 4>(1);
 
-    // --- step 2: token --------------------------------------------------
+    // --- step 3: token --------------------------------------------------
     const token = ref('');
     const tokenSaving = ref(false);
     const tokenError = ref<string | null>(null);
     const tokenSkipped = ref(false);
+    // Guard so a token can't be skipped by accident - the button opens a
+    // confirmation that spells out exactly which features go dark.
+    const showSkipConfirm = ref(false);
 
     const saveToken = async () => {
         tokenError.value = null;
@@ -28,7 +35,7 @@
             token.value = '';
             tokenSkipped.value = false;
             await config.refresh();
-            step.value = 3;
+            step.value = 4;
         } catch (e: any) {
             tokenError.value = e.toString();
         } finally {
@@ -36,15 +43,22 @@
         }
     };
 
-    const skipToken = () => {
+    // Skip is a two-step action: the button only opens the warning
+    // dialog, and the user has to confirm there to actually proceed
+    // token-less.
+    const requestSkipToken = () => {
+        showSkipConfirm.value = true;
+    };
+    const confirmSkipToken = () => {
         tokenSkipped.value = true;
-        step.value = 3;
+        showSkipConfirm.value = false;
+        step.value = 4;
     };
 
     const openTokensPage = () =>
         openUrl('https://defrag.racing/user/settings?tab=security');
 
-    // --- step 3: engine + demos -----------------------------------------
+    // --- step 2: engine + demos -----------------------------------------
     const engines = ref<EngineCandidate[]>([]);
     const enginesLoading = ref(false);
     const selectedEngine = ref<string | null>(null);
@@ -185,9 +199,10 @@
                     </div>
                 </div>
 
-                <!-- step 2: token -->
-                <div v-else-if="step === 2" class="space-y-4">
-                    <h2 class="text-xl font-bold">Account token</h2>
+                <!-- step 3: token (optional - last because it's the only
+                     skippable part of setup) -->
+                <div v-else-if="step === 3" class="space-y-4">
+                    <h2 class="text-xl font-bold">Account token <span class="text-sm font-normal text-neutral-500">(optional)</span></h2>
                     <p class="text-sm text-neutral-400 leading-relaxed">
                         A token links the launcher to your defrag.racing account. It unlocks:
                     </p>
@@ -249,19 +264,51 @@
                     <p v-if="tokenError" class="text-xs text-red-400">{{ tokenError }}</p>
 
                     <div class="flex justify-between pt-2">
-                        <button class="btn-ghost" @click="skipToken">Skip - defrag:// only</button>
+                        <button class="btn-ghost" @click="requestSkipToken">Skip - defrag:// only</button>
                         <button class="btn-primary" :disabled="!token.trim() || tokenSaving" @click="saveToken">
                             {{ tokenSaving ? 'Saving…' : 'Save & continue' }}
                         </button>
                     </div>
+
+                    <!-- Skip confirmation. Pasting a token is the single
+                         biggest "did I set this up right?" moment, so
+                         skipping it can't be a one-tap accident: this
+                         dialog names every feature that stays dark and
+                         makes the user actively choose the crippled mode. -->
+                    <div
+                        v-if="showSkipConfirm"
+                        class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
+                        @click.self="showSkipConfirm = false"
+                    >
+                        <div class="max-w-md w-full bg-neutral-900 border border-amber-500/40 rounded-xl p-5 space-y-3">
+                            <h3 class="text-lg font-bold text-amber-200">Continue without a token?</h3>
+                            <p class="text-sm text-neutral-300">
+                                Without a token the launcher runs in <strong>defrag:// only</strong> mode. These features will be <strong>disabled</strong> and visibly empty:
+                            </p>
+                            <ul class="text-xs text-amber-100 space-y-0.5 pl-1 rounded border border-amber-500/30 bg-amber-500/10 p-3">
+                                <TokenFeatureList />
+                            </ul>
+                            <p class="text-xs text-neutral-500">
+                                Only <code class="bg-black/40 px-1 rounded">defrag://</code> server-join links will work. You can paste a token anytime later from Settings.
+                            </p>
+                            <div class="flex justify-end gap-2 pt-1">
+                                <button class="btn-ghost" @click="showSkipConfirm = false">Back - I'll add a token</button>
+                                <button
+                                    class="px-3 py-1.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-sm font-semibold"
+                                    @click="confirmSkipToken"
+                                >Skip anyway</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- step 3: engine + demos -->
-                <div v-else-if="step === 3" class="space-y-4">
+                <!-- step 2: engine + demos (required - the launcher's
+                     base, comes before the optional token step) -->
+                <div v-else-if="step === 2" class="space-y-4">
                     <h2 class="text-xl font-bold">Defrag installation</h2>
                     <p class="text-sm text-neutral-400 leading-relaxed">
                         Pick the engine you want <code class="text-xs bg-black/40 px-1 rounded">defrag://</code> links to open, and confirm the demos folder the launcher will watch.
-                        Both are optional - skip if you only want the token for manual use.
+                        Both are required - the engine opens join links and the demos folder is what gets backed up.
                     </p>
 
                     <div class="space-y-2">
@@ -318,7 +365,7 @@
                     </div>
 
                     <div class="pt-2 space-y-2">
-                        <button class="btn-primary w-full" :disabled="!canProceedFromEngine" @click="step = 4">Next</button>
+                        <button class="btn-primary w-full" :disabled="!canProceedFromEngine" @click="step = 3">Next</button>
                         <p v-if="!canProceedFromEngine" class="text-xs text-amber-300/80 text-center">
                             Pick your engine and demos folder to continue - both are required for the launcher (and even <code class="bg-black/40 px-1 rounded">defrag://</code> links) to work.
                         </p>
@@ -362,7 +409,7 @@
                             You can add a token anytime from
                             <strong class="text-amber-200">Settings → Auto-upload token</strong>.
                         </div>
-                        <button class="mt-1 text-amber-200 hover:underline font-semibold" @click="step = 2">
+                        <button class="mt-1 text-amber-200 hover:underline font-semibold" @click="step = 3">
                             ← Go back and paste a token instead
                         </button>
                     </div>
