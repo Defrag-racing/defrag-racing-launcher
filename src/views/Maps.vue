@@ -242,25 +242,32 @@
                                  buttons appear on every card; the engine path
                                  is required (same gating as Quick launch). The
                                  backend auto-downloads the map's pk3 into
-                                 baseq3 first if it isn't installed. -->
-                            <div class="flex items-center gap-1.5 mt-2 pt-2 border-t border-white/[0.06]">
-                                <span class="text-[10px] uppercase tracking-wider text-neutral-600 mr-0.5">Run offline</span>
-                                <button
-                                    class="flex-1 px-2 py-1 rounded text-[11px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
-                                    :disabled="!config.config.engine_path || !!runningKey"
-                                    :title="config.config.engine_path
-                                        ? `Run ${m.name} offline in VQ3 (downloads the map if missing)`
-                                        : 'Pick an engine in Settings first'"
-                                    @click="runOffline(m, 'vq3')"
-                                >{{ isRunning(m.id, 'vq3') ? '…' : 'VQ3' }}</button>
-                                <button
-                                    class="flex-1 px-2 py-1 rounded text-[11px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
-                                    :disabled="!config.config.engine_path || !!runningKey"
-                                    :title="config.config.engine_path
-                                        ? `Run ${m.name} offline in CPM (downloads the map if missing)`
-                                        : 'Pick an engine in Settings first'"
-                                    @click="runOffline(m, 'cpm')"
-                                >{{ isRunning(m.id, 'cpm') ? '…' : 'CPM' }}</button>
+                                 baseq3 first if it isn't installed. Label sits
+                                 on its own line so it stays readable and the
+                                 buttons keep their full width. -->
+                            <div class="mt-2 pt-2 border-t border-white/[0.06]">
+                                <div class="text-[10px] uppercase tracking-wider text-neutral-400 mb-1 flex items-center gap-1">
+                                    <span class="text-emerald-400">▶</span>
+                                    Click to run offline instantly
+                                </div>
+                                <div class="flex items-center gap-1.5">
+                                    <button
+                                        class="flex-1 px-2 py-1 rounded text-[11px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                                        :disabled="!config.config.engine_path || !!runningKey"
+                                        :title="config.config.engine_path
+                                            ? `Run ${m.name} offline in VQ3 (downloads the map if missing)`
+                                            : 'Pick an engine in Settings first'"
+                                        @click="runOffline(m, 'vq3')"
+                                    >{{ isRunning(m.id, 'vq3') ? '…' : 'VQ3' }}</button>
+                                    <button
+                                        class="flex-1 px-2 py-1 rounded text-[11px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                                        :disabled="!config.config.engine_path || !!runningKey"
+                                        :title="config.config.engine_path
+                                            ? `Run ${m.name} offline in CPM (downloads the map if missing)`
+                                            : 'Pick an engine in Settings first'"
+                                        @click="runOffline(m, 'cpm')"
+                                    >{{ isRunning(m.id, 'cpm') ? '…' : 'CPM' }}</button>
+                                </div>
                             </div>
                         </div>
                     </li>
