@@ -4,6 +4,10 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.25
+
+- Linux: fixed the engine misbehaving (e.g. libcurl and other libraries failing) when launched from the launcher while it worked fine started by hand. When the launcher runs as an AppImage, its startup script prepends the bundled `$APPDIR` libraries onto `LD_LIBRARY_PATH` (and a few module-loader vars) so its own binary finds them - but every process it spawned inherited that and loaded the AppImage's bundled libcurl/glib instead of the system ones. The launcher now hands the engine a clean, shell-equivalent environment (stripping only the AppImage's own additions, leaving anything you set intact), so it loads system libraries exactly as it does when you run the binary yourself.
+
 ## 0.1.24
 
 - Pasting a token now tells you right away if it's wrong. The launcher checks the token against your account the moment you paste it - in onboarding and in Settings - instead of saving it and letting it fail silently later (the classic "I made the wrong token", only discovered hours later as a cryptic rejection on the Servers tab). A bad paste, a revoked token, or the wrong token type each get a specific message, and both screens point you at the exact place to fix it: the **Launcher Tokens** block under defrag.racing > Settings > Security. A valid token shows the account name you just signed in as.

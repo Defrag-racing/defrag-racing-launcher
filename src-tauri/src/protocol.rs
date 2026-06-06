@@ -168,8 +168,90 @@ fn spawn_engine(
         cmd.current_dir(dir);
     }
 
+    // On Linux, when the launcher itself runs as an AppImage, hand the
+    // engine a clean environment so it loads system libraries instead of
+    // the AppImage's bundled ones (see strip_appimage_env).
+    #[cfg(target_os = "linux")]
+    strip_appimage_env(&mut cmd);
+
     cmd.spawn()?;
     Ok(())
+}
+
+/// Undo the environment mangling an AppImage's `AppRun` does, for a child
+/// process we spawn (the Q3 engine).
+///
+/// When the launcher is distributed as an AppImage, its AppRun prepends
+/// `$APPDIR/usr/lib` onto `LD_LIBRARY_PATH` and points a handful of
+/// module-loader vars at bundled copies, so that the launcher's own
+/// binary finds the libraries packed beside it. Any process the launcher
+/// spawns inherits all of that and then resolves shared libraries
+/// (libcurl, glib, …) to the AppImage's bundled versions, which are built
+/// for the launcher and routinely mismatch what the engine needs - the
+/// engine misbehaves when launched from the launcher but works when the
+/// user runs the exact same path by hand from a shell (clean env).
+///
+/// We restore the shell-equivalent environment by removing only what
+/// AppRun added: every colon-separated entry under `$APPDIR` is dropped
+/// from the path-like vars (and the var removed entirely if nothing
+/// genuine remains), and the bundle-pointing loader vars are cleared.
+/// Values the user actually set survive untouched. No-op when not running
+/// from an AppImage (`APPDIR` unset).
+#[cfg(target_os = "linux")]
+fn strip_appimage_env(cmd: &mut Command) {
+    use std::path::PathBuf;
+
+    let appdir = match std::env::var_os("APPDIR") {
+        Some(d) if !d.is_empty() => PathBuf::from(d),
+        _ => return, // not an AppImage launch - nothing AppRun touched
+    };
+
+    // Path-list vars AppRun prepends $APPDIR entries onto. Keep the user's
+    // own entries, strip the bundle's.
+    const PATH_VARS: &[&str] = &[
+        "LD_LIBRARY_PATH",
+        "PATH",
+        "XDG_DATA_DIRS",
+        "GST_PLUGIN_SYSTEM_PATH",
+        "GST_PLUGIN_SYSTEM_PATH_1_0",
+        "GTK_PATH",
+        "QT_PLUGIN_PATH",
+        "PYTHONPATH",
+        "PERLLIB",
+        "GSETTINGS_SCHEMA_DIR",
+        "GIO_EXTRA_MODULES",
+    ];
+    for var in PATH_VARS {
+        if let Some(val) = std::env::var_os(var) {
+            let kept: Vec<PathBuf> = std::env::split_paths(&val)
+                .filter(|p| !p.starts_with(&appdir))
+                .collect();
+            if kept.is_empty() {
+                cmd.env_remove(var);
+            } else if let Ok(joined) = std::env::join_paths(kept) {
+                cmd.env(var, joined);
+            }
+        }
+    }
+
+    // Vars AppRun points straight at the bundle - no system value to
+    // preserve, so clear them for the child outright. APPDIR/APPIMAGE/
+    // ARGV0/OWD are AppImage runtime breadcrumbs that have no business
+    // leaking into the engine either.
+    const CLEAR_VARS: &[&str] = &[
+        "LD_PRELOAD",
+        "GDK_PIXBUF_MODULE_FILE",
+        "GDK_PIXBUF_MODULEDIR",
+        "GIO_MODULE_DIR",
+        "GTK_IM_MODULE_FILE",
+        "APPDIR",
+        "APPIMAGE",
+        "ARGV0",
+        "OWD",
+    ];
+    for var in CLEAR_VARS {
+        cmd.env_remove(var);
+    }
 }
 
 #[cfg(test)]
