@@ -4,6 +4,11 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.20
+
+- The "Token required" screens on Servers, Records and Maps now have a button that takes you straight to the token field in Settings and highlights it, instead of just telling you to go there.
+- Onboarding token step is clearer: the "open the token page" box now obviously reads as a clickable button ("Click here to open the token page", "Open" + opens-in-browser hint), and the instructions spell out exactly where to look - the **Launcher Tokens** block under defrag.racing > Settings > Security. The Settings token field says the same.
+
 ## 0.1.19
 
 - The "what a token unlocks" list is now consistent everywhere it shows (Dashboard banner, Settings, onboarding) and names every gated feature: auto-backup, YouTube renders, the server browser, and the Records and Maps tabs, plus notifications. It used to list a different subset in each place and omit Records/Maps. (The History tab works without a token - it's your local defrag:// join log - so it's intentionally not listed.)

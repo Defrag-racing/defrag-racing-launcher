@@ -22,16 +22,31 @@
     // also clear the query right after so the highlight is a one-shot
     // tied to the chip click, not to merely landing on Settings.
     const highlightDemos = ref(false);
+    const highlightToken = ref(false);
     const demosSection = ref<HTMLElement | null>(null);
+    const tokenSection = ref<HTMLElement | null>(null);
     let highlightTimer: number | undefined;
     onActivated(async () => {
-        if (route.query.highlight !== 'demos') return;
-        highlightDemos.value = true;
+        const target = route.query.highlight;
+        if (target !== 'demos' && target !== 'token') return;
+        // Same one-shot pulse + scroll for the token card - the Servers /
+        // Records / Maps "Token required" empty states deep-link here with
+        // ?highlight=token so the user lands on the field to paste into.
+        if (target === 'token') {
+            highlightToken.value = true;
+            showTokenForm.value = true; // make the input visible if a token already exists
+        } else {
+            highlightDemos.value = true;
+        }
+        const section = target === 'token' ? tokenSection : demosSection;
         router.replace({ name: 'settings', query: {} });
         await new Promise((r) => requestAnimationFrame(() => r(null)));
-        demosSection.value?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        section.value?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         if (highlightTimer !== undefined) window.clearTimeout(highlightTimer);
-        highlightTimer = window.setTimeout(() => { highlightDemos.value = false; }, 2600);
+        highlightTimer = window.setTimeout(() => {
+            highlightDemos.value = false;
+            highlightToken.value = false;
+        }, 2600);
     });
     const config = useConfigStore();
     const updater = useUpdaterStore();
@@ -334,15 +349,21 @@
             </section>
 
             <!-- Token -->
-            <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
+            <section
+                ref="tokenSection"
+                class="bg-neutral-900 border rounded-lg p-4 space-y-3 transition-all duration-500"
+                :class="highlightToken
+                    ? 'border-brand-500/70 ring-2 ring-brand-500/40 shadow-lg shadow-brand-500/10'
+                    : 'border-white/10'"
+            >
                 <div class="flex items-start justify-between gap-3">
                     <div>
                         <div class="font-semibold">Account token</div>
                         <div class="text-xs text-neutral-500 mt-0.5">
-                            Personal access token from
+                            Personal access token from the
                             <a href="#" class="text-brand-400 hover:underline"
                                @click.prevent="openUrl('https://defrag.racing/user/settings?tab=security')">
-                                defrag.racing → Settings → Security
+                                "Launcher Tokens" block on defrag.racing → Settings → Security
                             </a>.
                             Stored in your OS keyring. Unlocks:
                         </div>

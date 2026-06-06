@@ -147,8 +147,11 @@
                 <div class="text-neutral-300 font-semibold">Token required</div>
                 <p class="text-sm text-neutral-500">
                     Maps browser needs a token from your defrag.racing account.
-                    Open Settings to paste one.
                 </p>
+                <RouterLink
+                    :to="{ name: 'settings', query: { highlight: 'token' } }"
+                    class="inline-flex items-center gap-1 mt-1 px-3 py-1.5 rounded bg-brand-500/20 hover:bg-brand-500/30 text-brand-300 text-sm font-semibold"
+                >Open Settings to paste a token →</RouterLink>
             </div>
         </div>
 

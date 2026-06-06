@@ -215,26 +215,30 @@
                          the token?" friction. -->
                     <div class="pt-1">
                         <button
-                            class="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-brand-500/20 hover:bg-brand-500/30 border border-brand-500/40 transition"
+                            type="button"
+                            class="group w-full flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-brand-500/25 hover:bg-brand-500/40 border border-brand-400/60 hover:border-brand-300 cursor-pointer transition shadow-sm"
                             @click="openTokensPage"
                         >
                             <div class="text-left">
-                                <div class="text-sm font-semibold text-brand-200">
-                                    Step 1 - Open token page in your browser
+                                <div class="text-sm font-semibold text-brand-100 group-hover:underline">
+                                    Step 1 - Click here to open the token page
                                 </div>
                                 <div class="text-xs text-brand-300/70 mt-0.5 font-mono">
-                                    defrag.racing &gt; Settings &gt; Security
+                                    defrag.racing &gt; Settings &gt; Security &gt; "Launcher Tokens"
                                 </div>
                             </div>
-                            <span class="text-brand-300 text-lg flex-shrink-0">↗</span>
+                            <span class="flex items-center gap-1 text-brand-200 font-semibold text-sm flex-shrink-0 whitespace-nowrap">
+                                Open <span class="text-lg">↗</span>
+                            </span>
                         </button>
+                        <div class="text-[11px] text-neutral-500 mt-1 text-center">opens in your web browser</div>
                     </div>
 
                     <!-- Ordered list starts at 2 because step 1 is the
                          big CTA button above. Custom marker color keeps
                          the numbers from going default-black on dark bg. -->
                     <ol start="2" class="text-sm text-neutral-300 list-decimal list-inside space-y-1 pt-1 pl-1 marker:text-brand-400">
-                        <li>Under <em>Launcher tokens</em>, click <em>New token</em> and label it (e.g. "Home PC")</li>
+                        <li>On that page, find the <strong class="text-brand-200">Launcher Tokens</strong> block, click <em>New token</em> and label it (e.g. "Home PC")</li>
                         <li>Copy the generated token and paste it below</li>
                     </ol>
 
