@@ -4,6 +4,12 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.21
+
+- Setup wizard no longer lets you skip the engine and demos folder. They're required - without an engine even `defrag://` join links can't open, and without a demos folder there's nothing to back up. Only the account token stays optional (you can still go `defrag://`-only).
+- Reset now actually works and warns you properly. It used to rely on a browser confirm() dialog that WebView2 could silently swallow (so Reset did nothing). It's now a typed confirmation - you type "yes" to wipe settings + token, and it drops you back into the setup wizard from step 1. Your demos (local and on the server) are never touched.
+- Removed the separate "Re-run setup" button. Reset is the one way to redo setup, and the engine path, demos folder and token are all editable directly in Settings anyway.
+
 ## 0.1.20
 
 - The "Token required" screens on Servers, Records and Maps now have a button that takes you straight to the token field in Settings and highlights it, instead of just telling you to go there.

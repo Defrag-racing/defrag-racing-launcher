@@ -49,7 +49,6 @@
     const enginesLoading = ref(false);
     const selectedEngine = ref<string | null>(null);
     const demosPath = ref<string | null>(null);
-    const engineSkipped = ref(false);
 
     const rescanEngines = async () => {
         enginesLoading.value = true;
@@ -88,14 +87,12 @@
         demosPath.value = await tauri.guessDemosPath(path);
     };
 
-    const skipEngineSetup = () => {
-        engineSkipped.value = true;
-        step.value = 4;
-    };
-
+    // Engine + demos folder are mandatory - without an engine even
+    // defrag:// join links can't open, and without a demos folder the
+    // whole point of the launcher (backup) is dead. So no skip here; the
+    // token (step 2) is the only optional part of setup.
     const canProceedFromEngine = computed(() => {
-        if (engineSkipped.value) return true;
-        return !! demosPath.value;
+        return !! selectedEngine.value && !! demosPath.value;
     });
 
     // --- finish ---------------------------------------------------------
@@ -320,9 +317,11 @@
                         </div>
                     </div>
 
-                    <div class="flex justify-between pt-2">
-                        <button class="btn-ghost" @click="skipEngineSetup">Skip</button>
-                        <button class="btn-primary" :disabled="!canProceedFromEngine" @click="step = 4">Next</button>
+                    <div class="pt-2 space-y-2">
+                        <button class="btn-primary w-full" :disabled="!canProceedFromEngine" @click="step = 4">Next</button>
+                        <p v-if="!canProceedFromEngine" class="text-xs text-amber-300/80 text-center">
+                            Pick your engine and demos folder to continue - both are required for the launcher (and even <code class="bg-black/40 px-1 rounded">defrag://</code> links) to work.
+                        </p>
                     </div>
                 </div>
 
@@ -337,11 +336,9 @@
                         </li>
                         <li class="flex items-center gap-2">
                             <span class="text-brand-400">✓</span>
-                            <span v-if="engineSkipped">Engine + demos folder skipped</span>
-                            <span v-else-if="selectedEngine">Engine: {{ selectedEngine }}</span>
-                            <span v-else>No engine selected</span>
+                            <span>Engine: {{ selectedEngine }}</span>
                         </li>
-                        <li v-if="demosPath" class="flex items-center gap-2">
+                        <li class="flex items-center gap-2">
                             <span class="text-brand-400">✓</span>
                             <span>Demos folder: {{ demosPath }}</span>
                         </li>

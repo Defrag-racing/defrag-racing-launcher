@@ -153,8 +153,6 @@
         await config.refresh();
     };
 
-    const runOnboarding = () => router.push({ name: 'onboarding' });
-
     const forceRecheck = async () => {
         if (reCheckBusy.value || reCheckCooldown.value > 0) return;
         if (! confirm('Re-check every demo against the server? This re-hashes the whole folder and can take a while - watch the progress bar on the Demos tab.')) return;
@@ -181,11 +179,34 @@
         if (reCheckTimer !== undefined) window.clearInterval(reCheckTimer);
     });
 
+    // Reset is gated behind a typed confirmation modal rather than a native
+    // confirm() - the WebView2 confirm() was unreliable (it could return
+    // false without ever showing a dialog, so Reset silently did nothing).
+    // The user has to type "yes" / "i understand" to arm the button.
+    const showResetConfirm = ref(false);
+    const resetConfirmText = ref('');
+    const resetting = ref(false);
+    const resetConfirmValid = computed(() => {
+        const t = resetConfirmText.value.trim().toLowerCase();
+        return t === 'yes' || t === 'i understand';
+    });
+    const cancelReset = () => {
+        showResetConfirm.value = false;
+        resetConfirmText.value = '';
+    };
     const resetLauncher = async () => {
-        if (! confirm('Clear all launcher settings and the stored token? This cannot be undone. Demos on your PC are not affected.')) return;
-        await tauri.resetLauncher();
-        await config.refresh();
-        router.replace({ name: 'onboarding' });
+        if (! resetConfirmValid.value || resetting.value) return;
+        resetting.value = true;
+        try {
+            await tauri.resetLauncher();
+            await config.refresh();
+            showResetConfirm.value = false;
+            resetConfirmText.value = '';
+            // Back to step 1 of the setup wizard.
+            router.replace({ name: 'onboarding' });
+        } finally {
+            resetting.value = false;
+        }
     };
 
     // -- Check & repair -----------------------------------------------
@@ -536,28 +557,62 @@
                 </div>
             </section>
 
-            <!-- Run setup again -->
-            <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 flex items-center justify-between">
-                <div>
-                    <div class="font-semibold">Re-run setup</div>
-                    <div class="text-xs text-neutral-500 mt-0.5">Go through the onboarding wizard again.</div>
-                </div>
-                <button class="btn-ghost" @click="runOnboarding">Run</button>
-            </section>
-
-            <!-- Reset - wipes every setting and token so the user can start
-                 fresh without uninstalling. Lives in a red-tinted card so
-                 it reads as destructive at a glance. -->
+            <!-- Reset - wipes every setting and token and drops the user
+                 back into the onboarding wizard. Lives in a red-tinted card
+                 so it reads as destructive at a glance. (Re-run setup used
+                 to be a separate button; it's gone - Reset is the canonical
+                 way to redo setup, and every field is editable above anyway.) -->
             <section class="bg-red-500/5 border border-red-500/30 rounded-lg p-4 flex items-center justify-between">
                 <div>
                     <div class="font-semibold text-red-300">Reset launcher</div>
-                    <div class="text-xs text-neutral-500 mt-0.5">Clear all settings and the stored token. Demos on your PC are not touched.</div>
+                    <div class="text-xs text-neutral-500 mt-0.5">Clear all settings and the stored token, then re-run the setup wizard. Demos on your PC are not touched.</div>
                 </div>
-                <button class="btn-danger" @click="resetLauncher">Reset</button>
+                <button class="btn-danger" @click="showResetConfirm = true">Reset</button>
             </section>
 
             <div class="text-xs text-neutral-600 text-center pt-4">
                 Defrag Racing Launcher v{{ appVersion || '…' }}
+            </div>
+        </div>
+
+        <!-- Reset confirmation modal. Typed confirmation (not a native
+             confirm) both because confirm() is unreliable in WebView2 and
+             because a wipe-everything action deserves a deliberate step. -->
+        <div
+            v-if="showResetConfirm"
+            class="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+            @click.self="cancelReset"
+        >
+            <div class="bg-neutral-900 border border-red-500/40 rounded-lg p-5 max-w-md w-full space-y-3">
+                <div class="font-semibold text-red-300 text-lg">Reset launcher?</div>
+                <p class="text-sm text-neutral-300">
+                    This clears <strong>everything the launcher stored</strong>: your account token,
+                    the engine path, the demos-folder path, and all settings. You'll be taken back
+                    through the setup wizard.
+                </p>
+                <p class="text-xs text-neutral-500">
+                    Your demo files on your PC and your demos already backed up to defrag.racing are
+                    <strong>not</strong> touched.
+                </p>
+                <div class="pt-1">
+                    <label class="text-xs text-neutral-400">Type <code class="bg-black/40 px-1 rounded text-amber-300">yes</code> to confirm:</label>
+                    <input
+                        v-model="resetConfirmText"
+                        type="text"
+                        placeholder="yes"
+                        autocomplete="off"
+                        class="mt-1 w-full bg-black/40 border border-white/15 rounded px-3 py-2 text-sm text-neutral-100 focus:border-red-500/60 focus:outline-none"
+                        @keyup.enter="resetLauncher"
+                    />
+                </div>
+                <div class="flex justify-end gap-2 pt-1">
+                    <button class="btn-ghost" @click="cancelReset">Cancel</button>
+                    <button
+                        class="btn-danger disabled:opacity-40 disabled:cursor-not-allowed"
+                        :disabled="!resetConfirmValid || resetting"
+                        @click="resetLauncher"
+                    >{{ resetting ? 'Resetting…' : 'Reset everything' }}</button>
+                </div>
             </div>
         </div>
     </div>
