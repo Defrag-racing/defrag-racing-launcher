@@ -4,6 +4,11 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.24
+
+- Pasting a token now tells you right away if it's wrong. The launcher checks the token against your account the moment you paste it - in onboarding and in Settings - instead of saving it and letting it fail silently later (the classic "I made the wrong token", only discovered hours later as a cryptic rejection on the Servers tab). A bad paste, a revoked token, or the wrong token type each get a specific message, and both screens point you at the exact place to fix it: the **Launcher Tokens** block under defrag.racing > Settings > Security. A valid token shows the account name you just signed in as.
+- The "token rejected" message is no longer misleading. A token that simply isn't a Launcher Token used to report "account is restricted from uploading demos" even when nothing was restricted - it now reads as a wrong-token-type / restricted-account error, which is what's actually happening.
+
 ## 0.1.23
 
 - Start with system is now on by default after setup. The launcher is a background companion - the demo watcher and the `defrag://` join handler only do anything while it's running - so it now enables launch-at-login when you finish onboarding instead of waiting for you to find the Settings toggle. It still starts hidden in the tray, and the same toggle turns it off if you'd rather launch it by hand.

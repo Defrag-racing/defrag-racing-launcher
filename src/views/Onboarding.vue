@@ -22,6 +22,9 @@
     const tokenSaving = ref(false);
     const tokenError = ref<string | null>(null);
     const tokenSkipped = ref(false);
+    // Account name the validated token resolved to, shown on the final
+    // screen so the user can confirm they signed in as the right player.
+    const tokenSavedName = ref<string | null>(null);
     // Guard so a token can't be skipped by accident - the button opens a
     // confirmation that spells out exactly which features go dark.
     const showSkipConfirm = ref(false);
@@ -31,7 +34,18 @@
         if (! token.value.trim()) return;
         tokenSaving.value = true;
         try {
+            // Validate against the server BEFORE saving. Pasting a token
+            // that silently doesn't work - the classic "I made the wrong
+            // token" - used to surface only hours later as a cryptic
+            // rejection on the Servers tab. Catch it here with a message
+            // that says what's wrong and where to fix it.
+            const check = await tauri.validateToken(token.value.trim());
+            if (! check.ok) {
+                tokenError.value = check.message;
+                return;
+            }
             await tauri.saveToken(token.value.trim());
+            tokenSavedName.value = check.name;
             token.value = '';
             tokenSkipped.value = false;
             await config.refresh();
@@ -273,7 +287,17 @@
                         class="w-full bg-black/60 border border-white/10 rounded px-3 py-2 text-sm font-mono focus:border-brand-500/60 focus:outline-none"
                         @keydown.enter="saveToken"
                     />
-                    <p v-if="tokenError" class="text-xs text-red-400">{{ tokenError }}</p>
+                    <div v-if="tokenError" class="rounded border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-200 space-y-1.5">
+                        <div class="flex items-start gap-2">
+                            <span class="text-red-400 mt-0.5 flex-shrink-0">✕</span>
+                            <span>{{ tokenError }}</span>
+                        </div>
+                        <div class="text-red-300/80 pl-6">
+                            Open the token page above and check you copied the token from the
+                            <strong class="text-red-200">Launcher Tokens</strong> block under
+                            <span class="font-mono">defrag.racing &gt; Settings &gt; Security</span> - not another token type.
+                        </div>
+                    </div>
 
                     <div class="flex justify-between pt-2">
                         <button class="btn-ghost" @click="requestSkipToken">Skip - defrag:// only</button>
@@ -391,6 +415,7 @@
                         <li class="flex items-center gap-2">
                             <span :class="tokenSkipped ? 'text-amber-400' : 'text-brand-400'">{{ tokenSkipped ? '!' : '✓' }}</span>
                             <span v-if="tokenSkipped">Token skipped</span>
+                            <span v-else-if="tokenSavedName">Signed in as <strong class="text-neutral-100">{{ tokenSavedName }}</strong></span>
                             <span v-else>Token stored</span>
                         </li>
                         <li class="flex items-center gap-2">

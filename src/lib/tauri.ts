@@ -48,6 +48,14 @@ export interface PendingUpload {
     upload_throughput_bps: number | null;
 }
 
+export interface TokenCheck {
+    ok: boolean;
+    /** 'ok' | 'invalid' | 'wrong_type' | 'network' | 'server' */
+    kind: 'ok' | 'invalid' | 'wrong_type' | 'network' | 'server';
+    message: string;
+    name: string | null;
+}
+
 export interface HealthItem {
     id: string;
     title: string;
@@ -86,6 +94,10 @@ export const tauri = {
     logToFile: (msg: string) => invoke<void>('log_to_file', { msg }),
 
     saveToken: (token: string) => invoke<void>('save_token', { token }),
+    /** Check a token with the server before saving. `kind` distinguishes
+     *  an invalid token, a wrong-type token, and a network failure so the
+     *  UI can show the right guidance. */
+    validateToken: (token: string) => invoke<TokenCheck>('validate_token', { token }),
     hasToken: () => invoke<boolean>('has_token'),
     clearToken: () => invoke<void>('clear_token'),
     resetLauncher: () => invoke<void>('reset_launcher'),

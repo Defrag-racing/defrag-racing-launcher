@@ -130,6 +130,88 @@ pub fn save_token(token: String) -> Result<(), String> {
     token::save(&token).map_err(err_to_string)
 }
 
+/// Result of checking a token against the server before we commit to it.
+/// `kind` lets the UI branch to the right guidance instead of dumping a
+/// raw error string: an invalid token, a wrong-type token, and a network
+/// blip each need a different message.
+#[derive(serde::Serialize)]
+pub struct TokenCheck {
+    pub ok: bool,
+    /// "ok" | "invalid" | "wrong_type" | "network" | "server"
+    pub kind: String,
+    pub message: String,
+    /// Player name when the token resolves to an account - lets the UI
+    /// confirm *who* they just signed in as.
+    pub name: Option<String>,
+}
+
+/// Verify a token actually works before saving it, by calling the
+/// account endpoint (`/api/launcher/me`, which needs the `launcher:read`
+/// ability every real Launcher Token carries). This is what turns "paste
+/// a token, find out hours later on the Servers tab that it was the wrong
+/// one" into immediate, specific feedback at the moment of entry.
+///
+/// Does NOT save the token - the caller saves only on `ok: true`.
+#[tauri::command]
+pub async fn validate_token(token: String) -> Result<TokenCheck, String> {
+    let token = token.trim().to_string();
+    if token.is_empty() {
+        return Ok(TokenCheck {
+            ok: false,
+            kind: "invalid".into(),
+            message: "Paste a token first.".into(),
+            name: None,
+        });
+    }
+
+    let client = crate::api::Client::new(config::api_base_url(), token)
+        .map_err(err_to_string)?;
+
+    match client.fetch_me().await {
+        Ok(me) => {
+            let name = me
+                .get("plain_name")
+                .or_else(|| me.get("name"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            Ok(TokenCheck {
+                ok: true,
+                kind: "ok".into(),
+                message: "Token valid.".into(),
+                name,
+            })
+        }
+        // Bad/garbled/partial paste, or a revoked token: the server
+        // doesn't recognise it at all.
+        Err(crate::api::ApiError::Unauthorized) => Ok(TokenCheck {
+            ok: false,
+            kind: "invalid".into(),
+            message: "This token wasn't recognised. Make sure you copied the whole token (it starts with a number and a |) and that it hasn't been revoked.".into(),
+            name: None,
+        }),
+        // The token is a real token but not a Launcher Token - the usual
+        // cause is creating the wrong token type on the website.
+        Err(crate::api::ApiError::Forbidden) => Ok(TokenCheck {
+            ok: false,
+            kind: "wrong_type".into(),
+            message: "This isn't a valid Launcher Token (or your account is restricted). Most likely you created the wrong kind of token - it must come from the \"Launcher Tokens\" block.".into(),
+            name: None,
+        }),
+        Err(crate::api::ApiError::Network(_)) => Ok(TokenCheck {
+            ok: false,
+            kind: "network".into(),
+            message: "Couldn't reach defrag.racing to check the token. Check your connection and try again.".into(),
+            name: None,
+        }),
+        Err(e) => Ok(TokenCheck {
+            ok: false,
+            kind: "server".into(),
+            message: format!("Couldn't verify the token: {e}"),
+            name: None,
+        }),
+    }
+}
+
 #[tauri::command]
 pub fn has_token() -> Result<bool, String> {
     Ok(token::load().map_err(err_to_string)?.is_some())

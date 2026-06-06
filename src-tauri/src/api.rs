@@ -42,7 +42,11 @@ pub struct UploadResponse {
 pub enum ApiError {
     #[error("authentication failed - token invalid or revoked")]
     Unauthorized,
-    #[error("account is restricted from uploading demos")]
+    // 403 covers two cases: a Launcher Token whose account is restricted
+    // from the action (e.g. uploads disabled), and a token that simply
+    // isn't a Launcher Token (wrong type, missing the launcher ability).
+    // Keep the message general so it isn't misleading on read endpoints.
+    #[error("token rejected - wrong token type or account restricted")]
     Forbidden,
     #[error("rate limit exceeded - backing off")]
     RateLimited,

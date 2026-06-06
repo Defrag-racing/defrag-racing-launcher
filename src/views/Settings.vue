@@ -135,6 +135,15 @@
         tokenSaving.value = true;
         tokenError.value = null;
         try {
+            // Verify with the server before storing, so a wrong-type or
+            // invalid token is rejected here with a clear reason instead
+            // of being saved and silently failing on the Servers / upload
+            // paths later.
+            const check = await tauri.validateToken(tokenInput.value.trim());
+            if (! check.ok) {
+                tokenError.value = check.message;
+                return;
+            }
             await tauri.saveToken(tokenInput.value.trim());
             tokenInput.value = '';
             showTokenForm.value = false;
@@ -414,7 +423,16 @@
                         {{ tokenSaving ? 'Saving…' : 'Save' }}
                     </button>
                 </div>
-                <p v-if="tokenError" class="text-xs text-red-400">{{ tokenError }}</p>
+                <div v-if="tokenError" class="mt-2 rounded border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-200 space-y-1.5">
+                    <div class="flex items-start gap-2">
+                        <span class="text-red-400 mt-0.5 flex-shrink-0">✕</span>
+                        <span>{{ tokenError }}</span>
+                    </div>
+                    <div class="text-red-300/80 pl-6">
+                        Create the token from the <strong class="text-red-200">Launcher Tokens</strong> block under
+                        <span class="font-mono">defrag.racing &gt; Settings &gt; Security</span> - not another token type.
+                    </div>
+                </div>
             </section>
 
             <!-- Force re-check uploaded demos -->
