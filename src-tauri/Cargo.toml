@@ -1,6 +1,6 @@
 [package]
 name = "defrag-launcher"
-version = "0.1.32"
+version = "0.1.33"
 description = "Demo backup + defrag:// launcher for defrag.racing"
 authors = ["defrag.racing"]
 edition = "2021"
@@ -74,6 +74,13 @@ hex = "0.4"
 # used for default install paths during engine detection.
 directories = "5"
 walkdir = "2"
+
+# Read pk3 (zip) archives for the offline Maps tab: list maps/*.bsp to find
+# map names and pull out the levelshot for thumbnails, without extracting
+# the whole map. `image` decodes TGA levelshots (Q3's common format) and
+# re-encodes them to PNG since the webview can't render TGA directly.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+image = { version = "0.25", default-features = false, features = ["tga", "jpeg", "png"] }
 
 # Base64 obfuscation for the on-disk token file. Not real encryption —
 # just keeps the token from appearing verbatim in casual filesystem scans.

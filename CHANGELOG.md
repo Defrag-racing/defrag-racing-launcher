@@ -4,6 +4,11 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.33
+
+- Maps tab now has an **Offline (local)** sub-tab listing the maps you actually have installed in the engine's baseq3 folder - no token needed, works without internet. Map names come from each pk3's `maps/*.bsp`, and the thumbnail is the pk3's levelshot (TGA levelshots are converted, same as the website). Each card has VQ3 / CPM "Run" buttons that launch straight into the map (it's already installed, so no download).
+- It's built to be light: listing only reads the pk3 directory (no unpacking), thumbnails are extracted lazily as cards scroll into view (just the one small levelshot, never the whole map), and every extracted thumbnail is cached on disk - so re-opening the tab or restarting reads the cache instead of re-reading the pk3s.
+
 ## 0.1.32
 
 - Maps tab now shows each map's weapons, items and functions as small icons over the thumbnail (same icon set as the website). The icons are bundled with the launcher, so the grid doesn't fire a network request per icon. Needs the Maps tab, which is token-gated like before.

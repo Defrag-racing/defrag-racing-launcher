@@ -164,6 +164,13 @@ export const tauri = {
      *  the original pk3 filename), then launch `+vq3`/`+cpm <map>`. */
     runMapOffline: (mapName: string, physics: 'vq3' | 'cpm', pk3: string | null) =>
         invoke<MapRunResult>('run_map_offline', { mapName, physics, pk3 }),
+    /** List maps installed in the engine's baseq3 folder (reads pk3
+     *  indexes; no extraction). */
+    listOfflineMaps: () => invoke<OfflineMap[]>('list_offline_maps'),
+    /** Extract one offline map's levelshot from its pk3 as a data URL
+     *  (cached). null when the pk3 has no levelshot for that map. */
+    offlineMapThumb: (pk3Path: string, mapName: string) =>
+        invoke<string | null>('offline_map_thumb', { pk3Path, mapName }),
     getPendingDeepLink: () => invoke<string | null>('get_pending_deep_link'),
     /** Optional enrichment is logged into history.json so the History
      *  tab can show map/server name alongside the IP. Pass whatever
@@ -402,6 +409,14 @@ export interface MapRow {
 export interface MapRunResult {
     /** True if the pk3 was downloaded this run, false if already present. */
     downloaded: boolean;
+}
+
+/** A map installed locally in the engine's baseq3 folder (offline tab). */
+export interface OfflineMap {
+    name: string;
+    pk3: string;
+    pk3_path: string;
+    has_levelshot: boolean;
 }
 
 /** Token owner identity for the Profile button. mdd_id is the public

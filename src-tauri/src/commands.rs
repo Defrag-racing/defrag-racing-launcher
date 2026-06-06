@@ -938,6 +938,25 @@ pub async fn run_map_offline(
     Ok(MapRunResult { downloaded })
 }
 
+/// List the maps installed in the engine's baseq3 folder (offline Maps
+/// tab). Reads pk3 indexes only - cheap, no extraction.
+#[tauri::command]
+pub fn list_offline_maps() -> Result<Vec<crate::offline_maps::OfflineMap>, String> {
+    let cfg = Config::load().map_err(err_to_string)?;
+    let engine = cfg
+        .engine_path
+        .ok_or_else(|| "No engine configured - pick one in Settings first.".to_string())?;
+    crate::offline_maps::list(&engine).map_err(err_to_string)
+}
+
+/// Extract a single offline map's levelshot from its pk3 and return it as a
+/// data URL (cached on disk). Ok(None) when the pk3 has no levelshot.
+#[tauri::command]
+pub fn offline_map_thumb(pk3_path: String, map_name: String) -> Result<Option<String>, String> {
+    crate::offline_maps::thumb_data_url(std::path::Path::new(&pk3_path), &map_name)
+        .map_err(err_to_string)
+}
+
 /// Open an external URL in the user's browser. Routed through Rust (not
 /// the JS opener plugin directly) so the Linux/AppImage path can launch
 /// the browser with a clean environment - see protocol::open_external_url.

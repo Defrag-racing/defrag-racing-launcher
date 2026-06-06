@@ -14,8 +14,13 @@
         itemIcon, itemName,
         functionIcon, functionName,
     } from '../lib/mapIcons';
+    import MapsOffline from './MapsOffline.vue';
 
     const config = useConfigStore();
+
+    // Online (defrag.racing browser) vs Offline (maps installed locally in
+    // baseq3). Online is token-gated; offline works without a token.
+    const subtab = ref<'online' | 'offline'>('online');
 
     const search = ref('');
     const page = ref(1);
@@ -158,14 +163,23 @@
 <template>
     <div class="flex-1 flex flex-col min-h-0">
         <header class="px-5 py-3 border-b border-white/10 flex items-center justify-between gap-3">
-            <div class="min-w-0">
+            <div class="min-w-0 flex items-center gap-3">
                 <div class="font-semibold">Maps</div>
-                <div class="text-xs text-neutral-500 mt-0.5 truncate">
-                    Browse maps from defrag.racing, newest first. Click a map to
-                    open its full page on the web for weapons / records / demos.
+                <!-- Online / Offline sub-tabs -->
+                <div class="flex items-center gap-1 text-xs">
+                    <button
+                        class="px-2 py-1 rounded transition-colors"
+                        :class="subtab === 'online' ? 'bg-white/10 text-neutral-100 font-semibold' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
+                        @click="subtab = 'online'"
+                    >Online</button>
+                    <button
+                        class="px-2 py-1 rounded transition-colors"
+                        :class="subtab === 'offline' ? 'bg-white/10 text-neutral-100 font-semibold' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
+                        @click="subtab = 'offline'"
+                    >Offline <span class="text-neutral-500">(local)</span></button>
                 </div>
             </div>
-            <div class="flex items-center gap-2 text-xs text-neutral-500 flex-shrink-0">
+            <div v-if="subtab === 'online'" class="flex items-center gap-2 text-xs text-neutral-500 flex-shrink-0">
                 <span v-if="lastFetchedAt">Updated {{ lastFetchedLabel }}</span>
                 <button
                     class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-50"
@@ -175,6 +189,7 @@
             </div>
         </header>
 
+        <template v-if="subtab === 'online'">
         <div v-if="!config.hasToken" class="flex-1 flex items-center justify-center p-8">
             <div class="text-center max-w-sm space-y-2">
                 <div class="text-5xl">🔑</div>
@@ -344,5 +359,8 @@
                 >Next →</button>
             </footer>
         </template>
+        </template>
+
+        <MapsOffline v-else />
     </div>
 </template>

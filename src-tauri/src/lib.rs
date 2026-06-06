@@ -5,6 +5,7 @@ mod config;
 mod engine;
 mod hashing;
 mod history;
+mod offline_maps;
 mod protocol;
 mod session_tracker;
 mod token;
@@ -227,6 +228,8 @@ pub fn run() {
             commands::launch_engine,
             commands::launch_engine_args,
             commands::run_map_offline,
+            commands::list_offline_maps,
+            commands::offline_map_thumb,
             commands::open_url,
             commands::get_servers,
             commands::get_pending_deep_link,
