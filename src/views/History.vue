@@ -100,8 +100,30 @@
         return formatTime(e.timestamp_ms);
     });
 
+    // Relative-time label for an arbitrary timestamp (the per-map plays),
+    // ticking off the same _now ref as the row labels.
+    const relTimeMs = computed(() => (ms: number) => {
+        void _now.value;
+        return formatTime(ms);
+    });
+
     const stripColors = (s: string): string =>
         s.replace(/\^\d|\^x[\da-fA-F]{2}|\^[\da-fA-F]{6}/g, '');
+
+    // Stable key per entry (the backend session id; falls back to
+    // ip:port#ts for legacy entries written before ids existed).
+    const rowKey = (e: ConnectionEntry): string =>
+        e.id || `${e.ip}:${e.port}#${e.timestamp_ms}`;
+
+    // Which rows have their map timeline expanded.
+    const expanded = ref<Set<string>>(new Set());
+    const toggleExpand = (e: ConnectionEntry) => {
+        const k = rowKey(e);
+        const next = new Set(expanded.value);
+        if (next.has(k)) next.delete(k); else next.add(k);
+        expanded.value = next;
+    };
+    const isExpanded = (e: ConnectionEntry): boolean => expanded.value.has(rowKey(e));
 </script>
 
 <template>
@@ -184,7 +206,37 @@
                             <span v-if="e.server_name" class="font-mono">{{ e.ip }}:{{ e.port }}</span>
                             <span v-if="e.server_name" class="text-neutral-600">·</span>
                             <span>{{ labelFor(e) }}</span>
+                            <button
+                                v-if="e.maps_played && e.maps_played.length"
+                                class="ml-1 text-neutral-400 hover:text-neutral-200 flex items-center gap-0.5"
+                                :title="isExpanded(e) ? 'Hide maps played' : 'Show maps played'"
+                                @click="toggleExpand(e)"
+                            >
+                                <span class="inline-block transition-transform" :class="isExpanded(e) ? 'rotate-90' : ''">▸</span>
+                                {{ e.maps_played.length }} map{{ e.maps_played.length === 1 ? '' : 's' }}
+                            </button>
                         </div>
+
+                        <!-- Per-session map timeline: maps the server
+                             rotated through while the game was running.
+                             Chronological (join map first). -->
+                        <ul
+                            v-if="isExpanded(e) && e.maps_played && e.maps_played.length"
+                            class="mt-2 ml-1 border-l border-white/[0.06] pl-3 space-y-1"
+                        >
+                            <li
+                                v-for="(mp, i) in e.maps_played"
+                                :key="`${mp.map}#${mp.timestamp_ms}#${i}`"
+                                class="flex items-center gap-2 text-xs"
+                            >
+                                <button class="text-brand-400 hover:underline truncate" @click="openMap(mp.map)">{{ mp.map }}</button>
+                                <span
+                                    v-if="mp.physics"
+                                    class="uppercase text-[10px] px-1 py-0.5 rounded bg-white/5 text-neutral-300 flex-shrink-0"
+                                >{{ mp.physics }}</span>
+                                <span class="text-neutral-600 ml-auto whitespace-nowrap">{{ relTimeMs(mp.timestamp_ms) }}</span>
+                            </li>
+                        </ul>
                     </div>
                     <button
                         class="px-3 py-1 rounded bg-brand-500/20 hover:bg-brand-500/30 text-brand-300 text-xs font-semibold disabled:opacity-50 flex-shrink-0"

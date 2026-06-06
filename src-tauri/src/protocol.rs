@@ -130,9 +130,11 @@ pub fn parse_url(url: &str) -> Result<ServerAddr, ProtocolError> {
 }
 
 /// Spawns the configured engine with `+connect <host>:<port>`. Returns
-/// once the process is started - we don't wait for it to exit because
-/// the engine stays open for the entire gaming session.
-pub fn launch(engine: Option<&Path>, addr: &ServerAddr) -> Result<(), ProtocolError> {
+/// the child process handle once started - we don't wait for it to exit
+/// because the engine stays open for the entire gaming session, but the
+/// caller keeps the handle so the map-history tracker can watch the
+/// process and stop tracking when the game closes.
+pub fn launch(engine: Option<&Path>, addr: &ServerAddr) -> Result<std::process::Child, ProtocolError> {
     spawn_engine(engine, |cmd| {
         // Q3-family engines parse `+connect <host>:<port>` as a startup
         // console command. Two args, not one - `+connect host:port` as
@@ -144,21 +146,24 @@ pub fn launch(engine: Option<&Path>, addr: &ServerAddr) -> Result<(), ProtocolEr
 /// Spawns the configured engine without any `+connect` - just opens
 /// Defrag at the main menu. Used by the Dashboard "Play" button so a
 /// user who keeps the launcher in their tray can jump into the game
-/// without finding the engine .exe in their filesystem.
+/// without finding the engine .exe in their filesystem. No server, so no
+/// session tracking - the child handle is dropped.
 pub fn launch_no_connect(engine: Option<&Path>) -> Result<(), ProtocolError> {
-    spawn_engine(engine, |_| {})
+    spawn_engine(engine, |_| {}).map(|_| ())
 }
 
 /// Spawns the engine with caller-supplied extra arguments (no
 /// `+connect`). Backs the developer-mode custom Quick launch + named
-/// launch profiles: the args come from the user's config, already split
-/// into tokens via `split_args`.
+/// launch profiles + the Maps offline-run buttons: the args come from the
+/// caller, already split into tokens via `split_args`. No server, so the
+/// child handle is dropped.
 pub fn launch_with_args(engine: Option<&Path>, args: &[String]) -> Result<(), ProtocolError> {
     spawn_engine(engine, |cmd| {
         for a in args {
             cmd.arg(a);
         }
     })
+    .map(|_| ())
 }
 
 /// Open an external URL in the user's browser.
@@ -255,10 +260,13 @@ pub fn split_args(input: &str) -> Vec<String> {
     args
 }
 
+/// Spawn the engine and return the child handle so the caller can track
+/// the process lifetime (used by the map-history tracker to know how long
+/// the user is in-game). Callers that don't care just drop it.
 fn spawn_engine(
     engine: Option<&Path>,
     extra_args: impl FnOnce(&mut Command),
-) -> Result<(), ProtocolError> {
+) -> Result<std::process::Child, ProtocolError> {
     let engine = engine.ok_or(ProtocolError::EngineNotConfigured)?;
     if !engine.exists() {
         return Err(ProtocolError::EngineMissing(engine.to_path_buf()));
@@ -280,8 +288,7 @@ fn spawn_engine(
     #[cfg(target_os = "linux")]
     strip_appimage_env(&mut cmd);
 
-    cmd.spawn()?;
-    Ok(())
+    Ok(cmd.spawn()?)
 }
 
 /// Undo the environment mangling an AppImage's `AppRun` does, for a child

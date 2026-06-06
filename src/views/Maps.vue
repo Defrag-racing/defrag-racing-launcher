@@ -114,6 +114,20 @@
             .catch(() => { /* best effort */ });
     };
 
+    // Launch the engine to run a map offline in the chosen physics. Uses
+    // the same launch plumbing as developer-mode profiles - the engine
+    // reads `+vq3 <map>` / `+cpm <map>` as a startup console command. Map
+    // name is quoted so the arg splitter keeps it one token. Failures
+    // surface in the existing top-of-view error banner.
+    const runOffline = async (name: string, physics: 'vq3' | 'cpm') => {
+        error.value = null;
+        try {
+            await tauri.launchEngineArgs(`+${physics} "${name}"`);
+        } catch (e: any) {
+            error.value = e?.toString?.() ?? 'Failed to launch the engine';
+        }
+    };
+
     const formatDate = (s: string | null): string => {
         if (!s) return '';
         const d = new Date(s.replace(' ', 'T') + 'Z');
@@ -214,6 +228,29 @@
                                 <span v-if="m.gametype" class="uppercase px-1 py-0.5 rounded bg-white/5 text-neutral-300">{{ m.gametype }}</span>
                                 <span v-if="m.is_nsfw" class="uppercase px-1 py-0.5 rounded bg-red-500/15 text-red-300">NSFW</span>
                                 <span class="ml-auto whitespace-nowrap">{{ formatDate(m.date_added) }}</span>
+                            </div>
+
+                            <!-- Run the map offline in the chosen physics. Both
+                                 buttons appear on every card; the engine path
+                                 is required (same gating as Quick launch). -->
+                            <div class="flex items-center gap-1.5 mt-2 pt-2 border-t border-white/[0.06]">
+                                <span class="text-[10px] uppercase tracking-wider text-neutral-600 mr-0.5">Run offline</span>
+                                <button
+                                    class="flex-1 px-2 py-1 rounded text-[11px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    :disabled="!config.config.engine_path"
+                                    :title="config.config.engine_path
+                                        ? `Run ${m.name} offline in VQ3`
+                                        : 'Pick an engine in Settings first'"
+                                    @click="runOffline(m.name, 'vq3')"
+                                >VQ3</button>
+                                <button
+                                    class="flex-1 px-2 py-1 rounded text-[11px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    :disabled="!config.config.engine_path"
+                                    :title="config.config.engine_path
+                                        ? `Run ${m.name} offline in CPM`
+                                        : 'Pick an engine in Settings first'"
+                                    @click="runOffline(m.name, 'cpm')"
+                                >CPM</button>
                             </div>
                         </div>
                     </li>

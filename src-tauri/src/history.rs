@@ -25,6 +25,13 @@ const HISTORY_CAP: usize = 200;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionEntry {
+    /// Stable session id, generated at log time as
+    /// `{timestamp_ms}-{ip}-{port}`. Lets the map tracker append maps to
+    /// the right entry while the engine process is alive, and the frontend
+    /// key its expandable rows. Defaults to empty for legacy entries
+    /// written before this field existed.
+    #[serde(default)]
+    pub id: String,
     /// Unix-epoch milliseconds at click time. Frontend renders this
     /// with the user's locale; backend doesn't care about formatting.
     pub timestamp_ms: u64,
@@ -47,6 +54,24 @@ pub struct ConnectionEntry {
     /// entries.
     #[serde(default = "default_source")]
     pub source: String,
+    /// Maps that played on this server while the launched engine process
+    /// was alive (the per-session map history). Appended in the background
+    /// by the session tracker as the server rotates maps; empty when no
+    /// changes were seen (no token, off-list server, or the game closed
+    /// before a rotation).
+    #[serde(default)]
+    pub maps_played: Vec<MapPlay>,
+}
+
+/// One map the server was running, observed during a connected session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MapPlay {
+    pub map: String,
+    /// Unix-epoch milliseconds when we first observed this map on the
+    /// server during the session.
+    pub timestamp_ms: u64,
+    #[serde(default)]
+    pub physics: Option<String>,
 }
 
 fn default_source() -> String { "confirmed".to_string() }
@@ -114,15 +139,26 @@ impl ConnectionHistory {
         server_name: Option<String>,
         physics: Option<String>,
         source: &str,
-    ) {
+    ) -> String {
+        let ts = now_ms();
+        let id = format!("{}-{}-{}", ts, ip, port);
+        // Seed the map timeline with the map we already know at connect
+        // time (if any), so the session starts with the map you joined on
+        // rather than only logging the first rotation after you arrive.
+        let maps_played = match (&map, &physics) {
+            (Some(m), p) => vec![MapPlay { map: m.clone(), timestamp_ms: ts, physics: p.clone() }],
+            _ => Vec::new(),
+        };
         let entry = ConnectionEntry {
-            timestamp_ms: now_ms(),
+            id: id.clone(),
+            timestamp_ms: ts,
             ip,
             port,
             map,
             server_name,
             physics,
             source: source.to_string(),
+            maps_played,
         };
         let mut guard = self.inner.lock().unwrap();
         guard.entries.insert(0, entry);
@@ -131,6 +167,25 @@ impl ConnectionHistory {
         }
         if let Err(e) = Self::save_file(&guard) {
             crate::log_startup(&format!("history.log: save failed: {}", e));
+        }
+        id
+    }
+
+    /// Append a map to a session's timeline, found by entry id. No-op if
+    /// the entry has aged out of the cap, or if the map is identical to the
+    /// last one already recorded for it (server still on the same map).
+    /// Persisted best-effort like log().
+    pub fn append_map(&self, session_id: &str, map: String, physics: Option<String>, ts_ms: u64) {
+        let mut guard = self.inner.lock().unwrap();
+        let Some(entry) = guard.entries.iter_mut().find(|e| e.id == session_id) else {
+            return;
+        };
+        if entry.maps_played.last().map(|m| m.map.as_str()) == Some(map.as_str()) {
+            return;
+        }
+        entry.maps_played.push(MapPlay { map, timestamp_ms: ts_ms, physics });
+        if let Err(e) = Self::save_file(&guard) {
+            crate::log_startup(&format!("history.append_map: save failed: {}", e));
         }
     }
 
@@ -149,7 +204,7 @@ impl ConnectionHistory {
     }
 }
 
-fn now_ms() -> u64 {
+pub fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)

@@ -6,6 +6,7 @@ mod engine;
 mod hashing;
 mod history;
 mod protocol;
+mod session_tracker;
 mod token;
 mod watcher;
 
@@ -427,19 +428,29 @@ fn handle_deep_link_url(app: &tauri::AppHandle, url: &str) {
             if auto_connect_ok {
                 let engine = cfg.as_ref().and_then(|c| c.engine_path.as_deref());
                 match protocol::launch(engine, &addr) {
-                    Ok(()) => {
+                    Ok(child) => {
                         // Log the connection to history with whatever
                         // we have (just IP:port at this point -
                         // enrichment requires the frontend's server
-                        // lookup which auto-connect skips by design).
+                        // lookup which auto-connect skips by design),
+                        // then track the engine process so the server's
+                        // map rotations get logged onto this entry until
+                        // the game closes.
                         let state: tauri::State<AppState> = app.state();
-                        state.history.log(
+                        let session_id = state.history.log(
                             addr.host().to_string(),
                             addr.port(),
                             None,
                             None,
                             None,
                             "auto",
+                        );
+                        state.session_tracker.register(
+                            child,
+                            addr.host().to_string(),
+                            addr.port(),
+                            session_id,
+                            None,
                         );
                         let _ = app.emit(
                             "deep-link://result",

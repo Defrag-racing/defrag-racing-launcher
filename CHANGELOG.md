@@ -4,6 +4,11 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.29
+
+- Maps tab: every map card now has **VQ3** and **CPM** "Run offline" buttons that launch the engine straight into that map in the chosen physics (e.g. `+vq3 cityrocket` / `+cpm cityrocket`). Disabled with a hint until an engine is set in Settings.
+- History tab: each connection now records the **maps that played on the server while you were in the game**, shown in an expandable list under the row (map + physics + time). The launcher watches the engine process it started for the connect and polls that server's current map in the background - even while it sits in the tray - logging each rotation, then stops automatically when you close the game. Needs a launcher token (the server list is token-locked); without one the map history stays empty.
+
 ## 0.1.28
 
 - Linux: fixed external links (map pages, profiles, YouTube renders, the token page, etc.) not opening. Same root cause as the engine-launch fix - when the launcher runs as an AppImage, the browser was being spawned with the AppImage's mangled library environment and failed to start. Links now open through a system opener (xdg-open, with fallbacks to gio and common browsers) launched with a clean, shell-equivalent environment. Windows and macOS are unchanged.

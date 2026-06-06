@@ -42,6 +42,10 @@ pub struct AppState {
     /// single load happens at boot and subsequent log() calls touch
     /// the same in-memory copy.
     pub history: Arc<ConnectionHistory>,
+    /// Tracks running engine processes started via a server connect and
+    /// logs the maps that server rotates through, onto the matching
+    /// history entry, for the life of the process.
+    pub session_tracker: Arc<crate::session_tracker::SessionTracker>,
 }
 
 impl Default for AppState {
@@ -51,12 +55,15 @@ impl Default for AppState {
         // mounts so the Dashboard's first get_upload_state poll shows
         // history instead of an empty list.
         upload_state.load_persisted();
+        let history = Arc::new(ConnectionHistory::default());
+        let session_tracker = crate::session_tracker::SessionTracker::new(history.clone());
         Self {
             watcher: Mutex::new(None),
             upload_state,
             pending_deep_link: Mutex::new(None),
             last_deep_link: Mutex::new(None),
-            history: Arc::new(ConnectionHistory::default()),
+            history,
+            session_tracker,
         }
     }
 }
@@ -818,15 +825,23 @@ pub fn handle_protocol_url(
 ) -> Result<String, String> {
     let addr = protocol::parse_url(&url).map_err(err_to_string)?;
     let cfg = Config::load().map_err(err_to_string)?;
-    protocol::launch(cfg.engine_path.as_deref(), &addr).map_err(err_to_string)?;
+    let child = protocol::launch(cfg.engine_path.as_deref(), &addr).map_err(err_to_string)?;
     let enrich = enrichment.unwrap_or_default();
-    state.history.log(
+    let seed_map = enrich.map.clone();
+    let session_id = state.history.log(
         addr.host().to_string(),
         addr.port(),
         enrich.map,
         enrich.server_name,
         enrich.physics,
         source.as_deref().unwrap_or("servers"),
+    );
+    state.session_tracker.register(
+        child,
+        addr.host().to_string(),
+        addr.port(),
+        session_id,
+        seed_map,
     );
     Ok(addr.to_string())
 }
@@ -1103,15 +1118,23 @@ pub fn confirm_pending_deep_link(
         .ok_or_else(|| "No pending connection".to_string())?;
     let addr = protocol::parse_url(&url).map_err(err_to_string)?;
     let cfg = Config::load().map_err(err_to_string)?;
-    protocol::launch(cfg.engine_path.as_deref(), &addr).map_err(err_to_string)?;
+    let child = protocol::launch(cfg.engine_path.as_deref(), &addr).map_err(err_to_string)?;
     let enrich = enrichment.unwrap_or_default();
-    state.history.log(
+    let seed_map = enrich.map.clone();
+    let session_id = state.history.log(
         addr.host().to_string(),
         addr.port(),
         enrich.map,
         enrich.server_name,
         enrich.physics,
         "confirmed",
+    );
+    state.session_tracker.register(
+        child,
+        addr.host().to_string(),
+        addr.port(),
+        session_id,
+        seed_map,
     );
     // Engine has focus now - drop the launcher back to the tray so it
     // isn't pointlessly floating over Quake.

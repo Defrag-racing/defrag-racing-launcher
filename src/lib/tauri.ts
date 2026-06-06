@@ -313,7 +313,16 @@ export interface ConnectEnrichment {
  *  into auto-connect Settings and the launcher launched the engine
  *  without a banner, "confirmed" when they pressed Connect on the
  *  pending banner. */
+/** One map observed on the server during a connected session. */
+export interface MapPlay {
+    map: string;
+    timestamp_ms: number;
+    physics: string | null;
+}
+
 export interface ConnectionEntry {
+    /** Stable session id ("{ts}-{ip}-{port}"); empty for legacy entries. */
+    id: string;
     timestamp_ms: number;
     ip: string;
     port: number;
@@ -321,6 +330,9 @@ export interface ConnectionEntry {
     server_name: string | null;
     physics: string | null;
     source: string;
+    /** Maps the server rotated through while the engine process was alive
+     *  (per-session map history). Empty when nothing was recorded. */
+    maps_played: MapPlay[];
 }
 
 /** Laravel paginator wrapper. The records endpoint now uses
