@@ -4,6 +4,11 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.16
+
+- The session summary no longer claims demos were uploaded when they weren't. "X uploaded" now counts only real uploads this run; a demo re-confirmed from the local cache (already on the server from a previous run) correctly counts as "already backed up". Before, a demo that was only re-checked could be tallied as a fresh upload.
+- The 30-minute safety rescan no longer looks like it reprocessed your whole library. It now skips demos already confirmed backed up this session instead of re-checking (and re-counting) every one, so "processed this session" reflects real work rather than doubling every rescan. No demos were ever actually re-hashed or re-uploaded - this was a counting issue - but the numbers now match reality.
+
 ## 0.1.15
 
 - Fixed some demos showing a greyed-out, un-clickable Render button. A recently backed-up demo could appear twice - once as a real row and once as a hash-less ghost row - because the live queue and the on-disk list disagreed on the file's path form; both sides now use one normalised path.

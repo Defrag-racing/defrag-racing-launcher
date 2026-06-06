@@ -22,6 +22,7 @@ use anyhow::{Context, Result};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, FileIdMap};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
@@ -212,6 +213,18 @@ pub struct UploadState {
     done_count: AtomicU64,
     duplicate_count: AtomicU64,
     error_count: AtomicU64,
+    /// Normalised paths that reached Done/Duplicate THIS session. The
+    /// periodic safety-net rescan (every PERIODIC_RESCAN_SECS) re-walks
+    /// the whole folder; without this set it would re-confirm every
+    /// already-backed-up demo from cache and re-tick the session
+    /// counters, so a long-running session looks like it reprocessed the
+    /// entire library ("10000 processed", "20 uploaded" for demos that
+    /// never touched the network this run). The old guard checked the
+    /// visible queue, but that's bounded by QUEUE_CAP - once a file falls
+    /// out of it the guard went blind. This set is unbounded and survives
+    /// queue eviction. Errors are deliberately NOT recorded so a rescan
+    /// still retries them. Cleared on watcher::start.
+    handled: Mutex<HashSet<PathBuf>>,
 }
 
 impl UploadState {
@@ -234,6 +247,14 @@ impl UploadState {
         self.done_count.store(0, Ordering::Release);
         self.duplicate_count.store(0, Ordering::Release);
         self.error_count.store(0, Ordering::Release);
+        self.handled.lock().unwrap().clear();
+    }
+
+    /// True if `path` already reached a successful terminal status
+    /// (Done / Duplicate) earlier in this session - the periodic rescan
+    /// uses this to skip re-confirming demos it already accounted for.
+    fn is_handled(&self, path: &Path) -> bool {
+        self.handled.lock().unwrap().contains(path)
     }
 
     pub fn is_paused(&self) -> bool {
@@ -456,17 +477,20 @@ impl UploadState {
         filename: &str,
         f: impl FnOnce(&mut PendingUpload),
     ) {
-        // Returns Some(new_status) when the item just transitioned from
-        // a non-terminal status into a terminal one - the caller then
-        // bumps the matching session counter. None means either the
-        // status didn't change kind (still non-terminal, or was already
-        // terminal) or it was already counted before.
+        // Returns Some((status, fresh_upload)) when the item just
+        // transitioned from a non-terminal status into a terminal one -
+        // the caller then bumps the matching session counter. fresh_upload
+        // is true only for a real upload this run (Done with no
+        // duplicate_reason); a Done that carries a duplicate_reason came
+        // from the cache or a load-time reconcile (uploaded in an EARLIER
+        // session, only re-confirmed now). None means the status didn't
+        // change kind, or it was already terminal / already counted.
         let became_terminal = self.with_mut(|items| {
             if let Some(existing) = items.iter_mut().find(|i| i.path == path) {
                 let was_terminal = is_terminal(existing.status);
                 f(existing);
                 if !was_terminal && is_terminal(existing.status) {
-                    Some(existing.status)
+                    Some((existing.status, existing.duplicate_reason.is_none()))
                 } else {
                     None
                 }
@@ -474,24 +498,32 @@ impl UploadState {
                 let mut new = PendingUpload::new(path.to_path_buf(), filename.to_string());
                 f(&mut new);
                 let final_status = new.status;
+                let fresh_upload = new.duplicate_reason.is_none();
                 items.insert(0, new);
                 if items.len() > QUEUE_CAP {
                     items.truncate(QUEUE_CAP);
                 }
                 if is_terminal(final_status) {
-                    Some(final_status)
+                    Some((final_status, fresh_upload))
                 } else {
                     None
                 }
             }
         });
-        if let Some(status) = became_terminal {
+        if let Some((status, fresh_upload)) = became_terminal {
             self.processed_count.fetch_add(1, Ordering::AcqRel);
             match status {
-                UploadStatus::Done => { self.done_count.fetch_add(1, Ordering::AcqRel); }
-                UploadStatus::Duplicate => { self.duplicate_count.fetch_add(1, Ordering::AcqRel); }
+                // Only a real, this-session upload counts as "uploaded".
+                UploadStatus::Done if fresh_upload => { self.done_count.fetch_add(1, Ordering::AcqRel); }
                 UploadStatus::Error => { self.error_count.fetch_add(1, Ordering::AcqRel); }
-                _ => {}
+                // Duplicate, or a Done re-confirmed from cache: "already
+                // backed up" - it did not touch the network this run.
+                _ => { self.duplicate_count.fetch_add(1, Ordering::AcqRel); }
+            }
+            // Remember successful confirmations so the periodic rescan
+            // skips them next time round (Errors stay eligible for retry).
+            if matches!(status, UploadStatus::Done | UploadStatus::Duplicate) {
+                self.handled.lock().unwrap().insert(path.to_path_buf());
             }
         }
         self.dirty.store(true, Ordering::Release);
@@ -895,14 +927,12 @@ async fn handle_file(
         .unwrap_or("")
         .to_string();
 
-    // Skip files that already made it up in a previous session - identified
-    // by presence in state with Done/Duplicate status.
-    let already_present = state.with_mut(|items| {
-        items
-            .iter()
-            .any(|i| i.path == path && matches!(i.status, UploadStatus::Done | UploadStatus::Duplicate))
-    });
-    if already_present {
+    // Skip files already confirmed backed up earlier THIS session. The
+    // session-wide `handled` set (unlike the QUEUE_CAP-bounded visible
+    // queue) doesn't forget a file once it scrolls out of view, so the
+    // periodic rescan no longer re-confirms - and re-counts - the whole
+    // library every PERIODIC_RESCAN_SECS.
+    if state.is_handled(&path) {
         return;
     }
 
