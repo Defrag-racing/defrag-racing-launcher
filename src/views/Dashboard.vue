@@ -18,7 +18,6 @@
     import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
     import { useRouter } from 'vue-router';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { getVersion } from '@tauri-apps/api/app';
     import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
     import { LazyStore } from '@tauri-apps/plugin-store';
     import {
@@ -29,14 +28,11 @@
         type RenderStatusResponse,
     } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
-    import { useUpdaterStore } from '../stores/updater';
-    import { fetchChangelogSince, renderMarkdown, type ChangelogSection } from '../lib/changelog';
     import DemosFolderChip from '../components/DemosFolderChip.vue';
     import TokenFeatureList from '../components/TokenFeatureList.vue';
 
     const router = useRouter();
     const config = useConfigStore();
-    const updater = useUpdaterStore();
 
     // -- live session queue -------------------------------------------
     const queue = ref<UploadStateSnapshot>({
@@ -404,30 +400,6 @@
         }
     };
 
-    // -- what's new ----------------------------------------------------
-    const whatsNewOpen = ref(false);
-    const whatsNewLoading = ref(false);
-    const whatsNewError = ref<string | null>(null);
-    const whatsNewSections = ref<ChangelogSection[]>([]);
-    const whatsNewInstalled = ref<string>('');
-    const renderedBody = (body: string) => renderMarkdown(body);
-    const toggleWhatsNew = async () => {
-        if (whatsNewOpen.value) { whatsNewOpen.value = false; return; }
-        whatsNewOpen.value = true;
-        if (whatsNewSections.value.length > 0) return;
-        whatsNewLoading.value = true;
-        whatsNewError.value = null;
-        try {
-            const installed = await getVersion();
-            whatsNewInstalled.value = installed;
-            whatsNewSections.value = await fetchChangelogSince(installed);
-        } catch (e: any) {
-            whatsNewError.value = e?.toString?.() ?? 'Failed to load changelog';
-        } finally {
-            whatsNewLoading.value = false;
-        }
-    };
-
     // -- rate-limit countdown -----------------------------------------
     const rateLimitResumeAtMs = ref(0);
     const nowMs = ref(Date.now());
@@ -525,8 +497,6 @@
         document.removeEventListener('visibilitychange', onDemosVisibility);
         window.removeEventListener('resize', measureViewport);
     });
-
-    const installUpdate = () => updater.install();
 
     const toggle = async () => {
         toggleError.value = null;
@@ -848,43 +818,8 @@
             </div>
         </div>
 
-        <!-- update banner + what's new -->
-        <div
-            v-if="updater.state.kind === 'available'"
-            class="border-b border-brand-500/20 bg-brand-500/10 text-xs text-brand-300"
-        >
-            <div class="px-5 py-2 flex items-center gap-3">
-                <span>Update <strong>v{{ updater.state.version }}</strong> is available.</span>
-                <button class="ml-auto px-2 py-0.5 rounded bg-white/5 hover:bg-white/10" @click="toggleWhatsNew">
-                    {{ whatsNewOpen ? 'Hide changes' : 'View changes' }}
-                </button>
-                <button class="px-2 py-0.5 rounded bg-brand-500/20 hover:bg-brand-500/30 font-semibold" @click="installUpdate">
-                    Install &amp; restart
-                </button>
-            </div>
-            <div v-if="whatsNewOpen" class="px-5 py-3 border-t border-brand-500/20 bg-black/30 max-h-72 overflow-y-auto">
-                <div v-if="whatsNewLoading" class="text-neutral-400">Loading changelog…</div>
-                <div v-else-if="whatsNewError" class="text-red-300">{{ whatsNewError }}</div>
-                <div v-else-if="whatsNewSections.length === 0" class="text-neutral-400">
-                    Nothing newer than v{{ whatsNewInstalled }} in the changelog yet.
-                </div>
-                <div v-else class="space-y-4">
-                    <section v-for="s in whatsNewSections" :key="s.version">
-                        <h3 class="text-sm font-semibold text-brand-200 mb-1">v{{ s.version }}</h3>
-                        <div class="text-xs text-neutral-200" v-html="renderedBody(s.body)"></div>
-                    </section>
-                </div>
-            </div>
-        </div>
-        <div v-else-if="updater.state.kind === 'downloading'" class="px-5 py-2 border-b border-brand-500/20 bg-brand-500/10 text-xs text-brand-300">
-            Downloading update… {{ updater.state.percent }}%
-        </div>
-        <div v-else-if="updater.state.kind === 'installing'" class="px-5 py-2 border-b border-brand-500/20 bg-brand-500/10 text-xs text-brand-300">
-            Installing… the launcher will restart in a moment.
-        </div>
-        <div v-else-if="updater.state.kind === 'error'" class="px-5 py-2 border-b border-red-500/20 bg-red-500/10 text-xs text-red-300">
-            Update failed: {{ updater.state.message }}
-        </div>
+        <!-- Update banner lives at App level now (shows on every tab),
+             so it's no longer duplicated here. -->
 
         <!-- live backup progress -->
         <div

@@ -7,6 +7,7 @@
     import { useConfigStore } from './stores/config';
     import { useNotificationsStore } from './stores/notifications';
     import { useUpdaterStore } from './stores/updater';
+    import UpdateBanner from './components/UpdateBanner.vue';
 
     const router = useRouter();
     const route = useRoute();
@@ -381,6 +382,15 @@
             <span>{{ launchError }}</span>
             <button class="ml-auto text-neutral-400 hover:text-neutral-200" @click="dismissLaunchError">×</button>
         </p>
+
+        <!-- Update banner - app-level so it shows on every tab, not just
+             Demos. Hidden on the settings route, which mounts its own copy
+             inside the "Check now" card (so the two never stack). Only
+             renders when an update is actually available / in progress, so
+             it adds no chrome the rest of the time. showNav gates it to the
+             same screens as the nav, keeping it off the onboarding /
+             version-mismatch full-screen flows. -->
+        <UpdateBanner v-if="showNav && route.name !== 'settings'" />
 
         <!-- keep-alive: cached views survive tab switches so paginated
              lists + filters + scroll positions stay intact. Each view

@@ -4,6 +4,11 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.26
+
+- The "update available" banner now shows on every tab, not just Demos. It used to live only on the Demos page, so an update was invisible while you were on Servers, Records, Maps, History or Notifications. It's now app-level (with the same View changes / Install & restart actions and inline changelog) and appears wherever you are.
+- Settings' "Check now" is self-contained. When a manual check finds an update, the View changes and Install & restart buttons - plus the full changelog - now appear right there under the button, instead of telling you to go back to the Dashboard.
+
 ## 0.1.25
 
 - Linux: fixed the engine misbehaving (e.g. libcurl and other libraries failing) when launched from the launcher while it worked fine started by hand. When the launcher runs as an AppImage, its startup script prepends the bundled `$APPDIR` libraries onto `LD_LIBRARY_PATH` (and a few module-loader vars) so its own binary finds them - but every process it spawned inherited that and loaded the AppImage's bundled libcurl/glib instead of the system ones. The launcher now hands the engine a clean, shell-equivalent environment (stripping only the AppImage's own additions, leaving anything you set intact), so it loads system libraries exactly as it does when you run the binary yourself.

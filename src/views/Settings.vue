@@ -5,6 +5,7 @@
     import { openUrl } from '@tauri-apps/plugin-opener';
     import { tauri, type EngineCandidate, type HealthItem } from '../lib/tauri';
     import TokenFeatureList from '../components/TokenFeatureList.vue';
+    import UpdateBanner from '../components/UpdateBanner.vue';
     import { useConfigStore } from '../stores/config';
     import { useUpdaterStore } from '../stores/updater';
     import { displayPath } from '../lib/path';
@@ -545,8 +546,8 @@
                 <div class="text-xs text-neutral-500 leading-relaxed">
                     The launcher checks `defrag.racing` and GitHub for a newer signed release
                     on every startup. Required to keep security fixes flowing - cannot be
-                    disabled. When an update is available the dashboard shows an "Install &amp; restart"
-                    banner.
+                    disabled. When an update is available an "Install &amp; restart" banner appears
+                    on every tab - and right here, with the full changelog.
                 </div>
                 <!-- Manual check + next-check countdown. Lives here
                      (not on the main dashboard) because it's a setting-
@@ -557,7 +558,7 @@
                         <span v-if="updater.state.kind === 'checking'" class="text-neutral-300">Checking…</span>
                         <span v-else-if="updater.upToDateToast" class="text-emerald-400">✓ You're on the latest version</span>
                         <span v-else-if="updater.state.kind === 'available'" class="text-brand-300">
-                            Update v{{ updater.state.version }} is available - see Dashboard.
+                            Update v{{ updater.state.version }} is available.
                         </span>
                         <span v-else-if="updater.state.kind === 'error'" class="text-red-300">
                             Last check failed: {{ updater.state.message }}
@@ -572,6 +573,17 @@
                         :disabled="updater.manualBusy"
                         @click="manualCheck"
                     >{{ updater.manualBusy ? 'Checking…' : 'Check now' }}</button>
+                </div>
+
+                <!-- The actionable banner (View changes + Install & restart,
+                     with the inline changelog) right under Check now, so a
+                     manual check that finds an update is self-contained here
+                     instead of pointing the user back to the Dashboard.
+                     Renders nothing when there's no update in flight. The
+                     app-level copy is suppressed on this route so it doesn't
+                     stack with this one. -->
+                <div v-if="updater.state.kind === 'available' || updater.state.kind === 'downloading' || updater.state.kind === 'installing' || updater.state.kind === 'error'" class="-mx-4 -mb-4 mt-1 rounded-b-lg overflow-hidden">
+                    <UpdateBanner />
                 </div>
             </section>
 
