@@ -1,0 +1,11 @@
+<svg width="512" height="512" version="1.1" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+ <defs>
+  <radialGradient id="radialGradient116" cx="256" cy="256" r="208" gradientTransform="matrix(1.5623 .022642 -.022004 1.5183 -138.32 -138.48)" gradientUnits="userSpaceOnUse">
+   <stop stop-color="#ff0000" offset="0"/>
+   <stop stop-color="#030000" offset="1"/>
+  </radialGradient>
+ </defs>
+ <circle cx="256" cy="256" r="228.85" fill="url(#radialGradient116)"/>
+ <path d="m338.28 160.73a128 128 0 0 1 38.004 141.83 128 128 0 0 1-120.28 84.221 128 128 0 0 1-120.28-84.221 128 128 0 0 1 38.004-141.83" fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="bevel" stroke-width="32"/>
+ <path d="m256 285.21v-160" fill="none" stroke="#ffffff" stroke-linecap="round" stroke-width="32"/>
+</svg>

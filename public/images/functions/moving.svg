@@ -1,0 +1,16 @@
+<svg width="512" height="512" version="1.1" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+ <g>
+  <rect x="34.249" y="34.249" width="443.5" height="443.5" fill="#000000" stroke="#000000" stroke-linecap="round" stroke-linejoin="round" stroke-width="36.498"/>
+  <rect x="48" y="48" width="416" height="416" fill="#d8d8d8"/>
+  <rect x="32" y="32" width="16" height="432" fill="#e8e8e8"/>
+  <rect x="48" y="32" width="416" height="16" fill="#e8e8e8"/>
+  <rect x="32" y="464" width="432" height="16" fill="#a9a9a9"/>
+  <rect x="464" y="32" width="16" height="448" fill="#a9a9a9"/>
+  <rect transform="scale(-1,1)" x="-365" y="240" width="220" height="32" fill="#000000"/>
+  <path transform="matrix(0 -.74709 -.74709 0 -73.872 -152.2)" d="m-545.05-172.5-64.952-112.5 129.9-1e-5z" fill="#000000" stroke="#000000" stroke-linecap="round" stroke-linejoin="round" stroke-width="15.999"/>
+  <path transform="matrix(0 -.74709 .74709 0 582.92 -151.2)" d="m-545.05-172.5-64.952-112.5 129.9-1e-5z" fill="#000000" stroke="#000000" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/>
+  <rect transform="matrix(0,-1,-1,0,0,0)" x="-365.98" y="-271.9" width="220" height="32" fill="#000000"/>
+  <path transform="scale(1,-1)" d="m256.9-55.976-48.525-84.047h97.049z" fill="#000000" stroke="#000000" stroke-linecap="round" stroke-linejoin="round" stroke-width="11.953"/>
+  <path d="m255.9 455.02-48.525-84.047h97.049z" fill="#000000" stroke="#000000" stroke-linecap="round" stroke-linejoin="round" stroke-width="11.953"/>
+ </g>
+</svg>

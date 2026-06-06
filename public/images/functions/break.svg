@@ -1,0 +1,28 @@
+<svg width="512" height="512" version="1.1" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+ <defs>
+  <radialGradient id="radialGradient877" cx="260.95" cy="255.69" r="225" gradientTransform="matrix(1.1378 0 0 1.1378 -40.898 -34.919)" gradientUnits="userSpaceOnUse">
+   <stop stop-color="#add8e6" offset="0"/>
+   <stop stop-color="#add8e6" stop-opacity="0" offset="1"/>
+  </radialGradient>
+ </defs>
+ <path d="m343.56 496.56a256 256 0 0 1-321.88-137.46 256 256 0 0 1 116.11-330.18 256 256 0 0 1 337.07 94.269 256 256 0 0 1-72.022 342.51" fill="url(#radialGradient877)" stroke-width="91.418"/>
+ <path d="m260 230 10-110 10-40 20-30" fill="none" stroke="#000000" stroke-width="8"/>
+ <path d="m90 130 50 30 85 95" fill="none" stroke="#000000" stroke-width="8"/>
+ <path d="m420 120-50 80-55 50" fill="none" stroke="#000000" stroke-width="8"/>
+ <path d="m176 200 89 5 45-10 60 5" fill="none" stroke="#000000" stroke-width="8"/>
+ <path d="m500 280h-70l-10-20h-106" fill="none" stroke="#000000" stroke-width="8"/>
+ <path d="m425 185h-20l-13-20" fill="none" stroke="#000000" stroke-width="8"/>
+ <path d="m135 157 1-21" fill="none" stroke="#000000" stroke-width="8"/>
+ <path d="m220 280h-30v-10l-40-10-20-10h-80l-30-30" fill="none" stroke="#000000" stroke-width="8"/>
+ <path d="m280 480v-150" fill="none" stroke="#000000" stroke-width="8"/>
+ <path d="m120 410v-20h20l50-70 40-10" fill="none" stroke="#000000" stroke-width="8"/>
+ <path d="m280 480v-155" fill="none" stroke="#000000" stroke-width="8"/>
+ <path d="m280 350-30-25" fill="none" stroke="#000000" stroke-width="8"/>
+ <path d="m185 425v-15l-15-5-5-15-10-21" fill="none" stroke="#000000" stroke-width="8"/>
+ <path d="m430 390-20-5-5-20-25-5-20-30-30-10-20-10" fill="none" stroke="#000000" stroke-width="8"/>
+ <path d="m360 375v-45" fill="none" stroke="#000000" stroke-width="8"/>
+ <path d="m380 360h-20" fill="none" stroke="#000000" stroke-width="8"/>
+ <path d="m360 330v-70" fill="none" stroke="#000000" stroke-width="8"/>
+ <path d="m360 290 30-30" fill="none" stroke="#000000" stroke-width="8"/>
+ <path d="m225 255 35-25 55 20-5 60-30 15h-30l-20-15-10-30z" fill="none" stroke="#000000" stroke-width="8"/>
+</svg>

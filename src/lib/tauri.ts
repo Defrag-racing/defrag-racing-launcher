@@ -392,6 +392,11 @@ export interface MapRow {
     /** Original pk3 filename/path. One pk3 can hold several maps, so the
      *  offline-run download keys off this, not the map name. */
     pk3: string | null;
+    /** Comma-separated weapon / item / function codes (e.g. "rl,gl,lg"),
+     *  rendered as icons over the thumbnail. See lib/mapIcons. */
+    weapons: string | null;
+    items: string | null;
+    functions: string | null;
 }
 
 export interface MapRunResult {

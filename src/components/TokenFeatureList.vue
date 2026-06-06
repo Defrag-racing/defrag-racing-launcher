@@ -9,5 +9,7 @@
     <li>• YouTube renders straight from the Demos list</li>
     <li>• Server browser with your PB and rank per map</li>
     <li>• Records and Maps tabs (times + your rank)</li>
+    <li>• Maps tab: weapon/item/function icons + "Run offline" (auto-downloads any map and plays it in VQ3/CPM)</li>
+    <li>• Map history - which maps played on the servers you joined</li>
     <li>• Record + system notifications from defrag.racing</li>
 </template>

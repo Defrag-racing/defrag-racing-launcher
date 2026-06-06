@@ -4,6 +4,11 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.32
+
+- Maps tab now shows each map's weapons, items and functions as small icons over the thumbnail (same icon set as the website). The icons are bundled with the launcher, so the grid doesn't fire a network request per icon. Needs the Maps tab, which is token-gated like before.
+- Onboarding's feature list is updated to cover everything that's been added - run-any-map-offline, map history, the Maps icons, and Developer mode - so new users see the full picture. The same expanded list now also shows in the "skip the token" confirmation and on the final screen after skipping, so people who go token-less still see what the launcher does.
+
 ## 0.1.31
 
 - Maps tab: the offline-run controls are clearer. The "Run offline" row now reads "▶ Click to run offline instantly" on its own line above the VQ3 / CPM buttons, so it's obvious what the buttons do without crowding the card.

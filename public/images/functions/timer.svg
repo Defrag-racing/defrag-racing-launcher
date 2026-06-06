@@ -1,0 +1,34 @@
+<svg width="512" height="512" version="1.1" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+ <defs>
+  <linearGradient id="linearGradient894" x1="110" x2="390" y1="150" y2="420" gradientUnits="userSpaceOnUse">
+   <stop stop-color="#c8c8c8" offset="0"/>
+   <stop stop-color="#ffffff" offset=".50191"/>
+   <stop stop-color="#c8c8c8" offset="1"/>
+  </linearGradient>
+  <radialGradient id="radialGradient940" cx="256" cy="290" r="214" gradientTransform="translate(0 2.0678e-5)" gradientUnits="userSpaceOnUse">
+   <stop stop-color="#000000" offset="0"/>
+   <stop stop-color="#000000" offset=".81308"/>
+   <stop stop-color="#808080" offset=".90654"/>
+   <stop stop-color="#000000" offset="1"/>
+  </radialGradient>
+  <radialGradient id="radialGradient954" cx="256" cy="32" r="48" gradientTransform="matrix(1.75 4.4666e-7 -1.3116e-7 .5 -192 16)" gradientUnits="userSpaceOnUse">
+   <stop stop-color="#808080" offset="0"/>
+   <stop stop-color="#000000" offset="1"/>
+  </radialGradient>
+  <radialGradient id="radialGradient962" cx="391.16" cy="-228.23" r="37" gradientTransform="matrix(1.8502 -.13817 .040255 .53904 -323.37 -51.16)" gradientUnits="userSpaceOnUse">
+   <stop stop-color="#808080" offset="0"/>
+   <stop stop-color="#000000" offset="1"/>
+  </radialGradient>
+ </defs>
+ <g>
+  <ellipse cx="256" cy="290" rx="194" ry="194" fill="url(#linearGradient894)" stroke="url(#radialGradient940)" stroke-linecap="round" stroke-linejoin="round" stroke-width="40"/>
+  <rect x="221.56" y="21.564" width="68.871" height="20.871" fill="#ffffff" stroke="url(#radialGradient954)" stroke-linecap="round" stroke-linejoin="round" stroke-width="27.129"/>
+  <rect transform="rotate(45)" x="365.13" y="-237.26" width="52.06" height="18.06" fill="#ffffff" stroke="url(#radialGradient962)" stroke-linecap="round" stroke-linejoin="round" stroke-width="21.94"/>
+  <rect x="254.32" y="126.32" width="3.3505" height="19.35" fill="#808080" stroke="#000000" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.6496"/>
+  <rect x="254.32" y="434.32" width="3.3505" height="19.35" fill="#808080" stroke="#000000" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.6496"/>
+  <rect transform="rotate(90)" x="288.32" y="-111.68" width="3.3505" height="19.35" fill="#808080" stroke="#000000" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.6496"/>
+  <rect transform="rotate(90)" x="288.32" y="-419.68" width="3.3505" height="19.35" fill="#808080" stroke="#000000" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.6496"/>
+  <circle cx="256" cy="290" r="16" fill="#000000"/>
+  <rect transform="rotate(-45)" x="-38.891" y="385.37" width="166.18" height="2.1831" fill="#000000" stroke="#000000" stroke-linecap="round" stroke-linejoin="round" stroke-width="13.817" style="paint-order:normal"/>
+ </g>
+</svg>

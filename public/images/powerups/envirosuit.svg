@@ -1,0 +1,13 @@
+<svg width="512" height="512" version="1.1" viewBox="0 0 135.47 135.47" xmlns="http://www.w3.org/2000/svg" xmlns:osb="http://www.openswatchbook.org/uri/2009/osb" xmlns:xlink="http://www.w3.org/1999/xlink">
+ <defs>
+  <radialGradient id="radialGradient3119" cx="67.735" cy="66.971" r="43.922" gradientTransform="matrix(3.7339 .1568 -.26092 6.2133 20.558 -173.62)" gradientUnits="userSpaceOnUse">
+   <stop stop-color="#ffa700" stop-opacity=".8" offset="0"/>
+   <stop stop-color="#ffa700" offset="1"/>
+  </radialGradient>
+ </defs>
+ <text font-family="sans-serif" font-size="10.584px" word-spacing="0px" style="line-height:1.25;shape-inside:url(#rect38);white-space:pre" xml:space="preserve"/>
+ <path transform="scale(.26459)" d="m150.17 6.9434c-1.3134-0.028678-2.6699 0.30664-4.1699 1.0566-6.5148 3-42 28.787-52 32l-4 270c7.1408 64.267 32 189.29 166 189.29 134 0.04278 159-125.29 166-189.29l-4-270c-12.496-5.6234-45-28-52-32-4-2-7.2114-1.0002-10.885 1.9824-43.562 35.37-152.62 34.413-198.26-0.097656-2.426-1.8343-4.4966-2.8936-6.6856-2.9414zm105.92 86.057a112 112 0 0 1 55.908 15.006l-32 55.426a48 48 0 0 0-24-6.4316 48 48 0 0 0-24 6.4316l-32-55.426a112 112 0 0 1 56.092-15.006zm-112.09 112h64a48 48 0 0 0 24 41.568l-32 55.426a112 112 0 0 1-56-96.994zm160 0h64a112 112 0 0 1-56 96.994l-32-55.426a48 48 0 0 0 24-41.568z" fill="url(#radialGradient3119)" style="mix-blend-mode:normal;paint-order:normal"/>
+ <path transform="scale(.26459)" d="m256.09 93a112 112 45 0 0-56.092 15.006l32 55.426a48 48 0 0 1 24-6.4316 48 48 0 0 1 24 6.4316l32-55.426a112 112 45 0 0-55.908-15.006z" fill="none" stroke="#ffa700" stroke-width="4"/>
+ <path transform="scale(.26459)" d="m304 205a48 48 0 0 1-24 41.568l32 55.426a112 112 0 0 0 56-96.994h-64z" fill="none" stroke="#ffa700" stroke-width="4"/>
+ <path transform="scale(.26459)" d="m144 205a112 112 45 0 0 56 96.994l32-55.426a48 48 0 0 1-24-41.568h-64z" fill="none" stroke="#ffa700" stroke-width="4"/>
+</svg>

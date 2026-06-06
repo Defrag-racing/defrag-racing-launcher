@@ -202,7 +202,11 @@
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
-                            <span><strong>Records &amp; Maps</strong> - paginated leaderboards (VQ3 + CPM side-by-side) and the full map list with thumbnails.</span>
+                            <span><strong>Records &amp; Maps</strong> - paginated leaderboards (VQ3 + CPM side-by-side) and the full map list with thumbnails, weapon/item/function icons and per-map info.</span>
+                        </li>
+                        <li class="flex gap-2">
+                            <span class="text-brand-400 mt-0.5">•</span>
+                            <span><strong>Run any map offline</strong> - one click on a map's <strong>VQ3</strong> / <strong>CPM</strong> button downloads it (if you don't have it) and launches straight into it.</span>
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
@@ -210,11 +214,15 @@
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
-                            <span><strong>History</strong> - log of every <code class="text-xs bg-black/40 px-1 rounded">defrag://</code> server you joined, one-click Reconnect.</span>
+                            <span><strong>History</strong> - log of every <code class="text-xs bg-black/40 px-1 rounded">defrag://</code> server you joined, one-click Reconnect, plus the maps that played while you were on each server.</span>
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
                             <span><strong><code class="text-xs bg-black/40 px-1 rounded">defrag://</code> links</strong> - click "Join" on the website, the launcher asks you to confirm, your engine launches.</span>
+                        </li>
+                        <li class="flex gap-2">
+                            <span class="text-brand-400 mt-0.5">•</span>
+                            <span><strong>Developer mode</strong> - optional: add custom engine launch arguments and your own named Quick-launch profiles (in Settings).</span>
                         </li>
                     </ul>
                     <p class="text-xs text-neutral-500 leading-relaxed pt-1">

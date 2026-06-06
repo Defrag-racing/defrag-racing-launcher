@@ -1,0 +1,25 @@
+<svg width="512" height="512" version="1.1" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+ <defs>
+  <radialGradient id="radialGradient889" cx="256" cy="256" r="248" gradientTransform="matrix(.45968 .0080645 -.016424 .23404 142.53 294.02)" gradientUnits="userSpaceOnUse" spreadMethod="reflect">
+   <stop stop-color="#8e8e8e" offset="0"/>
+   <stop stop-color="#666666" offset="1"/>
+  </radialGradient>
+  <radialGradient id="radialGradient32" cx="256" cy="256" r="248" gradientTransform="matrix(.45968 .0064516 -.016424 .18723 142.53 306.42)" gradientUnits="userSpaceOnUse" spreadMethod="reflect">
+   <stop stop-color="#c8c8c8" offset="0"/>
+   <stop stop-color="#8e8e8e" offset="1"/>
+  </radialGradient>
+  <linearGradient id="linearGradient962" x1="961.76" x2="1511.2" y1="12.61" y2="12.61" gradientTransform="rotate(150 748.04 38.898)" gradientUnits="userSpaceOnUse">
+   <stop stop-color="#ffff00" offset="0"/>
+   <stop stop-color="#ff0000" offset="1"/>
+  </linearGradient>
+ </defs>
+ <g>
+  <circle cx="256" cy="356" rx="248" ry="124" fill="url(#radialGradient889)" stroke-width="0"/>
+  <circle cx="256" cy="356" rx="200" ry="100" fill="#7a7a7a" stroke-width="0"/>
+  <circle cx="256" cy="356" rx="24" ry="12" fill="#f7d505" stroke-width="0"/>
+  <ellipse cx="256" cy="356" rx="248" ry="99.2" fill="url(#radialGradient32)" stroke="#000000" stroke-linecap="round" stroke-linejoin="bevel" stroke-width="8"/>
+  <ellipse cx="256" cy="356" rx="200" ry="80" fill="#c8c8c8" stroke="#000000" stroke-linecap="round" stroke-linejoin="bevel" stroke-width="8"/>
+  <ellipse cx="256" cy="356" rx="32" ry="12.8" fill="#f7d505" stroke-width="0"/>
+  <path d="m354.69 14.474 20.013 37.773c-4.1004 2.3429-8.1648 4.7596-12.191 7.2525-55.663 35.521-100.33 83.306-133.22 137.77l21.029 36.424c35.305-54.338 82.51-99.431 138.76-128.16 3.6104-1.9158 7.2493-3.761 10.915-5.5326l20.012 37.776c8.7961-18.18 20.091-35.804 33.601-52.59 13.51-16.787 29.237-32.736 46.899-47.566-21.674-7.8802-44.731-14.006-69.069-17.991-24.339-3.9861-49.959-5.8315-76.757-5.1538zm-82.02 172.09c-36.586-32.528-78.339-58.899-122.83-78.311-35.084-15.308-71.868-26.289-109.15-32.554l-3.6831 17.571c35.199 8.9261 69.244 22.251 101.07 39.312 34.763 18.637 66.869 41.735 94.934 68.418zm-445.87-91.243c-2.1055 0.81785-4.2034 1.6556-6.2953 2.5137 2.1541-0.6873 4.3114-1.353 6.4725-1.9983z" fill="url(#linearGradient962)"/>
+ </g>
+</svg>

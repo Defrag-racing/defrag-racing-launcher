@@ -8,6 +8,12 @@
     import { tauri, type MapRow, type Paginated } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
     import { openExternal } from '../lib/open';
+    import {
+        splitCodes,
+        weaponIcon, weaponName,
+        itemIcon, itemName,
+        functionIcon, functionName,
+    } from '../lib/mapIcons';
 
     const config = useConfigStore();
 
@@ -136,6 +142,12 @@
     };
     const isRunning = (id: number, physics: string) => runningKey.value === keyOf(id, physics);
 
+    // Hide an icon whose SVG is missing (unknown code with no bundled
+    // file) instead of showing a broken-image glyph over the thumbnail.
+    const onIconError = (e: Event) => {
+        (e.target as HTMLImageElement).style.display = 'none';
+    };
+
     const formatDate = (s: string | null): string => {
         if (!s) return '';
         const d = new Date(s.replace(' ', 'T') + 'Z');
@@ -208,7 +220,7 @@
                         class="bg-neutral-900/40 border border-white/10 rounded-lg overflow-hidden flex flex-col hover:border-brand-500/40 transition-colors"
                     >
                         <button
-                            class="aspect-video bg-black/40 overflow-hidden flex items-center justify-center"
+                            class="relative aspect-video bg-black/40 overflow-hidden flex items-center justify-center"
                             :title="`Open ${m.name} on defrag.racing`"
                             @click="openMap(m.name)"
                         >
@@ -221,6 +233,47 @@
                             />
                             <div v-else class="text-[10px] text-neutral-600 uppercase">
                                 no thumbnail
+                            </div>
+
+                            <!-- Weapons / items / functions icons over the
+                                 thumbnail (bundled SVGs from defrag.racing).
+                                 Stacked bottom-right so they don't cover the
+                                 in-image map name (bottom-left). Clicks still
+                                 bubble to the button -> open the map page. -->
+                            <div class="absolute bottom-1 right-1 flex flex-col items-end gap-0.5">
+                                <div v-if="splitCodes(m.weapons).length" class="flex flex-wrap justify-end gap-0.5 max-w-[60%] bg-black/70 rounded px-1 py-0.5">
+                                    <img
+                                        v-for="c in splitCodes(m.weapons)"
+                                        :key="`w-${c}`"
+                                        :src="weaponIcon(c)"
+                                        :alt="weaponName(c)"
+                                        :title="weaponName(c)"
+                                        class="w-3.5 h-3.5"
+                                        @error="onIconError"
+                                    />
+                                </div>
+                                <div v-if="splitCodes(m.items).length" class="flex flex-wrap justify-end gap-0.5 max-w-[60%] bg-black/70 rounded px-1 py-0.5">
+                                    <img
+                                        v-for="c in splitCodes(m.items)"
+                                        :key="`i-${c}`"
+                                        :src="itemIcon(c)"
+                                        :alt="itemName(c)"
+                                        :title="itemName(c)"
+                                        class="w-3.5 h-3.5"
+                                        @error="onIconError"
+                                    />
+                                </div>
+                                <div v-if="splitCodes(m.functions).length" class="flex flex-wrap justify-end gap-0.5 max-w-[70%] bg-black/70 rounded px-1 py-0.5">
+                                    <img
+                                        v-for="c in splitCodes(m.functions)"
+                                        :key="`f-${c}`"
+                                        :src="functionIcon(c)"
+                                        :alt="functionName(c)"
+                                        :title="functionName(c)"
+                                        class="w-3.5 h-3.5"
+                                        @error="onIconError"
+                                    />
+                                </div>
                             </div>
                         </button>
                         <div class="p-2 flex-1 flex flex-col">
