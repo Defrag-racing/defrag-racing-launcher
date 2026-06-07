@@ -61,17 +61,36 @@ pub struct OfflineMapPage {
 
 const LEVELSHOT_EXTS: [&str; 4] = ["jpg", "jpeg", "png", "tga"];
 
-fn baseq3_dir(engine_path: &Path) -> Option<PathBuf> {
-    engine_path.parent().map(|d| d.join("baseq3"))
+/// Game dirs the engine searches for pk3s. The engine always adds the
+/// basegame (`baseq3`) regardless of `fs_game`, plus the active mod dir
+/// (`defrag`) - see oDFe `FS_Startup` (code/qcommon/files.c). Defrag's own
+/// map auto-download writes into the `defrag` folder, so maps live in both;
+/// scanning only baseq3 (the old behaviour) missed every map under defrag.
+/// `fs_game` is passed on the command line (not saved to config), and this
+/// is a defrag-only launcher, so the candidate mod dir is fixed to "defrag".
+///
+/// Existing game directories under the engine's install folder, in engine
+/// search-priority order (mod dir wins over basegame, so list it first).
+fn game_dirs(engine_path: &Path) -> Vec<PathBuf> {
+    let Some(install) = engine_path.parent() else { return Vec::new() };
+    // defrag before baseq3 so a map present in both is listed from the dir
+    // the engine would actually load it from.
+    ["defrag", "baseq3"]
+        .iter()
+        .map(|d| install.join(d))
+        .filter(|p| p.is_dir())
+        .collect()
 }
 
-/// Cheap change-detection signature for baseq3: the sorted set of pk3
-/// (name, size, mtime). Metadata only - no zip is opened - so this is fast
-/// even with thousands of files and lets us skip the expensive scan when
-/// nothing changed since the cached manifest was built.
-fn signature(baseq3: &Path) -> String {
-    let mut entries: Vec<(String, u64, u64)> = Vec::new();
-    if let Ok(rd) = std::fs::read_dir(baseq3) {
+/// Cheap change-detection signature across all game dirs: the sorted set of
+/// pk3 (dir, name, size, mtime). Metadata only - no zip is opened - so this
+/// is fast even with thousands of files and lets us skip the expensive scan
+/// when nothing changed since the cached manifest was built.
+fn signature(dirs: &[PathBuf]) -> String {
+    let mut entries: Vec<(String, String, u64, u64)> = Vec::new();
+    for dir in dirs {
+        let dir_key = dir.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+        let Ok(rd) = std::fs::read_dir(dir) else { continue };
         for ent in rd.flatten() {
             let path = ent.path();
             let is_pk3 = path
@@ -95,7 +114,7 @@ fn signature(baseq3: &Path) -> String {
                     (md.len(), mtime)
                 })
                 .unwrap_or((0, 0));
-            entries.push((name, len, mtime));
+            entries.push((dir_key.clone(), name, len, mtime));
         }
     }
     entries.sort();
@@ -106,8 +125,8 @@ fn signature(baseq3: &Path) -> String {
 
 #[derive(Serialize, Deserialize)]
 struct Manifest {
-    /// Which baseq3 this manifest describes (so switching engines rebuilds).
-    baseq3: String,
+    /// Install dir this manifest describes (so switching engines rebuilds).
+    install: String,
     /// signature() at build time.
     signature: String,
     maps: Vec<OfflineMap>,
@@ -134,66 +153,73 @@ fn save_manifest(m: &Manifest) {
     }
 }
 
-/// The expensive scan: open every pk3 and read its zip directory to collect
-/// `maps/*.bsp` names + which have levelshots. Runs only on a cache miss.
-fn scan(baseq3: &Path) -> Vec<OfflineMap> {
+/// The expensive scan: open every pk3 across the game dirs and read its zip
+/// directory to collect `maps/*.bsp` names + which have levelshots. Runs only
+/// on a cache miss. A pk3 with no `maps/*.bsp` entry contributes nothing (a
+/// texture/sound/config pack is naturally ignored). Maps are deduplicated by
+/// name across dirs - `dirs` is in engine priority order, so the first
+/// occurrence (the one the engine would load) wins.
+fn scan(dirs: &[PathBuf]) -> Vec<OfflineMap> {
     let mut out: Vec<OfflineMap> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
 
-    let rd = match std::fs::read_dir(baseq3) {
-        Ok(rd) => rd,
-        Err(_) => return out, // no baseq3 yet -> empty list, not an error
-    };
+    for dir in dirs {
+        let Ok(rd) = std::fs::read_dir(dir) else { continue };
+        for ent in rd.flatten() {
+            let path = ent.path();
+            let is_pk3 = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("pk3"))
+                .unwrap_or(false);
+            if !is_pk3 {
+                continue;
+            }
+            let Ok(file) = File::open(&path) else { continue };
+            let Ok(zip) = zip::ZipArchive::new(file) else { continue };
 
-    for ent in rd.flatten() {
-        let path = ent.path();
-        let is_pk3 = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.eq_ignore_ascii_case("pk3"))
-            .unwrap_or(false);
-        if !is_pk3 {
-            continue;
-        }
-        let Ok(file) = File::open(&path) else { continue };
-        let Ok(zip) = zip::ZipArchive::new(file) else { continue };
+            // (display-case name, lowercase stem) for each map; lowercase
+            // levelshot stems present in the pk3.
+            let mut maps: Vec<(String, String)> = Vec::new();
+            let mut levelshots: HashSet<String> = HashSet::new();
 
-        // (display-case name, lowercase stem) for each map; lowercase
-        // levelshot stems present in the pk3.
-        let mut maps: Vec<(String, String)> = Vec::new();
-        let mut levelshots: HashSet<String> = HashSet::new();
-
-        for raw in zip.file_names() {
-            let lower = raw.to_ascii_lowercase();
-            if let Some(stem) = lower.strip_prefix("maps/").and_then(|r| r.strip_suffix(".bsp")) {
-                if !stem.is_empty() && !stem.contains('/') {
-                    // keep the original-case basename for display
-                    let disp = Path::new(raw)
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or(stem)
-                        .to_string();
-                    maps.push((disp, stem.to_string()));
-                }
-            } else if let Some(rest) = lower.strip_prefix("levelshots/") {
-                if let Some(dot) = rest.rfind('.') {
-                    let stem = &rest[..dot];
-                    let ext = &rest[dot + 1..];
-                    if !stem.contains('/') && LEVELSHOT_EXTS.contains(&ext) {
-                        levelshots.insert(stem.to_string());
+            for raw in zip.file_names() {
+                let lower = raw.to_ascii_lowercase();
+                if let Some(stem) = lower.strip_prefix("maps/").and_then(|r| r.strip_suffix(".bsp")) {
+                    if !stem.is_empty() && !stem.contains('/') {
+                        // keep the original-case basename for display
+                        let disp = Path::new(raw)
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or(stem)
+                            .to_string();
+                        maps.push((disp, stem.to_string()));
+                    }
+                } else if let Some(rest) = lower.strip_prefix("levelshots/") {
+                    if let Some(dot) = rest.rfind('.') {
+                        let stem = &rest[..dot];
+                        let ext = &rest[dot + 1..];
+                        if !stem.contains('/') && LEVELSHOT_EXTS.contains(&ext) {
+                            levelshots.insert(stem.to_string());
+                        }
                     }
                 }
             }
-        }
 
-        let pk3_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
-        let pk3_path = path.to_string_lossy().to_string();
-        for (disp, stem) in maps {
-            out.push(OfflineMap {
-                has_levelshot: levelshots.contains(&stem),
-                name: disp,
-                pk3: pk3_name.clone(),
-                pk3_path: pk3_path.clone(),
-            });
+            let pk3_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+            let pk3_path = path.to_string_lossy().to_string();
+            for (disp, stem) in maps {
+                // dedup by map name across dirs (engine loads one of them)
+                if !seen.insert(stem.clone()) {
+                    continue;
+                }
+                out.push(OfflineMap {
+                    has_levelshot: levelshots.contains(&stem),
+                    name: disp,
+                    pk3: pk3_name.clone(),
+                    pk3_path: pk3_path.clone(),
+                });
+            }
         }
     }
 
@@ -201,23 +227,28 @@ fn scan(baseq3: &Path) -> Vec<OfflineMap> {
     out
 }
 
-/// Full list of every `maps/*.bsp` across the pk3s in baseq3. Served from
-/// the on-disk manifest when the baseq3 contents are unchanged; only a
-/// genuine change (added/removed/modified pk3) triggers the heavy scan.
+/// Full list of every `maps/*.bsp` across the pk3s in the engine's game dirs
+/// (baseq3 + defrag). Served from the on-disk manifest when nothing changed;
+/// only a genuine change (added/removed/modified pk3 in either dir) triggers
+/// the heavy scan.
 pub fn list(engine_path: &Path) -> Result<Vec<OfflineMap>> {
-    let baseq3 = baseq3_dir(engine_path).context("engine path has no parent")?;
-    let baseq3_key = baseq3.to_string_lossy().to_string();
-    let sig = signature(&baseq3);
+    let install = engine_path
+        .parent()
+        .context("engine path has no parent")?
+        .to_string_lossy()
+        .to_string();
+    let dirs = game_dirs(engine_path);
+    let sig = signature(&dirs);
 
     if let Some(m) = load_manifest() {
-        if m.baseq3 == baseq3_key && m.signature == sig {
+        if m.install == install && m.signature == sig {
             return Ok(m.maps);
         }
     }
 
-    let maps = scan(&baseq3);
+    let maps = scan(&dirs);
     save_manifest(&Manifest {
-        baseq3: baseq3_key,
+        install,
         signature: sig,
         maps: maps.clone(),
     });

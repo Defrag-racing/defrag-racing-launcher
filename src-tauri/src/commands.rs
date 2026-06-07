@@ -982,6 +982,40 @@ pub async fn offline_map_thumb(pk3_path: String, map_name: String) -> Result<Opt
     .map_err(err_to_string)?
 }
 
+/// Resolve the render resolution/aspect the engine would use for the
+/// embedded demo player, by reading the user's video cvars from their
+/// config (mirrors the engine's `CL_GetModeInfo`). The launcher sizes the
+/// embedded render region to this aspect so the demo isn't stretched and
+/// the defrag HUD/FOV match what the player normally sees. `desktop_w/h`
+/// come from the frontend (screen size). Engine path defaults to the
+/// configured one; fs_game defaults to "defrag".
+#[tauri::command]
+pub fn engine_demo_resolution(
+    desktop_w: i32,
+    desktop_h: i32,
+    fs_game: Option<String>,
+) -> Result<crate::engine_video::RenderTarget, String> {
+    let cfg = Config::load().map_err(err_to_string)?;
+    let engine = cfg
+        .engine_path
+        .ok_or_else(|| "No engine configured - pick one in Settings first.".to_string())?;
+    let install = engine
+        .parent()
+        .ok_or_else(|| "engine path has no parent".to_string())?;
+    let game = fs_game.unwrap_or_else(|| "defrag".to_string());
+
+    // Exec order: <install>/<fs_game>/q3config.cfg then autoexec.cfg (later
+    // wins), matching how the engine loads them.
+    let game_dir = install.join(&game);
+    let q3config = game_dir.join("q3config.cfg");
+    let autoexec = game_dir.join("autoexec.cfg");
+    let paths: Vec<&std::path::Path> = vec![q3config.as_path(), autoexec.as_path()];
+
+    let cvars = crate::engine_video::parse_configs(&paths);
+    crate::engine_video::resolve(&cvars, desktop_w, desktop_h)
+        .ok_or_else(|| "Could not resolve a valid video mode from the config.".to_string())
+}
+
 /// Open an external URL in the user's browser. Routed through Rust (not
 /// the JS opener plugin directly) so the Linux/AppImage path can launch
 /// the browser with a clean environment - see protocol::open_external_url.

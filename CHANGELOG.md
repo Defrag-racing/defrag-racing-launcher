@@ -4,6 +4,11 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.35
+
+- **Offline Maps now finds maps in the `defrag` folder too, not just `baseq3`.** The engine loads pk3s from both the base game folder and the active mod folder (defrag), so maps you have under `defrag\` - e.g. ones auto-downloaded in-game - were being missed by the Offline tab. It now scans both folders and de-duplicates by map name (the copy the engine would actually load wins). A pk3 with no `maps/*.bsp` inside (texture/sound/config packs) is ignored, as before.
+- No change to "Run offline" downloads: maps still download into `baseq3`, which the engine always reads regardless of `fs_game` - so a one-click offline map downloads first, then launches, and is always found.
+
 ## 0.1.34
 
 - **Offline Maps no longer hammers the disk.** On big libraries the tab used to re-open *every* pk3 in baseq3 on each visit to read its index, pinning the disk at 100% and freezing the app for seconds to minutes. Now the full scan runs only **once** and is cached to a manifest on disk; re-opening the tab just does a cheap metadata check (file size/date) and reuses the cached list unless baseq3 actually changed. The scan also runs off the UI thread, so it never freezes the window.
