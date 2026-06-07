@@ -46,6 +46,8 @@ pub struct AppState {
     /// logs the maps that server rotates through, onto the matching
     /// history entry, for the life of the process.
     pub session_tracker: Arc<crate::session_tracker::SessionTracker>,
+    /// The (at most one) active embedded demo-player session.
+    pub demo_player: crate::demo_player::DemoPlayer,
 }
 
 impl Default for AppState {
@@ -64,6 +66,7 @@ impl Default for AppState {
             last_deep_link: Mutex::new(None),
             history,
             session_tracker,
+            demo_player: crate::demo_player::DemoPlayer::default(),
         }
     }
 }
@@ -1014,6 +1017,77 @@ pub fn engine_demo_resolution(
     let cvars = crate::engine_video::parse_configs(&paths);
     crate::engine_video::resolve(&cvars, desktop_w, desktop_h)
         .ok_or_else(|| "Could not resolve a valid video mode from the config.".to_string())
+}
+
+/// One `.dm_68` demo available to the embedded player. `rel` is the path the
+/// engine's `+demo` arg wants - relative to `defrag/demos`, forward-slashed,
+/// extension kept; `name` is the bare filename for display.
+#[derive(serde::Serialize)]
+pub struct PlayerDemo {
+    pub rel: String,
+    pub name: String,
+    pub size: u64,
+    pub modified_ms: u64,
+}
+
+/// List the `.dm_68` demos the embedded player can open: everything under the
+/// engine install's `defrag/demos` folder (recursively), since that's where the
+/// bundled player engine looks (`fs_game defrag`, `fs_basepath <install>`).
+/// Independent of the upload watcher's configured demos_path - the player needs
+/// files the engine itself can resolve. Newest first.
+#[tauri::command]
+pub fn list_player_demos() -> Result<Vec<PlayerDemo>, String> {
+    use std::time::UNIX_EPOCH;
+    let cfg = Config::load().map_err(err_to_string)?;
+    let engine = cfg
+        .engine_path
+        .ok_or_else(|| "No engine configured - pick one in Settings first.".to_string())?;
+    let install = engine
+        .parent()
+        .ok_or_else(|| "Engine path has no parent folder.".to_string())?;
+    let demos = install.join("defrag").join("demos");
+    if !demos.is_dir() {
+        return Err(format!(
+            "No demos folder found at {} - play a Defrag run first, or check your engine path.",
+            demos.display()
+        ));
+    }
+
+    let mut out = Vec::new();
+    for e in walkdir::WalkDir::new(&demos)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+    {
+        let p = e.path();
+        let is_dm68 = p
+            .extension()
+            .and_then(|x| x.to_str())
+            .map(|s| s.eq_ignore_ascii_case("dm_68"))
+            .unwrap_or(false);
+        if !is_dm68 {
+            continue;
+        }
+        let rel = match p.strip_prefix(&demos) {
+            Ok(r) => r.to_string_lossy().replace('\\', "/"),
+            Err(_) => continue,
+        };
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| rel.clone());
+        let meta = std::fs::metadata(p).ok();
+        let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+        let modified_ms = meta
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        out.push(PlayerDemo { rel, name, size, modified_ms });
+    }
+    out.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms));
+    Ok(out)
 }
 
 /// Open an external URL in the user's browser. Routed through Rust (not

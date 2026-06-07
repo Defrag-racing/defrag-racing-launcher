@@ -262,6 +262,56 @@ export const tauri = {
     // uses a minimal interface (DefragServer below) for the columns it
     // actually renders.
     getServers: () => invoke<{ servers: DefragServer[] }>('get_servers'),
+
+    // ---- Embedded demo player (Windows only) ----------------------------
+    /** Resolve the render width/height/aspect the engine would use for the
+     *  embedded player, from the user's video cvars. The view sizes its
+     *  render region to `aspect` so the HUD/FOV aren't distorted. Pass the
+     *  screen size (for r_mode -2 = desktop). */
+    engineDemoResolution: (desktopW: number, desktopH: number, fsGame?: string) =>
+        invoke<RenderTarget>('engine_demo_resolution', {
+            desktopW,
+            desktopH,
+            fsGame: fsGame ?? null,
+        }),
+    /** List .dm_68 demos under the engine install's defrag/demos folder
+     *  (what the bundled player engine can open). Newest first. */
+    listPlayerDemos: () => invoke<PlayerDemo[]>('list_player_demos'),
+    /** Start (or restart) embedded playback of `demo` (path relative to
+     *  defrag/demos). `region` is the physical-pixel rect of the embed area
+     *  in the main window; `aspect` from engineDemoResolution. Resolves with
+     *  the control port. Errors on non-Windows. */
+    demoPlayerStart: (
+        demo: string,
+        region: { x: number; y: number; w: number; h: number },
+        aspect: number,
+    ) =>
+        invoke<number>('demo_player_start', {
+            demo,
+            x: region.x,
+            y: region.y,
+            w: region.w,
+            h: region.h,
+            aspect,
+        }),
+    /** Send a raw console line to the engine: `timescale 0.5`, `demopause 1`,
+     *  `seekdemo <ms>`, etc. */
+    demoPlayerCommand: (line: string) => invoke<void>('demo_player_command', { line }),
+    /** Reposition the render region (window resize) + re-init the engine
+     *  render window at the new size (vid_restart). */
+    demoPlayerSetRegion: (
+        region: { x: number; y: number; w: number; h: number },
+        aspect: number,
+    ) =>
+        invoke<void>('demo_player_set_region', {
+            x: region.x,
+            y: region.y,
+            w: region.w,
+            h: region.h,
+            aspect,
+        }),
+    /** Stop playback: kill the engine, drop the render window. */
+    demoPlayerStop: () => invoke<void>('demo_player_stop'),
 };
 
 /** Minimal shape for the columns the launcher renders. Mirrors the
@@ -565,4 +615,36 @@ export interface RenderedIndexResponse {
     map: Record<string, string>;
     removed: string[];
     synced_at: number;
+}
+
+// ---- Embedded demo player --------------------------------------------------
+
+/** Render target the engine would use for the embedded player - the view
+ *  sizes its render region to `aspect` (width / (height*pixelAspect)) so the
+ *  defrag HUD/FOV match. Mirrors Rust `engine_video::RenderTarget`. */
+export interface RenderTarget {
+    width: number;
+    height: number;
+    aspect: number;
+}
+
+/** One .dm_68 demo the embedded player can open. `rel` is the path relative
+ *  to defrag/demos (the engine `+demo` arg); `name` is the bare filename. */
+export interface PlayerDemo {
+    rel: string;
+    name: string;
+    size: number;
+    modified_ms: number;
+}
+
+/** Payload of the `demo-player-status` event the engine emits ~10x/sec.
+ *  Playhead = time - start; length = total - start (total is 0 until the
+ *  view seeks once to measure it). */
+export interface DemoPlayerStatus {
+    time: number;
+    start: number;
+    total: number;
+    demo: boolean;
+    paused: boolean;
+    atend: boolean;
 }

@@ -2,6 +2,7 @@ mod api;
 mod cache;
 mod commands;
 mod config;
+mod demo_player;
 mod engine;
 mod engine_video;
 mod hashing;
@@ -232,6 +233,11 @@ pub fn run() {
             commands::list_offline_maps,
             commands::offline_map_thumb,
             commands::engine_demo_resolution,
+            commands::list_player_demos,
+            demo_player::demo_player_start,
+            demo_player::demo_player_command,
+            demo_player::demo_player_set_region,
+            demo_player::demo_player_stop,
             commands::open_url,
             commands::get_servers,
             commands::get_pending_deep_link,

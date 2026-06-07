@@ -94,8 +94,19 @@ env_logger = "0.11"
 # Windows-only: read Steam install path from the registry so engine
 # auto-detect picks up Steam-installed Quake 3 without the user having to
 # hunt for the path. Wrapped in cfg so Linux/Mac builds skip the dep.
+#
+# `windows` backs the embedded demo player: we create a native WS_CHILD
+# "stage" window inside the launcher and hand its HWND to the bundled oDFe
+# engine (in_embedParent) so the demo renders inside our window. Version
+# pinned to what Tauri already resolves (0.61) so the HWND types line up.
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+] }
 
 # single-instance with deep-link forwarding — Windows + Linux only. macOS
 # handles deep links via the native NSURL/AppleEvent path which doesn't

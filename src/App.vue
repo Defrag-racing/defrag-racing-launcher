@@ -338,6 +338,13 @@
                         : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
                 >Maps</RouterLink>
                 <RouterLink
+                    :to="{ name: 'demo-player' }"
+                    class="px-3 py-1.5 text-sm rounded transition-colors"
+                    :class="route.name === 'demo-player'
+                        ? 'bg-white/10 text-neutral-100 font-semibold'
+                        : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
+                >Player</RouterLink>
+                <RouterLink
                     :to="{ name: 'history' }"
                     class="px-3 py-1.5 text-sm rounded transition-colors"
                     :class="route.name === 'history'
