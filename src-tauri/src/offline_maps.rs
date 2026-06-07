@@ -11,17 +11,31 @@
 //! Thumbnails come back as base64 data URLs (the webview can't read
 //! arbitrary local files without asset-protocol scoping) and are cached on
 //! disk so re-opening the tab doesn't re-read the pk3s.
+//!
+//! ## Performance
+//!
+//! Opening every pk3 in baseq3 to read its zip directory is the expensive
+//! part - a defrag player can have thousands of pk3s, and re-scanning them
+//! on every tab open pins the disk at 100%. So the full scan runs **once**
+//! and is cached to a manifest on disk (`offline_maps.json`). Re-opening the
+//! tab only does a cheap metadata pass (read_dir + file len/mtime) to build
+//! a signature; if it matches the cached manifest's signature we reuse the
+//! cached map list and never touch a single zip. The frontend additionally
+//! paginates, so only a page worth of thumbnails is ever extracted.
 
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
 use std::fs::File;
+use std::hash::{Hash, Hasher};
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 use anyhow::{Context, Result};
 use base64::Engine;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct OfflineMap {
     /// Map name = the bsp basename (what you pass to `+vq3` / `+cpm`).
     pub name: String,
@@ -34,21 +48,100 @@ pub struct OfflineMap {
     pub has_levelshot: bool,
 }
 
+/// One page of offline maps for the paginated tab. Mirrors the shape of the
+/// online maps endpoint so the frontend can reuse the same pager.
+#[derive(Serialize)]
+pub struct OfflineMapPage {
+    pub data: Vec<OfflineMap>,
+    pub total: usize,
+    pub current_page: u32,
+    pub last_page: u32,
+    pub per_page: u32,
+}
+
 const LEVELSHOT_EXTS: [&str; 4] = ["jpg", "jpeg", "png", "tga"];
 
 fn baseq3_dir(engine_path: &Path) -> Option<PathBuf> {
     engine_path.parent().map(|d| d.join("baseq3"))
 }
 
-/// List every `maps/*.bsp` across the pk3s in baseq3, each paired with the
-/// pk3 it came from and whether it has a levelshot.
-pub fn list(engine_path: &Path) -> Result<Vec<OfflineMap>> {
-    let baseq3 = baseq3_dir(engine_path).context("engine path has no parent")?;
+/// Cheap change-detection signature for baseq3: the sorted set of pk3
+/// (name, size, mtime). Metadata only - no zip is opened - so this is fast
+/// even with thousands of files and lets us skip the expensive scan when
+/// nothing changed since the cached manifest was built.
+fn signature(baseq3: &Path) -> String {
+    let mut entries: Vec<(String, u64, u64)> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(baseq3) {
+        for ent in rd.flatten() {
+            let path = ent.path();
+            let is_pk3 = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("pk3"))
+                .unwrap_or(false);
+            if !is_pk3 {
+                continue;
+            }
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+            let (len, mtime) = ent
+                .metadata()
+                .map(|md| {
+                    let mtime = md
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    (md.len(), mtime)
+                })
+                .unwrap_or((0, 0));
+            entries.push((name, len, mtime));
+        }
+    }
+    entries.sort();
+    let mut h = DefaultHasher::new();
+    entries.hash(&mut h);
+    format!("{:x}", h.finish())
+}
+
+#[derive(Serialize, Deserialize)]
+struct Manifest {
+    /// Which baseq3 this manifest describes (so switching engines rebuilds).
+    baseq3: String,
+    /// signature() at build time.
+    signature: String,
+    maps: Vec<OfflineMap>,
+}
+
+fn manifest_path() -> Option<PathBuf> {
+    directories::ProjectDirs::from("racing", "defrag", "launcher")
+        .map(|d| d.cache_dir().join("offline_maps.json"))
+}
+
+fn load_manifest() -> Option<Manifest> {
+    let path = manifest_path()?;
+    let bytes = std::fs::read(path).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn save_manifest(m: &Manifest) {
+    let Some(path) = manifest_path() else { return };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(bytes) = serde_json::to_vec(m) {
+        let _ = std::fs::write(path, bytes);
+    }
+}
+
+/// The expensive scan: open every pk3 and read its zip directory to collect
+/// `maps/*.bsp` names + which have levelshots. Runs only on a cache miss.
+fn scan(baseq3: &Path) -> Vec<OfflineMap> {
     let mut out: Vec<OfflineMap> = Vec::new();
 
-    let rd = match std::fs::read_dir(&baseq3) {
+    let rd = match std::fs::read_dir(baseq3) {
         Ok(rd) => rd,
-        Err(_) => return Ok(out), // no baseq3 yet -> empty list, not an error
+        Err(_) => return out, // no baseq3 yet -> empty list, not an error
     };
 
     for ent in rd.flatten() {
@@ -105,12 +198,76 @@ pub fn list(engine_path: &Path) -> Result<Vec<OfflineMap>> {
     }
 
     out.sort_by(|a, b| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()));
-    Ok(out)
+    out
+}
+
+/// Full list of every `maps/*.bsp` across the pk3s in baseq3. Served from
+/// the on-disk manifest when the baseq3 contents are unchanged; only a
+/// genuine change (added/removed/modified pk3) triggers the heavy scan.
+pub fn list(engine_path: &Path) -> Result<Vec<OfflineMap>> {
+    let baseq3 = baseq3_dir(engine_path).context("engine path has no parent")?;
+    let baseq3_key = baseq3.to_string_lossy().to_string();
+    let sig = signature(&baseq3);
+
+    if let Some(m) = load_manifest() {
+        if m.baseq3 == baseq3_key && m.signature == sig {
+            return Ok(m.maps);
+        }
+    }
+
+    let maps = scan(&baseq3);
+    save_manifest(&Manifest {
+        baseq3: baseq3_key,
+        signature: sig,
+        maps: maps.clone(),
+    });
+    Ok(maps)
+}
+
+/// Paginated + name-filtered view over `list()`. The heavy work is the
+/// cached `list()`; filtering + slicing here is in-memory and cheap.
+pub fn list_paged(engine_path: &Path, page: u32, per_page: u32, search: &str) -> Result<OfflineMapPage> {
+    let all = list(engine_path)?;
+    let q = search.trim().to_ascii_lowercase();
+    let filtered: Vec<OfflineMap> = if q.is_empty() {
+        all
+    } else {
+        all.into_iter()
+            .filter(|m| m.name.to_ascii_lowercase().contains(&q))
+            .collect()
+    };
+
+    let per_page = per_page.max(1);
+    let total = filtered.len();
+    let last_page = ((total as u32).div_ceil(per_page)).max(1);
+    let page = page.clamp(1, last_page);
+    let start = ((page - 1) * per_page) as usize;
+    let data: Vec<OfflineMap> = filtered.into_iter().skip(start).take(per_page as usize).collect();
+
+    Ok(OfflineMapPage {
+        data,
+        total,
+        current_page: page,
+        last_page,
+        per_page,
+    })
 }
 
 fn cache_dir() -> Option<PathBuf> {
     directories::ProjectDirs::from("racing", "defrag", "launcher")
         .map(|d| d.cache_dir().join("mapthumbs"))
+}
+
+/// Remove everything the offline Maps tab caches on disk: the thumbnail
+/// cache and the scan manifest. Called from the Settings "Reset launcher"
+/// flow so a reset really starts from zero.
+pub fn clear_cache() {
+    if let Some(dir) = cache_dir() {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    if let Some(path) = manifest_path() {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 fn cache_key(pk3_path: &Path, map_name: &str) -> String {

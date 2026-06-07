@@ -164,9 +164,12 @@ export const tauri = {
      *  the original pk3 filename), then launch `+vq3`/`+cpm <map>`. */
     runMapOffline: (mapName: string, physics: 'vq3' | 'cpm', pk3: string | null) =>
         invoke<MapRunResult>('run_map_offline', { mapName, physics, pk3 }),
-    /** List maps installed in the engine's baseq3 folder (reads pk3
-     *  indexes; no extraction). */
-    listOfflineMaps: () => invoke<OfflineMap[]>('list_offline_maps'),
+    /** List maps installed in the engine's baseq3 folder, paginated +
+     *  name-filtered. The first call scans every pk3 once (cached to a
+     *  manifest); later calls are cheap. Only a page is returned so the UI
+     *  never loads the whole library at once. */
+    listOfflineMaps: (page = 1, perPage = 24, search = '') =>
+        invoke<OfflineMapPage>('list_offline_maps', { page, perPage, search }),
     /** Extract one offline map's levelshot from its pk3 as a data URL
      *  (cached). null when the pk3 has no levelshot for that map. */
     offlineMapThumb: (pk3Path: string, mapName: string) =>
@@ -417,6 +420,15 @@ export interface OfflineMap {
     pk3: string;
     pk3_path: string;
     has_levelshot: boolean;
+}
+
+/** One page of offline maps. Same shape as the online maps pager. */
+export interface OfflineMapPage {
+    data: OfflineMap[];
+    total: number;
+    current_page: number;
+    last_page: number;
+    per_page: number;
 }
 
 /** Token owner identity for the Profile button. mdd_id is the public

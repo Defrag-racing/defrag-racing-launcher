@@ -244,6 +244,9 @@ pub fn reset_launcher(state: State<'_, AppState>) -> Result<(), String> {
     // from zero (otherwise re-onboarded user with new token would skip
     // re-uploading demos the prior token already covered).
     let _ = UploadCache::clear();
+    // Offline Maps tab caches (levelshot thumbnails + the scan manifest)
+    // live in our cache dir too - wipe them so a reset is truly clean.
+    crate::offline_maps::clear_cache();
     // Persisted queue history - blank the Dashboard so a re-onboarded
     // user doesn't see stale rows from the previous account.
     let _ = UploadState::clear_persisted();
@@ -939,22 +942,44 @@ pub async fn run_map_offline(
 }
 
 /// List the maps installed in the engine's baseq3 folder (offline Maps
-/// tab). Reads pk3 indexes only - cheap, no extraction.
+/// tab), paginated + name-filtered. The first scan opens every pk3 to read
+/// its index (heavy) and caches the result to a manifest; later calls reuse
+/// it unless baseq3 changed. Runs on the blocking pool so the scan never
+/// stalls the UI, and only a page of maps is returned so the frontend never
+/// extracts thumbnails for the whole library at once.
 #[tauri::command]
-pub fn list_offline_maps() -> Result<Vec<crate::offline_maps::OfflineMap>, String> {
+pub async fn list_offline_maps(
+    page: Option<u32>,
+    per_page: Option<u32>,
+    search: Option<String>,
+) -> Result<crate::offline_maps::OfflineMapPage, String> {
     let cfg = Config::load().map_err(err_to_string)?;
     let engine = cfg
         .engine_path
         .ok_or_else(|| "No engine configured - pick one in Settings first.".to_string())?;
-    crate::offline_maps::list(&engine).map_err(err_to_string)
+    let page = page.unwrap_or(1).max(1);
+    let per_page = per_page.unwrap_or(24).clamp(1, 100);
+    let search = search.unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::offline_maps::list_paged(&engine, page, per_page, &search).map_err(err_to_string)
+    })
+    .await
+    .map_err(err_to_string)?
 }
 
 /// Extract a single offline map's levelshot from its pk3 and return it as a
 /// data URL (cached on disk). Ok(None) when the pk3 has no levelshot.
 #[tauri::command]
-pub fn offline_map_thumb(pk3_path: String, map_name: String) -> Result<Option<String>, String> {
-    crate::offline_maps::thumb_data_url(std::path::Path::new(&pk3_path), &map_name)
-        .map_err(err_to_string)
+pub async fn offline_map_thumb(pk3_path: String, map_name: String) -> Result<Option<String>, String> {
+    // Opening the pk3 + (for TGA) decoding/re-encoding is disk + CPU work;
+    // keep it off the async worker so a burst of lazy thumbnail requests
+    // can't stall other commands.
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::offline_maps::thumb_data_url(std::path::Path::new(&pk3_path), &map_name)
+            .map_err(err_to_string)
+    })
+    .await
+    .map_err(err_to_string)?
 }
 
 /// Open an external URL in the user's browser. Routed through Rust (not

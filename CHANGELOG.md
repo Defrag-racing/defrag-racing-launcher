@@ -4,6 +4,12 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.34
+
+- **Offline Maps no longer hammers the disk.** On big libraries the tab used to re-open *every* pk3 in baseq3 on each visit to read its index, pinning the disk at 100% and freezing the app for seconds to minutes. Now the full scan runs only **once** and is cached to a manifest on disk; re-opening the tab just does a cheap metadata check (file size/date) and reuses the cached list unless baseq3 actually changed. The scan also runs off the UI thread, so it never freezes the window.
+- The Offline tab is now **paginated** (24 maps per page) instead of loading the whole library at once - so thumbnails are only ever extracted for the page you're looking at, not for thousands of maps up front.
+- "Reset launcher" in Settings now also clears the Offline Maps caches (the levelshot thumbnails and the scan manifest), so a reset truly starts from zero.
+
 ## 0.1.33
 
 - Maps tab now has an **Offline (local)** sub-tab listing the maps you actually have installed in the engine's baseq3 folder - no token needed, works without internet. Map names come from each pk3's `maps/*.bsp`, and the thumbnail is the pk3's levelshot (TGA levelshots are converted, same as the website). Each card has VQ3 / CPM "Run" buttons that launch straight into the map (it's already installed, so no download).
