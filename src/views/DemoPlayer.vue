@@ -325,12 +325,21 @@
         </div>
 
         <template v-else>
+            <!-- Demo name bar. Kept ABOVE the render area (not overlaid) so the
+                 native engine window, which sits on top of the render region,
+                 doesn't cover it. -->
+            <div
+                v-if="playing && selected"
+                class="flex-shrink-0 px-4 py-2 bg-neutral-900 border-b border-white/10 text-center text-sm font-semibold text-neutral-100 truncate"
+            >{{ formatDemoName(selected.name) }}</div>
+
             <!-- Stage: black render region the engine draws into (aspect-correct,
                  letterboxed by the backend). The native child window covers this. -->
             <div class="flex-1 min-h-0 relative bg-black">
                 <div ref="embedRegion" class="absolute inset-0"></div>
 
-                <!-- Overlay shown only when nothing is playing -->
+                <!-- Overlay shown only when nothing is playing (no native window
+                     covering it then). -->
                 <div
                     v-if="!playing"
                     class="absolute inset-0 flex flex-col items-center justify-center text-neutral-500 pointer-events-none"
@@ -338,22 +347,13 @@
                     <div class="text-5xl mb-3">▶</div>
                     <div class="text-sm">Pick a demo below to play it here</div>
                 </div>
-
-                <!-- Demo name banner -->
-                <div
-                    v-if="playing && selected"
-                    class="absolute top-0 left-0 right-0 px-4 py-2 bg-gradient-to-b from-black/70 to-transparent text-center text-sm font-semibold text-neutral-100 pointer-events-none"
-                >
-                    {{ formatDemoName(selected.name) }}
-                </div>
-
-                <div
-                    v-if="playError"
-                    class="absolute bottom-2 left-2 right-2 p-2 rounded bg-red-500/15 border border-red-500/30 text-red-300 text-xs"
-                >
-                    {{ playError }}
-                </div>
             </div>
+
+            <!-- Errors live below the render area so the native window can't hide them. -->
+            <div
+                v-if="playError"
+                class="flex-shrink-0 px-3 py-2 bg-red-500/15 border-t border-red-500/30 text-red-300 text-xs"
+            >{{ playError }}</div>
 
             <!-- Transport bar -->
             <div v-if="playing" class="flex-shrink-0 border-t border-white/10 bg-neutral-900 px-3 py-2">

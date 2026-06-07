@@ -26,6 +26,7 @@
             || r === 'servers'
             || r === 'records'
             || r === 'maps'
+            || r === 'demo-player'
             || r === 'notifications'
             || r === 'history'
             || r === 'settings';

@@ -123,7 +123,7 @@ mod stage {
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassW, SetWindowPos, HMENU,
-        HWND_TOP, SWP_NOACTIVATE, SWP_NOZORDER, WINDOW_EX_STYLE, WNDCLASSW, WS_CHILD,
+        HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WINDOW_EX_STYLE, WNDCLASSW, WS_CHILD,
         WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_VISIBLE,
     };
 
@@ -170,7 +170,22 @@ mod stage {
                 Some(hinstance),
                 None,
             ) {
-                Ok(hwnd) => hwnd.0 as isize,
+                Ok(hwnd) => {
+                    // Raise above the WebView2 sibling window so the engine's
+                    // render (a child of this stage) is visible instead of being
+                    // composited behind the webview. Without this the demo plays
+                    // but the area stays black.
+                    let _ = SetWindowPos(
+                        hwnd,
+                        Some(HWND_TOP),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                    );
+                    hwnd.0 as isize
+                }
                 Err(_) => 0,
             }
         }
@@ -182,15 +197,9 @@ mod stage {
         }
         unsafe {
             let hwnd = HWND(hwnd as *mut c_void);
-            let _ = SetWindowPos(
-                hwnd,
-                Some(HWND_TOP),
-                x,
-                y,
-                w,
-                h,
-                SWP_NOACTIVATE | SWP_NOZORDER,
-            );
+            // Keep it raised above the webview on every reposition (no
+            // SWP_NOZORDER, so HWND_TOP takes effect each time).
+            let _ = SetWindowPos(hwnd, Some(HWND_TOP), x, y, w, h, SWP_NOACTIVATE);
         }
     }
 
