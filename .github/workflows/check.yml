@@ -2,11 +2,11 @@
 #   - `check`: fast single-platform smoke test (Linux cargo check + vite
 #     build). Runs on PRs and main pushes so a broken Rust/TS change is
 #     caught in seconds.
-#   - `windows-msi-preview`: builds the actual Windows MSI on every main
-#     push and uploads it as an artifact. Lets us iterate on WiX / bundle
-#     config without cutting a release tag every attempt. Diagnostic
-#     step surfaces light.exe stderr when MSI bundling fails (tauri-
-#     action swallows it otherwise). Skipped on PRs to keep PR CI fast.
+#   - `windows-nsis-preview`: builds the Windows NSIS installer (.exe) on
+#     every main push and uploads it as an artifact, so we can install +
+#     test a build without cutting a release tag. Only the NSIS bundle is
+#     built (--bundles nsis), skipping the MSI/WiX path entirely - faster
+#     and avoids WiX flakiness. Skipped on PRs to keep PR CI fast.
 #
 # Cross-platform release builds + actual GitHub Release publication still
 # live in release.yml (tag-triggered).
@@ -47,7 +47,7 @@ jobs:
       - run: npm run build
       - run: cargo check --manifest-path src-tauri/Cargo.toml
 
-  windows-msi-preview:
+  windows-nsis-preview:
     # Main pushes only — PR builds skip the ~12-minute Windows compile.
     if: github.event_name == 'push'
     runs-on: windows-latest
@@ -69,7 +69,7 @@ jobs:
       # post-step exited silently because zstd was SIGKILL'd by
       # the OS, masking the real cause. Trade-off: ~5 min slower
       # build (deps recompile from source) for stable CI. The
-      # produced MSI is byte-identical either way.
+      # produced installer is byte-identical either way.
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
@@ -82,77 +82,24 @@ jobs:
       # doesn't have signing secrets (those exist only on tag pushes),
       # so we override that flag to false for the preview build —
       # otherwise tauri-bundler errors with "public key found, no
-      # private key" right after the .msi/.exe are bundled.
-      - name: Build MSI (no updater signing for preview)
+      # private key" right after the installer is bundled.
+      #
+      # --bundles nsis: build ONLY the NSIS installer (.exe), not the MSI.
+      # That's the format we install + test from, and it skips the WiX
+      # path entirely (faster, no WiX/light.exe flakiness).
+      - name: Build NSIS installer (no updater signing for preview)
         shell: pwsh
         run: |
           @'
           {"bundle":{"createUpdaterArtifacts":false}}
           '@ | Set-Content -Path build-override.json
-          npm run tauri build -- --config build-override.json
+          npm run tauri build -- --config build-override.json --bundles nsis
 
-      - name: Upload MSI artifact
+      - name: Upload NSIS installer artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: defrag-launcher-msi-${{ github.sha }}
-          path: |
-            src-tauri/target/release/bundle/msi/*.msi
-            src-tauri/target/release/bundle/nsis/*.exe
+          name: defrag-launcher-nsis-${{ github.sha }}
+          path: src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: warn
           retention-days: 14
-
-      # Same diagnostic as release.yml: tauri-action / npm run tauri build
-      # swallow light.exe stderr. Re-run candle + light manually with -v
-      # so the real WiX error shows up in the log.
-      - name: Diagnose WiX light.exe failure
-        if: failure()
-        shell: pwsh
-        working-directory: src-tauri
-        continue-on-error: true
-        run: |
-          $wix = "$env:LOCALAPPDATA\tauri\WixTools314"
-          Write-Host "=== WiX tools: $wix ==="
-          if (-not (Test-Path $wix)) {
-            Write-Host "WiX tools dir not found."
-            exit 0
-          }
-          Get-ChildItem $wix | Select-Object Name | Format-Table -AutoSize | Out-String | Write-Host
-
-          $main = "target\release\wix\x64\main.wxs"
-          $frag = "wix\cleanup.wxs"
-          $outDir = "target\release\wix\debug"
-          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-
-          Write-Host "=== Contents of target\release\wix\x64\ ==="
-          Get-ChildItem "target\release\wix\x64\" | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Host
-
-          Write-Host "=== main.wxs exists: $(Test-Path $main) ==="
-          Write-Host "=== cleanup.wxs exists: $(Test-Path $frag) ==="
-
-          # tauri-bundler generates one or more .wxl localization files
-          # (TauriCodepage / TauriLanguage / etc.) and passes them to light
-          # via -loc. Without them the linker rejects every !(loc.*)
-          # reference in main.wxs with LGHT0102, masking the real error.
-          $wxlFiles = Get-ChildItem "target\release\wix\x64\" -Filter "*.wxl" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
-          Write-Host "=== Found .wxl files: $(if ($wxlFiles) { $wxlFiles -join ', ' } else { '(none)' }) ==="
-          $locArgs = @()
-          foreach ($wxl in $wxlFiles) { $locArgs += "-loc"; $locArgs += $wxl }
-
-          Write-Host "`n=== candle main.wxs ==="
-          & "$wix\candle.exe" -arch x64 -out "$outDir\main.wixobj" $main
-          Write-Host "candle main exit: $LASTEXITCODE"
-
-          Write-Host "`n=== candle cleanup.wxs ==="
-          & "$wix\candle.exe" -arch x64 -out "$outDir\cleanup.wixobj" $frag
-          Write-Host "candle cleanup exit: $LASTEXITCODE"
-
-          Write-Host "`n=== light -v (verbose, validation on, with -loc) ==="
-          & "$wix\light.exe" -v @locArgs -ext WixUtilExtension -ext WixUIExtension -cultures:en-US `
-            -out "$outDir\debug.msi" "$outDir\main.wixobj" "$outDir\cleanup.wixobj"
-          Write-Host "`n=== light exit: $LASTEXITCODE ==="
-
-          Write-Host "`n=== light -v -sval (skip ICE validation, with -loc) ==="
-          & "$wix\light.exe" -v -sval @locArgs -ext WixUtilExtension -ext WixUIExtension -cultures:en-US `
-            -out "$outDir\debug-sval.msi" "$outDir\main.wixobj" "$outDir\cleanup.wixobj"
-          Write-Host "`n=== light -sval exit: $LASTEXITCODE ==="
