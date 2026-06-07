@@ -11,6 +11,7 @@
 
     import { onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+    import { getCurrentWindow } from '@tauri-apps/api/window';
     import { tauri, type PlayerDemo, type DemoPlayerStatus } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
 
@@ -48,8 +49,10 @@
 
     const embedRegion = ref<HTMLDivElement | null>(null);
     let unlisten: UnlistenFn | null = null;
+    let unlistenMoved: UnlistenFn | null = null;
     let resizeObs: ResizeObserver | null = null;
     let resizeTimer: number | null = null;
+    let moveRaf: number | null = null;
     let lastAspect = 16 / 9;
 
     const now = () => Date.now();
@@ -268,6 +271,20 @@
         }, 350);
     };
 
+    // The render window is a separate top-level overlay, so it doesn't move with
+    // the launcher automatically - when the user drags the window, reposition it
+    // (cheap, no engine re-init). Coalesced to one call per frame so a drag
+    // doesn't flood the IPC.
+    const onWindowMoved = () => {
+        if (!playing.value) return;
+        if (moveRaf !== null) return;
+        moveRaf = window.requestAnimationFrame(() => {
+            moveRaf = null;
+            const region = computeRegion();
+            if (region) tauri.demoPlayerReposition(region, lastAspect).catch(() => {});
+        });
+    };
+
     // ---- formatting --------------------------------------------------------
 
     const fmt = (sec: number) => {
@@ -285,6 +302,8 @@
 
     onMounted(async () => {
         unlisten = await listen<DemoPlayerStatus>('demo-player-status', (e) => onStatus(e.payload));
+        // Follow the launcher when it's dragged (overlay is a separate window).
+        unlistenMoved = await getCurrentWindow().onMoved(onWindowMoved);
         window.addEventListener('keydown', onKeydown);
         if (embedRegion.value) {
             resizeObs = new ResizeObserver(onRegionResize);
@@ -304,9 +323,11 @@
     onUnmounted(() => {
         stop();
         if (unlisten) unlisten();
+        if (unlistenMoved) unlistenMoved();
         window.removeEventListener('keydown', onKeydown);
         if (resizeObs) resizeObs.disconnect();
         if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+        if (moveRaf !== null) window.cancelAnimationFrame(moveRaf);
     });
 </script>
 

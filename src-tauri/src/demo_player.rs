@@ -59,6 +59,10 @@ struct Session {
     cmd_tx: Sender<String>,
     /// Native stage window handle (as isize; 0 on non-Windows). Destroyed on stop.
     stage: isize,
+    /// The launcher's main window HWND (owner of the stage), so reposition can
+    /// re-map the stage's client rect to screen coordinates after the launcher
+    /// is moved.
+    parent: isize,
     join: Option<JoinHandle<()>>,
 }
 
@@ -111,20 +115,27 @@ fn letterbox(rx: i32, ry: i32, rw: i32, rh: i32, aspect: f32) -> (i32, i32, i32,
 
 // ---- native stage window ---------------------------------------------------
 //
-// The raw Win32 calls are isolated here. They MUST be invoked on the UI thread
-// (see `*_on_main`), so the window shares Tauri's message pump.
+// The stage is an OWNED top-level WS_POPUP window (not a child) placed over the
+// launcher's client area. A child window would be composited *behind* the
+// WebView2 (Edge draws its content over sibling/child HWNDs via DirectComp), so
+// the demo played but the area stayed black. An owned top-level window is not
+// part of that composition and always renders above its owner, so the engine
+// shows. The trade-off: it doesn't move with the window automatically, so the
+// frontend re-sends its rect on window move/resize (reposition / set_region).
+//
+// All Win32 calls MUST be invoked on the UI thread (see `*_on_main`).
 
 #[cfg(windows)]
 mod stage {
     use std::ffi::c_void;
     use windows::core::{w, PCWSTR};
-    use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
-    use windows::Win32::Graphics::Gdi::{GetStockObject, BLACK_BRUSH, HBRUSH};
+    use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
+    use windows::Win32::Graphics::Gdi::{ClientToScreen, GetStockObject, BLACK_BRUSH, HBRUSH};
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassW, SetWindowPos, HMENU,
-        HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WINDOW_EX_STYLE, WNDCLASSW, WS_CHILD,
-        WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_VISIBLE,
+        HWND_TOP, SWP_NOACTIVATE, WINDOW_EX_STYLE, WNDCLASSW, WS_CLIPCHILDREN, WS_EX_NOACTIVATE,
+        WS_EX_TOOLWINDOW, WS_POPUP, WS_VISIBLE,
     };
 
     const CLASS_NAME: PCWSTR = w!("oDFeDemoStage");
@@ -150,56 +161,53 @@ mod stage {
         }
     }
 
-    /// Create the black child stage window inside `parent`. Returns 0 on failure.
-    pub fn create(parent: isize, x: i32, y: i32, w: i32, h: i32) -> isize {
+    // Map a point in `owner`'s client area (physical px) to screen coordinates.
+    unsafe fn to_screen(owner: HWND, x: i32, y: i32) -> (i32, i32) {
+        let mut pt = POINT { x, y };
+        let _ = ClientToScreen(owner, &mut pt);
+        (pt.x, pt.y)
+    }
+
+    /// Create the owned top-level stage window over `owner`'s client area at the
+    /// client-relative rect (cx, cy, w, h). Returns 0 on failure.
+    pub fn create(owner: isize, cx: i32, cy: i32, w: i32, h: i32) -> isize {
         ensure_class();
         unsafe {
             let hinstance: HINSTANCE = GetModuleHandleW(None).unwrap_or_default().into();
-            let parent = HWND(parent as *mut c_void);
+            let owner = HWND(owner as *mut c_void);
+            let (sx, sy) = to_screen(owner, cx, cy);
             match CreateWindowExW(
-                WINDOW_EX_STYLE(0),
+                // tool window = no taskbar button; noactivate = clicking the
+                // demo doesn't steal focus from the launcher's transport UI.
+                WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                 CLASS_NAME,
                 w!(""),
-                WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-                x,
-                y,
+                WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN,
+                sx,
+                sy,
                 w,
                 h,
-                Some(parent),
+                Some(owner), // owner (WS_POPUP => owned top-level, not a child)
                 None::<HMENU>,
                 Some(hinstance),
                 None,
             ) {
-                Ok(hwnd) => {
-                    // Raise above the WebView2 sibling window so the engine's
-                    // render (a child of this stage) is visible instead of being
-                    // composited behind the webview. Without this the demo plays
-                    // but the area stays black.
-                    let _ = SetWindowPos(
-                        hwnd,
-                        Some(HWND_TOP),
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                    );
-                    hwnd.0 as isize
-                }
+                Ok(hwnd) => hwnd.0 as isize,
                 Err(_) => 0,
             }
         }
     }
 
-    pub fn move_(hwnd: isize, x: i32, y: i32, w: i32, h: i32) {
+    /// Move/resize the stage to a new client-relative rect of `owner`.
+    pub fn reposition(owner: isize, hwnd: isize, cx: i32, cy: i32, w: i32, h: i32) {
         if hwnd == 0 {
             return;
         }
         unsafe {
+            let owner = HWND(owner as *mut c_void);
             let hwnd = HWND(hwnd as *mut c_void);
-            // Keep it raised above the webview on every reposition (no
-            // SWP_NOZORDER, so HWND_TOP takes effect each time).
-            let _ = SetWindowPos(hwnd, Some(HWND_TOP), x, y, w, h, SWP_NOACTIVATE);
+            let (sx, sy) = to_screen(owner, cx, cy);
+            let _ = SetWindowPos(hwnd, Some(HWND_TOP), sx, sy, w, h, SWP_NOACTIVATE);
         }
     }
 
@@ -216,19 +224,19 @@ mod stage {
 
 #[cfg(not(windows))]
 mod stage {
-    pub fn create(_parent: isize, _x: i32, _y: i32, _w: i32, _h: i32) -> isize {
+    pub fn create(_owner: isize, _cx: i32, _cy: i32, _w: i32, _h: i32) -> isize {
         0
     }
-    pub fn move_(_hwnd: isize, _x: i32, _y: i32, _w: i32, _h: i32) {}
+    pub fn reposition(_owner: isize, _hwnd: isize, _cx: i32, _cy: i32, _w: i32, _h: i32) {}
     pub fn destroy(_hwnd: isize) {}
 }
 
 /// Run `stage::create` on the UI thread and wait for the resulting handle.
-fn create_stage_on_main(app: &AppHandle, parent: isize, x: i32, y: i32, w: i32, h: i32) -> isize {
+fn create_stage_on_main(app: &AppHandle, owner: isize, cx: i32, cy: i32, w: i32, h: i32) -> isize {
     let (tx, rx) = mpsc::channel::<isize>();
     if app
         .run_on_main_thread(move || {
-            let _ = tx.send(stage::create(parent, x, y, w, h));
+            let _ = tx.send(stage::create(owner, cx, cy, w, h));
         })
         .is_err()
     {
@@ -237,8 +245,8 @@ fn create_stage_on_main(app: &AppHandle, parent: isize, x: i32, y: i32, w: i32, 
     rx.recv_timeout(Duration::from_secs(2)).unwrap_or(0)
 }
 
-fn move_stage_on_main(app: &AppHandle, hwnd: isize, x: i32, y: i32, w: i32, h: i32) {
-    let _ = app.run_on_main_thread(move || stage::move_(hwnd, x, y, w, h));
+fn reposition_stage_on_main(app: &AppHandle, owner: isize, hwnd: isize, cx: i32, cy: i32, w: i32, h: i32) {
+    let _ = app.run_on_main_thread(move || stage::reposition(owner, hwnd, cx, cy, w, h));
 }
 
 fn destroy_stage_on_main(app: &AppHandle, hwnd: isize) {
@@ -483,7 +491,7 @@ pub async fn demo_player_start(
             }
         }
 
-        // Create the aspect-correct stage window.
+        // Create the aspect-correct stage window (owned popup over `parent`).
         let (sx, sy, sw, sh) = letterbox(x, y, w, h, aspect);
         let stage = create_stage_on_main(&app, parent, sx, sy, sw, sh);
         if stage == 0 {
@@ -543,6 +551,7 @@ pub async fn demo_player_start(
             stop,
             cmd_tx,
             stage,
+            parent,
             join,
         });
 
@@ -564,7 +573,7 @@ pub fn demo_player_command(state: State<'_, AppState>, line: String) -> Result<(
     Ok(())
 }
 
-/// Reposition the stage to a new region/aspect (window resize) and tell the
+/// Resize the stage to a new region/aspect (window/layout resize) and tell the
 /// engine to re-create its render window at the new size via `vid_restart`.
 #[tauri::command]
 pub async fn demo_player_set_region(
@@ -576,12 +585,42 @@ pub async fn demo_player_set_region(
     h: i32,
     aspect: f32,
 ) -> Result<(), String> {
-    let guard = state.demo_player.inner.lock().unwrap();
-    if let Some(s) = guard.as_ref() {
-        let (sx, sy, sw, sh) = letterbox(x, y, w, h, aspect);
-        move_stage_on_main(&app, s.stage, sx, sy, sw, sh);
-        let _ = s.cmd_tx.send("vid_restart".to_string());
-    }
+    let (parent, stage, tx) = {
+        let guard = state.demo_player.inner.lock().unwrap();
+        match guard.as_ref() {
+            Some(s) => (s.parent, s.stage, s.cmd_tx.clone()),
+            None => return Ok(()),
+        }
+    };
+    let (sx, sy, sw, sh) = letterbox(x, y, w, h, aspect);
+    reposition_stage_on_main(&app, parent, stage, sx, sy, sw, sh);
+    let _ = tx.send("vid_restart".to_string());
+    Ok(())
+}
+
+/// Reposition the stage to a new region/aspect WITHOUT a `vid_restart`. Used on
+/// window MOVE (the launcher's client rect is unchanged, only its screen
+/// position moved, so the owned popup must follow but the engine needn't
+/// re-init). Cheap enough to call on every move event.
+#[tauri::command]
+pub async fn demo_player_reposition(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    aspect: f32,
+) -> Result<(), String> {
+    let (parent, stage) = {
+        let guard = state.demo_player.inner.lock().unwrap();
+        match guard.as_ref() {
+            Some(s) => (s.parent, s.stage),
+            None => return Ok(()),
+        }
+    };
+    let (sx, sy, sw, sh) = letterbox(x, y, w, h, aspect);
+    reposition_stage_on_main(&app, parent, stage, sx, sy, sw, sh);
     Ok(())
 }
 

@@ -237,6 +237,7 @@ pub fn run() {
             demo_player::demo_player_start,
             demo_player::demo_player_command,
             demo_player::demo_player_set_region,
+            demo_player::demo_player_reposition,
             demo_player::demo_player_stop,
             commands::open_url,
             commands::get_servers,

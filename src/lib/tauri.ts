@@ -310,6 +310,19 @@ export const tauri = {
             h: region.h,
             aspect,
         }),
+    /** Reposition the render window only (window MOVE) - no engine re-init.
+     *  Cheap, call on every move event so the overlay follows the launcher. */
+    demoPlayerReposition: (
+        region: { x: number; y: number; w: number; h: number },
+        aspect: number,
+    ) =>
+        invoke<void>('demo_player_reposition', {
+            x: region.x,
+            y: region.y,
+            w: region.w,
+            h: region.h,
+            aspect,
+        }),
     /** Stop playback: kill the engine, drop the render window. */
     demoPlayerStop: () => invoke<void>('demo_player_stop'),
 };
