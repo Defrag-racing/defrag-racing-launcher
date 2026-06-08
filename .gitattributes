@@ -1,0 +1,13 @@
+# Keep LF line endings in the repo AND in working trees on every platform, so
+# editing/opening a file on Windows can't introduce a CRLF-only diff (which is
+# what made src-tauri/Cargo.toml show as "changed" with an empty content diff).
+* text=auto eol=lf
+
+# Bundled engine binaries: never apply text/EOL filters to their bytes.
+*.exe binary
+*.dll binary
+*.png binary
+*.ico binary
+*.icns binary
+*.tga binary
+*.dm_68 binary
