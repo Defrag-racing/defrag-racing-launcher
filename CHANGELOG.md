@@ -4,6 +4,11 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.42
+
+- **Zooming the scrub bar no longer flickers/resizes the demo.** Holding the scrub handle to zoom into milliseconds used to grow the transport bar (the longer millisecond timer wrapped onto a second line), which shrank the demo area and forced the engine to resize and refresh its window - then again when you released. The transport bar now keeps a constant height, and the "ms zoom" readout sits on its own fixed line, so zooming in and out is seamless.
+- **Playback speeds moved to their own row.** The 0.1x-8x speed buttons took up most of the transport bar; they now live on a dedicated row, giving the scrub bar the full width underneath.
+
 ## 0.1.41
 
 - **The demo player now works on Linux.** Watching demos in the launcher and the side-by-side comparison - previously Windows-only - now run on Linux too. The bundled engine renders right inside the launcher window just like on Windows: same transport bar, scrubbing, speeds, multi-demo grid and per-pane sync. It runs on X11 and, on Wayland desktops, through XWayland automatically (the launcher pins itself to the X11 backend on startup). If you're on a native-Wayland-only setup the launcher tells you how to switch to an X11 session instead of just showing a black area.

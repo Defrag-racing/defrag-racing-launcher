@@ -822,6 +822,21 @@
 
         <!-- Transport bar -->
         <div class="flex-shrink-0 border-t border-white/10 bg-neutral-900 px-3 py-2">
+            <!-- Speeds (timescale) on their own row: there are a lot of them and
+                 they ate most of the width, leaving the scrub bar cramped. Giving
+                 them a dedicated row lets the scrub bar below span the full width. -->
+            <div class="flex items-center gap-1.5 flex-wrap mb-1.5">
+                <span class="text-[11px] uppercase tracking-wide text-neutral-500 mr-1">Speed</span>
+                <button
+                    v-for="x in SPEEDS"
+                    :key="x"
+                    class="px-2.5 py-1 rounded text-sm font-semibold"
+                    :class="speed === x ? 'bg-brand-500/30 text-brand-200' : 'bg-white/5 hover:bg-white/10 text-neutral-300'"
+                    @click="setSpeed(x)"
+                >{{ x + 'x' }}</button>
+            </div>
+
+            <!-- Playback + scrub -->
             <div class="flex items-center gap-2">
                 <button
                     class="px-3 py-1.5 rounded text-sm font-semibold"
@@ -836,20 +851,6 @@
                     @click="doPause"
                 >⏸ Pause</button>
                 <span class="w-px h-5 bg-white/10 mx-0.5"></span>
-                <button
-                    v-for="x in SPEEDS"
-                    :key="x"
-                    class="px-2.5 py-1.5 rounded text-sm font-semibold"
-                    :class="speed === x ? 'bg-brand-500/30 text-brand-200' : 'bg-white/5 hover:bg-white/10 text-neutral-300'"
-                    @click="setSpeed(x)"
-                >{{ x + 'x' }}</button>
-
-                <!-- Zoomed indicator lives IN the transport row (below the demo
-                     view) so it's never hidden behind the native engine windows. -->
-                <span
-                    v-if="fineMode"
-                    class="flex-shrink-0 px-1.5 py-0.5 rounded bg-amber-500/25 text-amber-200 text-[10px] font-mono whitespace-nowrap"
-                >ms zoom {{ fmt(Math.floor(sliderMin/1000)) }}–{{ fmt(Math.ceil(sliderMax/1000)) }}</span>
                 <input
                     type="range"
                     class="scrub flex-1 mx-2"
@@ -863,16 +864,30 @@
                     @change="onScrubChange"
                     @pointerdown="onScrubPointerDown"
                 />
-                <!-- Comparison: one timer per demo so you can read every run. -->
-                <span v-if="compare" class="font-mono text-xs tabular-nums text-right leading-tight">
+                <!-- Comparison: one timer per demo so you can read every run.
+                     nowrap so switching to ms precision in zoom mode can't wrap
+                     the timer onto a second line (that would grow the transport
+                     bar and trigger an engine-window resize). -->
+                <span v-if="compare" class="font-mono text-xs tabular-nums text-right leading-tight whitespace-nowrap flex-shrink-0">
                     <template v-for="(p, i) in paneTimers" :key="i">
                         <span v-if="i > 0" class="text-neutral-600 mx-1">·</span>
                         <span :class="paneColor(i)">{{ (i === 0 && fineMode) ? fmtMs(posMs) : fmt(p.posSec) }}/{{ fmt(p.lenSec) }}</span>
                     </template>
                 </span>
-                <span v-else class="font-mono text-sm tabular-nums w-28 text-right" :class="{ 'text-amber-300': fineMode }">
+                <span v-else class="font-mono text-sm tabular-nums w-36 text-right whitespace-nowrap flex-shrink-0" :class="{ 'text-amber-300': fineMode }">
                     {{ fineMode ? fmtMs(posMs) : fmt(posSec) }} / {{ fmt(lenSec) }}
                 </span>
+            </div>
+
+            <!-- ms-zoom readout on its own fixed-height line, so toggling zoom
+                 on/off never changes the transport bar height. Previously the
+                 indicator + the longer ms timer grew the bar, which shrank the
+                 demo area and forced the engine to resize/refresh its window. -->
+            <div class="h-4 mt-0.5 flex items-center justify-center">
+                <span
+                    v-if="fineMode"
+                    class="px-1.5 rounded bg-amber-500/25 text-amber-200 text-[10px] font-mono whitespace-nowrap leading-none"
+                >ms zoom {{ fmt(Math.floor(sliderMin/1000)) }}–{{ fmt(Math.ceil(sliderMax/1000)) }}</span>
             </div>
 
             <!-- Comparison: nudge each demo against demo A to line the runs up.
