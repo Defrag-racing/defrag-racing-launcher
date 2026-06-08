@@ -1,10 +1,13 @@
-<!-- Single source of truth for "what needs a defrag.racing token".
-     Used by the Dashboard no-token banner, the Settings token section, and
-     the Onboarding skip-token notice so the three can never drift apart
-     again. Renders bare <li> rows (a fragment) - each caller wraps them in
-     its own styled <ul>. History is deliberately absent: the History tab is
-     the local defrag:// join log and works without a token. -->
+<!-- Single source of truth for the "get a token" pitch list. Used by the
+     Dashboard no-token banner, the Settings token section, and the Onboarding
+     skip-token notice so the three can never drift apart again. Renders bare
+     <li> rows (a fragment) - each caller wraps them in its own styled <ul>.
+     The embedded player is listed first for prominence (it technically works
+     without a token, but we keep the token-free list to just defrag:// so the
+     green block doesn't pull the eye away from everything a token unlocks).
+     History is absent: the History tab is the local defrag:// join log. -->
 <template>
+    <li>• Play demos instantly in the launcher - embedded player, no separate game launch</li>
     <li>• Auto-backup of recorded demos</li>
     <li>• YouTube renders straight from the Demos list</li>
     <li>• Server browser with your PB and rank per map</li>

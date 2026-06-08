@@ -1,10 +1,7 @@
-<!-- Single source of truth for "what works WITHOUT a defrag.racing token".
-     The companion to TokenFeatureList - shown next to the no-token notices so
-     people know the launcher is still useful token-less. Renders bare <li>
-     rows (a fragment); each caller wraps them in its own styled <ul>. Keep in
-     sync with the onboarding feature list. -->
+<!-- The one thing that genuinely works without a defrag.racing token: the
+     defrag:// join handler. Kept deliberately to a single, plainly-worded line
+     so the green "works without a token" block stays small and doesn't compete
+     with the (longer) list of token-gated features above it. -->
 <template>
-    <li>• Play demos instantly in the launcher - embedded player, no separate game launch</li>
-    <li>• Run any map offline - one click downloads it and plays it in VQ3 / CPM</li>
-    <li>• <code class="bg-black/40 px-1 rounded">defrag://</code> server-join links from defrag.racing</li>
+    <li>• Click <strong>Connect</strong> on a server at defrag.racing/servers and the game opens and joins that server automatically.</li>
 </template>
