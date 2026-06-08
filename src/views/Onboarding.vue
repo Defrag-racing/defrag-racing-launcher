@@ -18,6 +18,13 @@
     // then meets the optional token step.
     const step = ref<1 | 2 | 3 | 4>(1);
 
+    // Step back one in the wizard (footer Back button). Token-skip state is
+    // cleared so revisiting the token step is a clean choice again.
+    const goBack = () => {
+        if (step.value <= 1) return;
+        step.value = (step.value - 1) as 1 | 2 | 3 | 4;
+    };
+
     // --- step 3: token --------------------------------------------------
     const token = ref('');
     const tokenSaving = ref(false);
@@ -213,8 +220,9 @@
             </div>
 
             <!-- Content scrolls inside the card so a text-heavy step (the welcome
-                 list) is always fully reachable, whatever the window size. -->
-            <div class="p-6 overflow-y-auto">
+                 list) is always fully reachable, whatever the window size. The
+                 footer below stays pinned, so Next/Back are always visible. -->
+            <div class="p-6 overflow-y-auto flex-1 min-h-0">
                 <!-- step 1 -->
                 <div v-if="step === 1" class="space-y-4">
                     <h1 class="text-2xl font-bold">Welcome to Defrag Racing Launcher</h1>
@@ -268,9 +276,6 @@
                     <p class="text-xs text-neutral-500 leading-relaxed pt-1">
                         Most of this needs a token from your defrag.racing account. The <code class="bg-black/40 px-1 rounded">defrag://</code> handler works without one. Setup takes under a minute.
                     </p>
-                    <div class="flex justify-end pt-2">
-                        <button class="btn-primary" @click="step = 2">Next</button>
-                    </div>
                 </div>
 
                 <!-- step 3: token (optional - last because it's the only
@@ -345,13 +350,6 @@
                             <strong class="text-red-200">Launcher Tokens</strong> block under
                             <span class="font-mono">defrag.racing &gt; Settings &gt; Security</span> - not another token type.
                         </div>
-                    </div>
-
-                    <div class="flex justify-between pt-2">
-                        <button class="btn-ghost" @click="requestSkipToken">Skip - defrag:// only</button>
-                        <button class="btn-primary" :disabled="!token.trim() || tokenSaving" @click="saveToken">
-                            {{ tokenSaving ? 'Saving…' : 'Save & continue' }}
-                        </button>
                     </div>
 
                     <!-- Skip confirmation. Pasting a token is the single
@@ -462,12 +460,9 @@
                         </div>
                     </div>
 
-                    <div class="pt-2 space-y-2">
-                        <button class="btn-primary w-full" :disabled="!canProceedFromEngine" @click="step = 3">Next</button>
-                        <p v-if="!canProceedFromEngine" class="text-xs text-amber-300/80 text-center">
-                            Pick your engine and demos folder to continue - both are required for the launcher (and even <code class="bg-black/40 px-1 rounded">defrag://</code> links) to work.
-                        </p>
-                    </div>
+                    <p v-if="!canProceedFromEngine" class="text-xs text-amber-300/80 pt-1">
+                        Pick your engine and demos folder to continue - both are required for the launcher (and even <code class="bg-black/40 px-1 rounded">defrag://</code> links) to work.
+                    </p>
                 </div>
 
                 <!-- step 4: finish -->
@@ -516,11 +511,34 @@
                         </button>
                     </div>
 
-                    <div class="flex justify-end pt-2">
+                </div>
+            </div>
+
+            <!-- Sticky footer: navigation is always visible, independent of how
+                 far the content above is scrolled. Back lets you revisit a step
+                 before finishing; the right side is the step's primary action. -->
+            <div class="flex-shrink-0 border-t border-white/10 p-4 flex items-center justify-between gap-2 bg-neutral-900">
+                <button v-if="step > 1" class="btn-ghost" @click="goBack">← Back</button>
+                <span v-else></span>
+
+                <div class="flex items-center gap-2">
+                    <template v-if="step === 1">
+                        <button class="btn-primary" @click="step = 2">Next</button>
+                    </template>
+                    <template v-else-if="step === 2">
+                        <button class="btn-primary" :disabled="!canProceedFromEngine" @click="step = 3">Next</button>
+                    </template>
+                    <template v-else-if="step === 3">
+                        <button class="btn-ghost" @click="requestSkipToken">Skip - defrag:// only</button>
+                        <button class="btn-primary" :disabled="!token.trim() || tokenSaving" @click="saveToken">
+                            {{ tokenSaving ? 'Saving…' : 'Save & continue' }}
+                        </button>
+                    </template>
+                    <template v-else>
                         <button class="btn-primary" :disabled="finishing" @click="finish">
                             {{ finishing ? 'Finishing…' : 'Open launcher' }}
                         </button>
-                    </div>
+                    </template>
                 </div>
             </div>
         </div>
