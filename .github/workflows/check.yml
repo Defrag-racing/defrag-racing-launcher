@@ -14,9 +14,10 @@
 name: Check
 
 on:
-  push:
-    branches: [main, master]
-  pull_request:
+  # Manual only: run from the Actions tab or `gh workflow run check.yml` to
+  # avoid burning Actions minutes on every push/PR. Cross-platform release
+  # builds still run automatically on tags in release.yml.
+  workflow_dispatch:
 
 permissions:
   contents: read
