@@ -32,6 +32,9 @@
     const posMs = ref(0);
     const lenMs = ref(0);
     const paused = ref(false);
+    // The demo ran to its end and is frozen on the last frame. Not a real pause
+    // (timescale is untouched), but we present it as paused and let Play replay.
+    const atEnd = ref(false);
     const speed = ref(1);
 
     // Scrub display in seconds.
@@ -88,6 +91,7 @@
         posSec.value = 0;
         lenSec.value = 0;
         paused.value = false;
+        atEnd.value = false;
         speed.value = 1;
         measured = false;
         measureAttemptAt = 0;
@@ -137,19 +141,32 @@
     };
 
     // ---- transport ---------------------------------------------------------
+    //
+    // Play/Pause control the play STATE; the speed buttons control the RATE
+    // (timescale) independently. So "1x" is just another speed, separate from
+    // the Play button.
 
     const doPause = () => {
         cmd('demopause 1');
         paused.value = true;
     };
-    const setSpeed = (x: number) => {
-        cmd(`demopause 0; timescale ${x}`);
+    // Resume playback at the current speed. If the demo is frozen at its end,
+    // seek back to the start first so Play replays it.
+    const play = () => {
+        const seek = atEnd.value ? 'seekdemo 0; ' : '';
+        cmd(`${seek}demopause 0; timescale ${speed.value || 1}`);
         paused.value = false;
+        atEnd.value = false;
+    };
+    // Set the playback RATE. Doesn't change play/pause state - if we're playing
+    // it changes live; if paused it's the rate the next Play uses.
+    const setSpeed = (x: number) => {
+        cmd(`timescale ${x}`);
         speed.value = x;
     };
-    // Spacebar / external toggle: resume at the last speed if paused, else pause.
+    // Spacebar / external toggle: Play when paused or ended, else Pause.
     const togglePause = () => {
-        if (paused.value) setSpeed(speed.value || 1);
+        if (paused.value || atEnd.value) play();
         else doPause();
     };
 
@@ -260,6 +277,9 @@
         paused.value = s.paused;
 
         if (!measured) {
+            // Length is measured by seeking to a huge time (which transiently
+            // hits the end), then back to 0 - so ignore `atend` until measured,
+            // or the Pause indicator would flash on at startup.
             if (lenMs.value > 0) {
                 lenSec.value = Math.max(1, Math.round(lenMs.value / 1000));
                 cmd('seekdemo 0');
@@ -271,6 +291,8 @@
             }
             return;
         }
+
+        atEnd.value = s.atend;
 
         if (lenMs.value > 0) {
             const maxSec = Math.round(lenMs.value / 1000);
@@ -401,16 +423,24 @@
             <div class="flex items-center gap-2">
                 <button
                     class="px-3 py-1.5 rounded text-sm font-semibold"
-                    :class="paused ? 'bg-emerald-500/30 text-emerald-200' : 'bg-white/5 hover:bg-white/10 text-neutral-200'"
+                    :class="(!paused && !atEnd) ? 'bg-emerald-500/30 text-emerald-200' : 'bg-white/5 hover:bg-white/10 text-neutral-200'"
+                    title="Play / resume"
+                    @click="play"
+                >▶ Play</button>
+                <button
+                    class="px-3 py-1.5 rounded text-sm font-semibold"
+                    :class="(paused || atEnd) ? 'bg-emerald-500/30 text-emerald-200' : 'bg-white/5 hover:bg-white/10 text-neutral-200'"
+                    title="Pause"
                     @click="doPause"
                 >⏸ Pause</button>
+                <span class="w-px h-5 bg-white/10 mx-0.5"></span>
                 <button
                     v-for="x in SPEEDS"
                     :key="x"
                     class="px-2.5 py-1.5 rounded text-sm font-semibold"
-                    :class="!paused && speed === x ? 'bg-brand-500/30 text-brand-200' : 'bg-white/5 hover:bg-white/10 text-neutral-300'"
+                    :class="speed === x ? 'bg-brand-500/30 text-brand-200' : 'bg-white/5 hover:bg-white/10 text-neutral-300'"
                     @click="setSpeed(x)"
-                >{{ x === 1 ? '1x (Play)' : x + 'x' }}</button>
+                >{{ x + 'x' }}</button>
 
                 <input
                     type="range"
