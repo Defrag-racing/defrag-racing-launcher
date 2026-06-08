@@ -290,6 +290,23 @@
     const sliderStep = computed(() => (fineMode.value ? 1 : 1)); // 1 ms vs 1 s
     const sliderValue = computed(() => (fineMode.value ? Math.round(posMs.value) : posSec.value));
 
+    // Filled fraction of the scrub bar (0-100), for the coloured fill + to know
+    // where the thumb sits.
+    const scrubPercent = computed(() => {
+        const min = sliderMin.value;
+        const max = sliderMax.value;
+        if (max <= min) return 0;
+        return Math.min(100, Math.max(0, ((sliderValue.value - min) / (max - min)) * 100));
+    });
+    // The bar turns amber while zoomed to milliseconds; blue otherwise. The fill
+    // is a gradient so we control its colour (native accent can't change live).
+    const scrubStyle = computed(() => {
+        const fill = fineMode.value ? '#fbbf24' : '#3b82f6';
+        const track = 'rgba(255,255,255,0.18)';
+        const p = scrubPercent.value;
+        return { background: `linear-gradient(90deg, ${fill} 0%, ${fill} ${p}%, ${track} ${p}%, ${track} 100%)` };
+    });
+
     const clearDwell = () => {
         if (dwellTimer !== null) {
             window.clearTimeout(dwellTimer);
@@ -788,25 +805,25 @@
                     @click="setSpeed(x)"
                 >{{ x + 'x' }}</button>
 
-                <div class="flex-1 mx-2 relative">
-                    <input
-                        type="range"
-                        class="w-full accent-brand-500"
-                        :class="{ 'accent-amber-400': fineMode }"
-                        :min="sliderMin"
-                        :max="sliderMax"
-                        :step="sliderStep"
-                        :value="sliderValue"
-                        @input="onScrubInput"
-                        @change="onScrubChange"
-                        @pointerdown="onScrubPointerDown"
-                    />
-                    <!-- Zoomed badge: shows you're in millisecond mode + the window. -->
-                    <div
-                        v-if="fineMode"
-                        class="absolute -top-5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-200 text-[10px] font-mono whitespace-nowrap pointer-events-none"
-                    >ms zoom · {{ fmt(Math.floor(sliderMin/1000)) }}–{{ fmt(Math.ceil(sliderMax/1000)) }}</div>
-                </div>
+                <!-- Zoomed indicator lives IN the transport row (below the demo
+                     view) so it's never hidden behind the native engine windows. -->
+                <span
+                    v-if="fineMode"
+                    class="flex-shrink-0 px-1.5 py-0.5 rounded bg-amber-500/25 text-amber-200 text-[10px] font-mono whitespace-nowrap"
+                >ms zoom {{ fmt(Math.floor(sliderMin/1000)) }}–{{ fmt(Math.ceil(sliderMax/1000)) }}</span>
+                <input
+                    type="range"
+                    class="scrub flex-1 mx-2"
+                    :class="{ 'scrub-fine': fineMode }"
+                    :style="scrubStyle"
+                    :min="sliderMin"
+                    :max="sliderMax"
+                    :step="sliderStep"
+                    :value="sliderValue"
+                    @input="onScrubInput"
+                    @change="onScrubChange"
+                    @pointerdown="onScrubPointerDown"
+                />
                 <!-- Comparison: one timer per demo so you can read every run. -->
                 <span v-if="compare" class="font-mono text-xs tabular-nums text-right leading-tight">
                     <template v-for="(p, i) in paneTimers" :key="i">
@@ -901,6 +918,49 @@
     }
     .nudge-reset:hover {
         background: rgb(244 63 94 / 0.26);
+    }
+
+    /* Custom scrub bar: a rounded track (its fill colour is set inline so it can
+       turn amber while zoomed) and a big, obvious thumb that grows further in
+       millisecond-zoom mode. */
+    .scrub {
+        -webkit-appearance: none;
+        appearance: none;
+        height: 6px;
+        border-radius: 9999px;
+        cursor: pointer;
+        outline: none;
+    }
+    .scrub::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 16px;
+        height: 16px;
+        border-radius: 9999px;
+        background: #ffffff;
+        border: 2px solid #3b82f6;
+        box-shadow: 0 0 0 3px rgb(59 130 246 / 0.35), 0 1px 3px rgb(0 0 0 / 0.5);
+        transition: width 0.1s ease, height 0.1s ease;
+    }
+    .scrub::-moz-range-thumb {
+        width: 16px;
+        height: 16px;
+        border-radius: 9999px;
+        background: #ffffff;
+        border: 2px solid #3b82f6;
+        box-shadow: 0 0 0 3px rgb(59 130 246 / 0.35);
+    }
+    .scrub-fine::-webkit-slider-thumb {
+        width: 24px;
+        height: 24px;
+        border-color: #f59e0b;
+        box-shadow: 0 0 0 4px rgb(245 158 11 / 0.4), 0 1px 4px rgb(0 0 0 / 0.6);
+    }
+    .scrub-fine::-moz-range-thumb {
+        width: 24px;
+        height: 24px;
+        border-color: #f59e0b;
+        box-shadow: 0 0 0 4px rgb(245 158 11 / 0.4);
     }
 
     .kbd {
