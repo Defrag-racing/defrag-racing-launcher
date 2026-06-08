@@ -192,14 +192,16 @@
 </script>
 
 <template>
-    <div class="min-h-full flex items-center justify-center p-6">
-        <div class="max-w-xl w-full bg-neutral-900 border border-white/10 rounded-xl overflow-hidden">
+    <div class="min-h-full flex items-center justify-center p-6 overflow-y-auto">
+        <div class="max-w-xl w-full bg-neutral-900 border border-white/10 rounded-xl overflow-hidden flex flex-col max-h-[calc(100vh-3rem)]">
             <!-- progress -->
-            <div class="h-1 bg-white/5">
+            <div class="h-1 bg-white/5 flex-shrink-0">
                 <div class="h-full bg-brand-500 transition-all" :style="{ width: (step * 25) + '%' }"></div>
             </div>
 
-            <div class="p-6">
+            <!-- Content scrolls inside the card so a text-heavy step (the welcome
+                 list) is always fully reachable, whatever the window size. -->
+            <div class="p-6 overflow-y-auto">
                 <!-- step 1 -->
                 <div v-if="step === 1" class="space-y-4">
                     <h1 class="text-2xl font-bold">Welcome to Defrag Racing Launcher</h1>
