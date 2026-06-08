@@ -164,7 +164,11 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev build-essential curl wget file pkg-config
+          # libfuse2 so the AppImage tooling (linuxdeploy) can FUSE-mount; the
+          # APPIMAGE_EXTRACT_AND_RUN env below also lets it run without FUSE, but
+          # installing it too is cheap insurance against the runner image dropping
+          # FUSE entirely.
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev build-essential curl wget file pkg-config libfuse2
 
       - name: Install npm deps
         run: npm ci
@@ -173,6 +177,12 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # AppImage bundling: linuxdeploy (and its plugins) are themselves
+          # AppImages and need FUSE to mount-and-run. The ubuntu-22.04 runner
+          # image no longer ships libfuse2, so they fail with the opaque
+          # "failed to run linuxdeploy". This makes every AppImage tool extract
+          # itself and run instead of FUSE-mounting. Ignored on Windows/macOS.
+          APPIMAGE_EXTRACT_AND_RUN: 1
           # Signing creds for tauri-plugin-updater. tauri-action passes
           # these to the bundler which signs the platform artifact and
           # emits `latest.json` alongside it. Keep both secrets set — a
