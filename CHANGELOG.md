@@ -9,6 +9,7 @@ The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.
 - **Wider, easier-to-read onboarding.** The setup card is roomier so the feature lists wrap onto fewer lines instead of cramming into a narrow column.
 - **The token step now spells out everything a token unlocks** - the same full feature list used elsewhere - instead of a short 3-item summary that hid most of what you get.
 - **The launcher no longer offers its own bundled demo-player engine as a defrag:// engine.** The engine shipped for the embedded player is internal-only; it's now filtered out of the engine picker on Windows, macOS and Linux, so you only ever pick your real Defrag install.
+- **No more stray "Connection Interrupted" while a demo is paused.** The embedded player's engine occasionally flashed the centered "Connection Interrupted" text and the bottom-right phone-jack icon when paused; that false positive is now suppressed during launcher-driven playback (bundled engine updated).
 
 ## 0.1.36
 
