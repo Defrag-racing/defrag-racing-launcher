@@ -21,6 +21,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-os = "2"
 tauri-plugin-store = "2"
+tauri-plugin-window-state = "2"
 
 # defrag:// deep links. deep-link registers the URL scheme with the OS
 # and forwards incoming links to the running app. single-instance is

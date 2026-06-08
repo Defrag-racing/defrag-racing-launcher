@@ -115,6 +115,11 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        // Remembers the main window's size/position across runs (restores on
+        // launch, saves on exit). We also save explicitly on hide-to-tray
+        // below, since closing the window only hides it (prevent_close) and
+        // the on-exit save wouldn't capture a resize done after the last hide.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(AppState::default())
         .setup(move |app| {
             log_startup("setup() entered");
@@ -199,6 +204,10 @@ pub fn run() {
                 // transport UI to stop it (the controls live in the now-hidden
                 // window).
                 demo_player::stop_active_session(window.app_handle());
+                // Persist the current size/position before hiding, so the next
+                // show (or a later real quit) restores what the user set.
+                use tauri_plugin_window_state::{AppHandleExt, StateFlags};
+                let _ = window.app_handle().save_window_state(StateFlags::all());
                 let _ = window.hide();
                 api.prevent_close();
             }
