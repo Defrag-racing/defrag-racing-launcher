@@ -99,6 +99,26 @@
         }
     };
 
+    // Windows long-path prefixes (\\?\ and \\?\UNC\) are an implementation
+    // detail that scares non-technical users - strip them for display only.
+    // The real value handed to the backend keeps the prefix untouched.
+    const prettyPath = (p: string | null | undefined): string => {
+        if (!p) return '';
+        if (p.startsWith('\\\\?\\UNC\\')) return '\\\\' + p.slice(8);
+        if (p.startsWith('\\\\?\\')) return p.slice(4);
+        return p;
+    };
+    const pathFile = (p: string | null | undefined): string => {
+        const s = prettyPath(p);
+        const i = Math.max(s.lastIndexOf('\\'), s.lastIndexOf('/'));
+        return i >= 0 ? s.slice(i + 1) : s;
+    };
+    const pathDir = (p: string | null | undefined): string => {
+        const s = prettyPath(p);
+        const i = Math.max(s.lastIndexOf('\\'), s.lastIndexOf('/'));
+        return i >= 0 ? s.slice(0, i) : '';
+    };
+
     const pickDemosFolder = async () => {
         const picked = await openDialog({
             title: 'Select your Defrag demos folder',
@@ -356,30 +376,41 @@
                     </p>
 
                     <div class="space-y-2">
-                        <div class="text-xs uppercase tracking-wider text-neutral-500">Engines</div>
+                        <div class="flex items-center justify-between">
+                            <div class="text-xs uppercase tracking-wider text-neutral-500">Engines</div>
+                            <span v-if="engines.length" class="text-xs text-neutral-600">{{ engines.length }} found</span>
+                        </div>
                         <div v-if="enginesLoading" class="text-sm text-neutral-500">Scanning…</div>
                         <div v-else-if="!engines.length" class="text-sm text-neutral-500">
                             None detected automatically.
                         </div>
-                        <label
-                            v-for="e in engines"
-                            :key="e.path"
-                            class="flex items-start gap-2 cursor-pointer bg-black/30 border border-white/10 rounded p-3 hover:bg-black/40"
-                            :class="{ 'ring-1 ring-brand-500': selectedEngine === e.path }"
-                        >
-                            <input
-                                type="radio"
-                                name="engine"
-                                :value="e.path"
-                                :checked="selectedEngine === e.path"
-                                @change="selectEngine(e.path)"
-                                class="mt-1"
-                            />
-                            <div class="min-w-0">
-                                <div class="font-semibold uppercase text-xs text-brand-400">{{ e.kind }}</div>
-                                <div class="text-sm text-neutral-200 break-all">{{ e.path }}</div>
-                            </div>
-                        </label>
+                        <!-- Scroll the list (not the whole page) so the header and the
+                             Selected / Demos / Next sections below stay on screen even
+                             when many engines are detected. -->
+                        <div v-if="engines.length" class="space-y-2 max-h-[40vh] overflow-y-auto pr-1 -mr-1">
+                            <label
+                                v-for="e in engines"
+                                :key="e.path"
+                                class="flex items-center gap-3 cursor-pointer bg-black/30 border border-white/10 rounded p-3 hover:bg-black/40"
+                                :class="{ 'ring-1 ring-brand-500 bg-brand-500/5': selectedEngine === e.path }"
+                            >
+                                <input
+                                    type="radio"
+                                    name="engine"
+                                    :value="e.path"
+                                    :checked="selectedEngine === e.path"
+                                    @change="selectEngine(e.path)"
+                                    class="flex-shrink-0"
+                                />
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex items-center gap-2">
+                                        <span class="font-semibold uppercase text-[10px] tracking-wider text-brand-400 flex-shrink-0">{{ e.kind }}</span>
+                                        <span class="text-sm text-neutral-100 font-medium truncate">{{ pathFile(e.path) }}</span>
+                                    </div>
+                                    <div class="text-xs text-neutral-500 truncate" :title="prettyPath(e.path)">{{ pathDir(e.path) }}</div>
+                                </div>
+                            </label>
+                        </div>
 
                         <button class="btn-ghost w-full" @click="pickManualEngine">Browse manually…</button>
                         <button class="text-xs text-neutral-500 hover:text-neutral-300" @click="rescanEngines">Rescan</button>
@@ -391,8 +422,9 @@
                             <svg class="w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                             </svg>
-                            <div class="flex-1 text-sm text-neutral-200 break-all min-w-0">
-                                {{ selectedEngine }}
+                            <div class="flex-1 min-w-0">
+                                <div class="text-sm text-neutral-100 font-medium truncate">{{ pathFile(selectedEngine) }}</div>
+                                <div class="text-xs text-neutral-500 truncate" :title="prettyPath(selectedEngine)">{{ pathDir(selectedEngine) }}</div>
                             </div>
                             <button class="btn-ghost flex-shrink-0" @click="selectedEngine = null">Change</button>
                         </div>
@@ -402,7 +434,7 @@
                         <div class="text-xs uppercase tracking-wider text-neutral-500">Demos folder</div>
                         <div class="flex items-center gap-2 bg-black/30 border border-white/10 rounded p-3">
                             <div class="flex-1 text-sm text-neutral-200 break-all min-w-0">
-                                {{ demosPath || '(not detected - click Change)' }}
+                                {{ demosPath ? prettyPath(demosPath) : '(not detected - click Change)' }}
                             </div>
                             <button class="btn-ghost" @click="pickDemosFolder">Change</button>
                         </div>
@@ -428,11 +460,11 @@
                         </li>
                         <li class="flex items-center gap-2">
                             <span class="text-brand-400">✓</span>
-                            <span>Engine: {{ selectedEngine }}</span>
+                            <span class="truncate">Engine: {{ pathFile(selectedEngine) }}</span>
                         </li>
                         <li class="flex items-center gap-2">
                             <span class="text-brand-400">✓</span>
-                            <span>Demos folder: {{ demosPath }}</span>
+                            <span class="break-all">Demos folder: {{ prettyPath(demosPath) }}</span>
                         </li>
                     </ul>
 
