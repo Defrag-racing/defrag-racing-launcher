@@ -384,9 +384,40 @@
                     {{ fmt(posSec) }} / {{ fmt(lenSec) }}
                 </span>
             </div>
-            <div class="mt-1 text-[11px] text-neutral-500">
-                Tip: ← / → seek 5 s (hold to scrub) · ↑ / ↓ seek 10 s · Esc closes the player.
+            <!-- Keyboard legend: what the shortcuts do while a demo plays. -->
+            <div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-neutral-500">
+                <span class="inline-flex items-center gap-1.5">
+                    <kbd class="kbd">←</kbd><kbd class="kbd">→</kbd>
+                    <span>seek 5 s <span class="text-neutral-600">(hold to scrub)</span></span>
+                </span>
+                <span class="inline-flex items-center gap-1.5">
+                    <kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd>
+                    <span>seek 10 s</span>
+                </span>
+                <span class="inline-flex items-center gap-1.5">
+                    <kbd class="kbd">Esc</kbd>
+                    <span>close player</span>
+                </span>
             </div>
         </div>
     </div>
 </template>
+
+<style scoped>
+    .kbd {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 1.4rem;
+        height: 1.25rem;
+        padding: 0 0.3rem;
+        border: 1px solid rgb(255 255 255 / 0.15);
+        border-bottom-width: 2px;
+        border-radius: 0.25rem;
+        background: rgb(255 255 255 / 0.06);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 10px;
+        line-height: 1;
+        color: rgb(212 212 212);
+    }
+</style>
