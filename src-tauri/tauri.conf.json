@@ -53,6 +53,14 @@
         "fragmentPaths": ["wix/cleanup.wxs"],
         "componentGroupRefs": ["LauncherCleanup"]
       }
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libsdl2-2.0-0"]
+      },
+      "rpm": {
+        "depends": ["SDL2"]
+      }
     }
   },
   "plugins": {

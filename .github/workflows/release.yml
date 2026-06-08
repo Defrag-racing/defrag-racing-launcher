@@ -168,7 +168,12 @@ jobs:
           # APPIMAGE_EXTRACT_AND_RUN env below also lets it run without FUSE, but
           # installing it too is cheap insurance against the runner image dropping
           # FUSE entirely.
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev build-essential curl wget file pkg-config libfuse2
+          # libsdl2-2.0-0: the bundled demo-player engine (resources/odfe/oDFe.x64)
+          # links libSDL2; linuxdeploy scans it while building the AppImage and
+          # fails ("failed to run linuxdeploy") if SDL2 isn't present to resolve.
+          # Installing it also lets linuxdeploy bundle SDL2 into the AppImage so
+          # the player works on machines without it.
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev build-essential curl wget file pkg-config libfuse2 libsdl2-2.0-0
 
       - name: Install npm deps
         run: npm ci
