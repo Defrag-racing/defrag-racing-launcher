@@ -4,8 +4,9 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 0.1.37
+## 0.1.38
 
+- **Demos always render at 125 fps in the player.** The embedded engine windows are never the OS-foreground window, so the engine had been capping them at the unfocused limit (60 fps) - playback (and every comparison pane) now runs at a full 125 fps regardless of which window has focus.
 - **Wider, easier-to-read onboarding.** The setup card is roomier so the feature lists wrap onto fewer lines instead of cramming into a narrow column.
 - **The token step now spells out everything a token unlocks** - the same full feature list used elsewhere - instead of a short 3-item summary that hid most of what you get.
 - **The launcher no longer offers its own bundled demo-player engine as a defrag:// engine.** The engine shipped for the embedded player is internal-only; it's now filtered out of the engine picker on Windows, macOS and Linux, so you only ever pick your real Defrag install.

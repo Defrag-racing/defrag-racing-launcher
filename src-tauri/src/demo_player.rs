@@ -715,6 +715,17 @@ fn spawn_pane(
         .arg("+set")
         .arg("con_notifytime")
         .arg("0")
+        // The embedded engine windows are never the OS-foreground window (the
+        // launcher is), so the engine treats them as "unfocused" and would cap
+        // at com_maxfpsUnfocused (default 60). Force both the focused and
+        // unfocused caps to 125 (8 ms/frame) so every pane renders smoothly
+        // regardless of which window has focus - this is the deliberate bypass.
+        .arg("+set")
+        .arg("com_maxfps")
+        .arg("125")
+        .arg("+set")
+        .arg("com_maxfpsUnfocused")
+        .arg("125")
         .arg("+set")
         .arg("fs_basepath")
         .arg(basepath.to_string_lossy().to_string());
