@@ -284,6 +284,138 @@ fn destroy_stage_on_main(app: &AppHandle, hwnd: isize) {
     let _ = app.run_on_main_thread(move || stage::destroy(hwnd));
 }
 
+// ---- transport-key hook ----------------------------------------------------
+//
+// The embedded engine renders into a child of our stage window, but it is a
+// SEPARATE PROCESS. When the user clicks the demo, keyboard focus moves to the
+// engine's window, so the launcher's WebView never sees keydowns and its
+// transport shortcuts go dead until the user clicks back into the launcher.
+// Forwarding keys from inside the engine only works while the engine window
+// actually holds focus, which in this cross-process embed it often doesn't.
+//
+// A low-level keyboard hook (WH_KEYBOARD_LL) sees every keystroke system-wide,
+// before any window, regardless of which process has focus. We install it while
+// a demo plays and act ONLY when the demo is the focused context (foreground is
+// our stage window, or a window belonging to the engine process) - so we never
+// hijack keys while the user types in the launcher's own UI (there the WebView's
+// own handler runs). Matching keys are turned into `demo-player-key` events and
+// swallowed so nothing else also reacts.
+
+/// Context the hook needs: where to emit, and how to recognize "demo focused".
+#[cfg(windows)]
+struct KeyHookCtx {
+    app: AppHandle,
+    stage: isize,
+    engine_pid: u32,
+}
+
+#[cfg(windows)]
+static KEY_HOOK_CTX: Mutex<Option<KeyHookCtx>> = Mutex::new(None);
+/// Installed HHOOK as isize (0 = none). Stored so we can unhook on stop.
+#[cfg(windows)]
+static KEY_HOOK_HANDLE: Mutex<isize> = Mutex::new(0);
+
+#[cfg(windows)]
+unsafe extern "system" fn ll_keyboard_proc(
+    code: i32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::Foundation::LRESULT;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CallNextHookEx, GetForegroundWindow, GetWindowThreadProcessId, HC_ACTION, KBDLLHOOKSTRUCT,
+    };
+
+    const WM_KEYDOWN: u32 = 0x0100;
+    const WM_SYSKEYDOWN: u32 = 0x0104;
+
+    if code == HC_ACTION as i32 {
+        let msg = wparam.0 as u32;
+        if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
+            let kb = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
+            // map the few transport keys we care about (VK_* codes)
+            let name = match kb.vkCode {
+                0x1B => Some("esc"),
+                0x20 => Some("space"),
+                0x25 => Some("left"),
+                0x26 => Some("up"),
+                0x27 => Some("right"),
+                0x28 => Some("down"),
+                _ => None,
+            };
+            if let Some(name) = name {
+                if let Ok(guard) = KEY_HOOK_CTX.lock() {
+                    if let Some(ctx) = guard.as_ref() {
+                        // Is the demo the focused context?
+                        let fg = GetForegroundWindow();
+                        let mut in_demo = fg.0 as isize == ctx.stage;
+                        if !in_demo {
+                            let mut pid = 0u32;
+                            GetWindowThreadProcessId(fg, Some(&mut pid));
+                            in_demo = pid != 0 && pid == ctx.engine_pid;
+                        }
+                        if in_demo {
+                            ctx.app.emit("demo-player-key", name.to_string()).ok();
+                            return LRESULT(1); // swallow - nothing else reacts
+                        }
+                    }
+                }
+            }
+        }
+    }
+    CallNextHookEx(None, code, wparam, lparam)
+}
+
+/// Start intercepting transport keys for the active session.
+fn install_key_hook(app: &AppHandle, stage: isize, engine_pid: u32) {
+    #[cfg(windows)]
+    {
+        *KEY_HOOK_CTX.lock().unwrap() = Some(KeyHookCtx {
+            app: app.clone(),
+            stage,
+            engine_pid,
+        });
+        // LL hooks fire on the installing thread's message loop - install on the
+        // main (UI) thread, which Tauri pumps.
+        let _ = app.run_on_main_thread(|| unsafe {
+            use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+            use windows::Win32::UI::WindowsAndMessaging::{SetWindowsHookExW, WH_KEYBOARD_LL};
+            let hinst = GetModuleHandleW(None).unwrap_or_default();
+            if let Ok(h) = SetWindowsHookExW(WH_KEYBOARD_LL, Some(ll_keyboard_proc), Some(hinst.into()), 0) {
+                *KEY_HOOK_HANDLE.lock().unwrap() = h.0 as isize;
+            }
+        });
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, stage, engine_pid);
+    }
+}
+
+/// Stop intercepting transport keys.
+fn remove_key_hook(app: &AppHandle) {
+    #[cfg(windows)]
+    {
+        let h = {
+            let mut g = KEY_HOOK_HANDLE.lock().unwrap();
+            let v = *g;
+            *g = 0;
+            v
+        };
+        if h != 0 {
+            let _ = app.run_on_main_thread(move || unsafe {
+                use windows::Win32::UI::WindowsAndMessaging::{UnhookWindowsHookEx, HHOOK};
+                let _ = UnhookWindowsHookEx(HHOOK(h as *mut std::ffi::c_void));
+            });
+        }
+        *KEY_HOOK_CTX.lock().unwrap() = None;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+    }
+}
+
 // ---- control channel -------------------------------------------------------
 
 /// Parse one `status ...` line into a `StatusEvent`. Returns None for any other
@@ -432,6 +564,7 @@ fn child_exited(child: &Arc<Mutex<std::process::Child>>) -> bool {
 /// Tear down a running session: signal the thread, kill the engine, drop the
 /// stage window.
 fn stop_session(app: &AppHandle, mut s: Session) {
+    remove_key_hook(app);
     s.stop.store(true, Ordering::Relaxed);
     if let Ok(mut c) = s.child.lock() {
         let _ = c.kill();
@@ -564,6 +697,10 @@ pub async fn demo_player_start(
                 return Err(format!("Failed to launch the demo-player engine: {e}"));
             }
         };
+
+        // Intercept transport keys while the demo (engine window) has focus.
+        let engine_pid = child.id();
+        install_key_hook(&app, stage, engine_pid);
 
         let child = Arc::new(Mutex::new(child));
         let stop = Arc::new(AtomicBool::new(false));
