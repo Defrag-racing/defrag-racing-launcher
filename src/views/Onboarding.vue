@@ -1,5 +1,5 @@
 <script setup lang="ts">
-    import { computed, onMounted, ref } from 'vue';
+    import { computed, onActivated, onMounted, ref } from 'vue';
     import { useRouter } from 'vue-router';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
     import { openExternal } from '../lib/open';
@@ -183,12 +183,25 @@
         }
     };
 
-    onMounted(() => {
-        // Prefetch engine list so step 3 shows results instantly. If the
-        // user is skipping straight through, this cost is wasted but it's
-        // tiny (<100ms on a warm filesystem).
+    // Put the wizard back to a clean step 1. The view is kept-alive, so after
+    // a Reset (which routes here from Settings) the cached instance would
+    // otherwise still show the old "All set" finish step with the previous
+    // engine/demos filled in. Resetting on entry makes Reset a true restart.
+    const resetWizard = () => {
+        step.value = 1;
+        token.value = '';
+        tokenError.value = null;
+        tokenSkipped.value = false;
+        tokenSavedName.value = null;
+        showSkipConfirm.value = false;
+        selectedEngine.value = null;
+        demosPath.value = null;
+        // Prefetch engine list so the picker shows results instantly.
         rescanEngines();
-    });
+    };
+
+    onMounted(resetWizard);
+    onActivated(resetWizard);
 </script>
 
 <template>
