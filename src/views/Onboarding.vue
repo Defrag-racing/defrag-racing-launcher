@@ -285,7 +285,10 @@
                     <p class="text-sm text-neutral-400 leading-relaxed">
                         A token links the launcher to your defrag.racing account. It unlocks:
                     </p>
-                    <ul class="text-sm text-neutral-300 space-y-1 pl-1 marker:text-brand-400">
+                    <!-- Two columns on the wide card so the full feature list
+                         stays short vertically - the token input below must be
+                         reachable without scrolling. -->
+                    <ul class="text-sm text-neutral-300 grid sm:grid-cols-2 gap-x-6 gap-y-1 pl-1 marker:text-brand-400">
                         <TokenFeatureList />
                     </ul>
                     <p class="text-xs text-neutral-500 leading-relaxed">
