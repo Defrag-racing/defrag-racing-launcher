@@ -607,16 +607,16 @@
     };
 
     const renderLabelFor = (d: DemoLibraryEntry): string => {
-        if (!d.hash) return 'Render';
+        if (!d.hash) return 'Render to video';
         if (rendering.value.has(d.hash)) return 'Working…';
         const st = renderState.value[d.hash];
-        if (!st || !st.has_render) return 'Render';
+        if (!st || !st.has_render) return 'Render to video';
         switch (st.status) {
-            case 'completed': return 'View ▶';
+            case 'completed': return 'Watch on YouTube';
             case 'pending':   return 'Queued';
             case 'rendering': return 'Rendering…';
             case 'uploading': return 'Uploading…';
-            case 'failed':    return 'Retry';
+            case 'failed':    return 'Retry render';
             default:          return 'Queued';
         }
     };
@@ -987,26 +987,31 @@
                     <!-- play embedded (Windows only) -->
                     <button
                         v-if="isWindows"
-                        class="px-3 py-1 rounded text-xs font-semibold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 flex-shrink-0 flex items-center gap-1"
-                        title="Play this demo in the launcher"
+                        class="px-3 py-1 rounded text-xs font-semibold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 flex-shrink-0 flex items-center gap-1 whitespace-nowrap"
+                        title="Watch this run instantly in the embedded player - no rendering or upload needed"
                         @click.stop="playDemo(d)"
-                    >▶ Play</button>
+                    >▶ Play in launcher</button>
 
-                    <!-- render -->
+                    <!-- render / play YouTube -->
                     <button
                         v-if="config.hasToken"
-                        class="px-3 py-1 rounded text-xs font-semibold disabled:opacity-50 flex-shrink-0"
+                        class="px-3 py-1 rounded text-xs font-semibold disabled:opacity-50 flex-shrink-0 flex items-center gap-1 whitespace-nowrap"
                         :class="renderIsCompleted(d)
                             ? 'bg-red-500/20 hover:bg-red-500/30 text-red-300'
                             : 'bg-brand-500/20 hover:bg-brand-500/30 text-brand-300'"
                         :disabled="!d.hash || (!!d.hash && rendering.has(d.hash))"
-                        :title="d.hash
-                            ? 'Queue a YouTube render'
-                            : ((d.upload_status === 'done' || d.upload_status === 'duplicate')
-                                ? 'Backed up, but its fingerprint is missing locally - turn on auto-backup (Start) to recompute it, then you can render'
-                                : 'Back this demo up first (turn on auto-backup), then you can render it')"
+                        :title="renderIsCompleted(d)
+                            ? 'Open the rendered run on YouTube'
+                            : (d.hash
+                                ? 'Render this run to a video and upload it to the defrag.racing YouTube channel'
+                                : ((d.upload_status === 'done' || d.upload_status === 'duplicate')
+                                    ? 'Backed up, but its fingerprint is missing locally - turn on auto-backup (Start) to recompute it, then you can render'
+                                    : 'Back this demo up first (turn on auto-backup), then you can render it'))"
                         @click="renderClickFor(d)"
-                    >{{ renderLabelFor(d) }}</button>
+                    >
+                        <svg v-if="renderIsCompleted(d)" class="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"/><path d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#0a0a0a"/></svg>
+                        <span>{{ renderLabelFor(d) }}</span>
+                    </button>
                 </li>
             </ul>
         </div>
