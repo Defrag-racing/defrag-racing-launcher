@@ -977,6 +977,17 @@ pub fn demo_player_seek_pane(state: State<'_, AppState>, pane: u8, ms: i32) -> R
     Ok(())
 }
 
+/// Send a verbatim console line to ONE pane (e.g. `s_volume 0` to mute it during
+/// a comparison so you only hear the demos you want). Unknown indices ignored.
+#[tauri::command]
+pub fn demo_player_pane_command(state: State<'_, AppState>, pane: u8, line: String) -> Result<(), String> {
+    let guard = state.demo_player.inner.lock().unwrap();
+    if let Some(p) = guard.iter().find(|p| p.index == pane) {
+        let _ = p.cmd_tx.send(line);
+    }
+    Ok(())
+}
+
 /// Reposition every pane's stage for a new region/aspect. `restart` issues a
 /// `vid_restart` per pane (needed when the client size changed); a plain move
 /// (window dragged) passes false so the engine needn't re-init.

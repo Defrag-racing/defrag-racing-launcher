@@ -326,6 +326,9 @@ export const tauri = {
      *  Used to nudge demo B's alignment without making demo A jump back. */
     demoPlayerSeekPane: (pane: number, ms: number) =>
         invoke<void>('demo_player_seek_pane', { pane, ms }),
+    /** Send a console line to ONE pane (e.g. `s_volume 0` to mute it). */
+    demoPlayerPaneCommand: (pane: number, line: string) =>
+        invoke<void>('demo_player_pane_command', { pane, line }),
     /** Reposition the render region (window resize) + re-init the engine
      *  render window at the new size (vid_restart). */
     demoPlayerSetRegion: (

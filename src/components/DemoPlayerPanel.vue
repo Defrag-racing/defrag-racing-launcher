@@ -43,11 +43,31 @@
     // is the anchor (offset 0); panes 1+ are nudged against it.
     const offsets = ref<number[]>([]);
 
+    // Per-pane audio mute. With several demos playing at once their sound would
+    // overlap into noise, so by default only demo A is audible and the rest
+    // start muted; each can be toggled. Quake's master volume is s_volume.
+    const DEFAULT_VOL = 0.8;
+    const muted = ref<boolean[]>([]);
+
     const blankTimer = (): PaneTimer => ({ posMs: 0, lenMs: 0, posSec: 0, lenSec: 0, measured: false, atEnd: false });
     const initPaneArrays = () => {
         const n = paneCount.value;
         paneTimers.value = Array.from({ length: n }, blankTimer);
         offsets.value = Array.from({ length: n }, () => 0);
+        // Default: demo A audible, the rest muted (avoids overlapping audio).
+        muted.value = Array.from({ length: n }, (_, i) => isCompare.value && i > 0);
+    };
+
+    // Push every pane's current mute state to its engine (after start).
+    const applyMutes = () => {
+        muted.value.forEach((m, i) => {
+            tauri.demoPlayerPaneCommand(i, `s_volume ${m ? 0 : DEFAULT_VOL}`).catch(() => {});
+        });
+    };
+    const toggleMute = (i: number) => {
+        if (i < 0 || i >= muted.value.length) return;
+        muted.value[i] = !muted.value[i];
+        tauri.demoPlayerPaneCommand(i, `s_volume ${muted.value[i] ? 0 : DEFAULT_VOL}`).catch(() => {});
     };
 
     const isWindows = navigator.userAgent.includes('Windows');
@@ -224,6 +244,9 @@
             if (!region) throw new Error('Render area not ready');
             await tauri.demoPlayerCompareStart(c.demos.map((d) => d.path), region, lastAspect);
             playing.value = true;
+            // Apply the default mute layout (only A audible) once the engines
+            // are up; the control channel buffers these until each connects.
+            applyMutes();
         } catch (e: any) {
             playError.value = e?.toString?.() ?? 'Failed to start comparison';
             playing.value = false;
@@ -722,8 +745,16 @@
             <span v-if="compare" class="flex-1 flex items-center justify-center gap-2 text-sm font-semibold truncate">
                 <template v-for="(d, i) in compare.demos" :key="i">
                     <span v-if="i > 0" class="text-neutral-500 flex-shrink-0">vs</span>
-                    <span class="truncate" :class="paneColor(i)" :title="d.name">
-                        <span class="opacity-60">{{ paneLetter(i) }}</span> {{ formatDemoName(d.name) }}
+                    <span class="flex items-center gap-1 truncate min-w-0">
+                        <button
+                            class="flex-shrink-0 px-1 rounded hover:bg-white/10"
+                            :class="(muted[i] ?? false) ? 'opacity-50' : ''"
+                            :title="(muted[i] ?? false) ? `Unmute demo ${paneLetter(i)}` : `Mute demo ${paneLetter(i)}`"
+                            @click="toggleMute(i)"
+                        >{{ (muted[i] ?? false) ? '🔇' : '🔊' }}</button>
+                        <span class="truncate" :class="paneColor(i)" :title="d.name">
+                            <span class="opacity-60">{{ paneLetter(i) }}</span> {{ formatDemoName(d.name) }}
+                        </span>
                     </span>
                 </template>
             </span>
