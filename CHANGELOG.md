@@ -4,6 +4,11 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.40
+
+- **History auto-refreshes.** The History tab now reloads itself every 30 seconds while it's open and the launcher window is focused, so connections you make in-game show up without pressing Refresh. It stays quiet when the window is in the background or you're on another tab.
+- **Clearing history now asks first.** The **Clear** button used to wipe your whole connection history immediately - the confirmation prompt didn't actually appear inside the launcher. It now arms an inline **Clear all / Cancel** confirmation, so a stray click can't nuke your history.
+
 ## 0.1.39
 
 - **Demos always render at 125 fps in the player.** The embedded engine windows are never the OS-foreground window, so the engine had been capping them at the unfocused limit (60 fps) - playback (and every comparison pane) now runs at a full 125 fps regardless of which window has focus.

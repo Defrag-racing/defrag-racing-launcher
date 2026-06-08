@@ -5,7 +5,7 @@
     // name) + map + ip:port; clicking the row re-connects to the same
     // address via the existing protocol handler.
 
-    import { computed, onActivated, onMounted, ref } from 'vue';
+    import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
     import { tauri, type ConnectionEntry } from '../lib/tauri';
     import { q3ToHtml } from '../lib/q3color';
     import { openExternal } from '../lib/open';
@@ -15,8 +15,10 @@
     const error = ref<string | null>(null);
     const reconnecting = ref<string | null>(null);
 
-    const refresh = async () => {
-        loading.value = true;
+    // `silent` skips the loading spinner so the auto-refresh tick doesn't
+    // flash "Loading…" over a list that's already on screen.
+    const refresh = async (silent = false) => {
+        if (!silent) loading.value = true;
         error.value = null;
         try {
             entries.value = await tauri.getConnectionHistory();
@@ -27,14 +29,50 @@
         }
     };
 
-    onMounted(refresh);
+    onMounted(() => { void refresh(); });
     // keep-alive re-entry: re-read history.json so a defrag:// click
     // that happened while the user was on a different tab shows up
     // immediately when they switch back here.
-    onActivated(() => { void refresh(); });
+    const viewActive = ref(true);
+    onActivated(() => { viewActive.value = true; void refresh(); });
+    onDeactivated(() => { viewActive.value = false; });
 
+    // Auto-refresh every 30s, but only while this view is the one on
+    // screen AND the launcher window is actually focused/visible - no
+    // point hammering history.json when the user is in another app or on
+    // a different tab. Uses a silent refresh so the list doesn't flicker.
+    let autoTimer: number | undefined;
+    const windowIsActive = (): boolean =>
+        document.visibilityState === 'visible' && document.hasFocus();
+    onMounted(() => {
+        autoTimer = window.setInterval(() => {
+            if (viewActive.value && windowIsActive()) void refresh(true);
+        }, 30_000);
+    });
+    onUnmounted(() => {
+        if (autoTimer !== undefined) window.clearInterval(autoTimer);
+    });
+
+    // Two-step clear: first click arms the inline confirm, second click
+    // (the red "Clear all" button) actually wipes. Replaces window.confirm,
+    // which is unreliable inside the WebView (returns immediately on some
+    // platforms, so history got nuked with no prompt).
+    const confirmingClear = ref(false);
+    let confirmTimer: number | undefined;
+    const askClear = () => {
+        confirmingClear.value = true;
+        // auto-disarm after a few seconds so a stray armed state doesn't
+        // linger and catch the next click.
+        if (confirmTimer !== undefined) window.clearTimeout(confirmTimer);
+        confirmTimer = window.setTimeout(() => { confirmingClear.value = false; }, 5_000);
+    };
+    const cancelClear = () => {
+        confirmingClear.value = false;
+        if (confirmTimer !== undefined) window.clearTimeout(confirmTimer);
+    };
     const clearAll = async () => {
-        if (!confirm('Clear all connection history?')) return;
+        confirmingClear.value = false;
+        if (confirmTimer !== undefined) window.clearTimeout(confirmTimer);
         try {
             await tauri.clearConnectionHistory();
             entries.value = [];
@@ -90,7 +128,6 @@
     onMounted(() => {
         nowTimer = window.setInterval(() => { _now.value = Date.now(); }, 30_000);
     });
-    import { onUnmounted } from 'vue';
     onUnmounted(() => {
         if (nowTimer !== undefined) window.clearInterval(nowTimer);
     });
@@ -140,13 +177,26 @@
                 <button
                     class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-50"
                     :disabled="loading"
-                    @click="refresh"
+                    @click="refresh()"
                 >{{ loading ? 'Loading…' : 'Refresh' }}</button>
-                <button
-                    v-if="entries.length"
-                    class="px-2 py-1 rounded bg-white/5 hover:bg-red-500/20 text-neutral-400 hover:text-red-300"
-                    @click="clearAll"
-                >Clear</button>
+                <template v-if="entries.length">
+                    <button
+                        v-if="!confirmingClear"
+                        class="px-2 py-1 rounded bg-white/5 hover:bg-red-500/20 text-neutral-400 hover:text-red-300"
+                        @click="askClear"
+                    >Clear</button>
+                    <template v-else>
+                        <span class="text-neutral-400">Clear all history?</span>
+                        <button
+                            class="px-2 py-1 rounded bg-red-500/20 hover:bg-red-500/30 text-red-300 font-semibold"
+                            @click="clearAll"
+                        >Clear all</button>
+                        <button
+                            class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300"
+                            @click="cancelClear"
+                        >Cancel</button>
+                    </template>
+                </template>
             </div>
         </header>
 
