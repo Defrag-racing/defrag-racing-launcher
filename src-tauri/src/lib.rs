@@ -194,6 +194,11 @@ pub fn run() {
             // so the launcher stays alive in the tray. The user can
             // still quit explicitly via the tray menu's Quit item.
             if let WindowEvent::CloseRequested { api, .. } = event {
+                // Kill any embedded demo before the window vanishes into the
+                // tray - otherwise the spawned engine keeps playing with no
+                // transport UI to stop it (the controls live in the now-hidden
+                // window).
+                demo_player::stop_active_session(window.app_handle());
                 let _ = window.hide();
                 api.prevent_close();
             }

@@ -48,6 +48,7 @@
 
     const embedRegion = ref<HTMLDivElement | null>(null);
     let unlisten: UnlistenFn | null = null;
+    let unlistenClosed: UnlistenFn | null = null;
     let unlistenMoved: UnlistenFn | null = null;
     let resizeObs: ResizeObserver | null = null;
     let resizeTimer: number | null = null;
@@ -157,8 +158,36 @@
         seekHoldUntil = now() + 700;
     };
 
+    // Jump the playhead by a fixed amount (ms). Used by the Up/Down 10 s seek.
+    const seekBy = (deltaMs: number) => {
+        const base = now() < seekHoldUntil ? seekTarget : posMs.value;
+        seekTarget = base + deltaMs;
+        if (seekTarget < 0) seekTarget = 0;
+        if (lenMs.value > 0 && seekTarget > lenMs.value) seekTarget = lenMs.value;
+        cmd(`seekdemo ${Math.round(seekTarget)}`);
+        const sec = Math.round(seekTarget / 1000);
+        posSec.value = Math.min(Math.max(sec, 0), lenSec.value || sec);
+        seekHoldUntil = now() + 300;
+    };
+
     const onKeydown = (e: KeyboardEvent) => {
         if (!playing.value) return;
+
+        // ESC quits the player entirely (same as the close button).
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            close();
+            return;
+        }
+
+        // Up / Down jump 10 s back/forward.
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            seekBy(e.key === 'ArrowUp' ? 10000 : -10000);
+            return;
+        }
+
+        // Left / Right: 5 s nudge, accelerating to a 2 s scrub when held.
         let dir = 0;
         if (e.key === 'ArrowRight') dir = 1;
         else if (e.key === 'ArrowLeft') dir = -1;
@@ -255,6 +284,14 @@
 
     onMounted(async () => {
         unlisten = await listen<DemoPlayerStatus>('demo-player-status', (e) => onStatus(e.payload));
+        // The engine went away on its own (demo ended, crash, or the backend
+        // killed it because the launcher was sent to the tray). Drop our UI back
+        // to the idle state so a stale "playing" panel doesn't linger.
+        unlistenClosed = await listen('demo-player-closed', () => {
+            if (!playing.value) return;
+            playing.value = false;
+            emit('close');
+        });
         unlistenMoved = await getCurrentWindow().onMoved(onWindowMoved);
         window.addEventListener('keydown', onKeydown);
         if (embedRegion.value) {
@@ -276,6 +313,7 @@
     onUnmounted(() => {
         stop();
         if (unlisten) unlisten();
+        if (unlistenClosed) unlistenClosed();
         if (unlistenMoved) unlistenMoved();
         window.removeEventListener('keydown', onKeydown);
         if (resizeObs) resizeObs.disconnect();
@@ -347,7 +385,7 @@
                 </span>
             </div>
             <div class="mt-1 text-[11px] text-neutral-500">
-                Tip: ← / → seek 5 s (hold to scrub). Resize the window to rescale.
+                Tip: ← / → seek 5 s (hold to scrub) · ↑ / ↓ seek 10 s · Esc closes the player.
             </div>
         </div>
     </div>

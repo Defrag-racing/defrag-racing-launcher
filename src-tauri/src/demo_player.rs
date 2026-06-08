@@ -39,11 +39,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use tauri::{AppHandle, Emitter, State};
-// `Manager` (app.path / get_webview_window) is only used in the Windows-gated
-// start path.
-#[cfg(windows)]
-use tauri::Manager;
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::commands::AppState;
 
@@ -667,6 +663,24 @@ pub async fn demo_player_stop(app: AppHandle, state: State<'_, AppState>) -> Res
         stop_session(&app, s);
     }
     Ok(())
+}
+
+/// Synchronously stop any active session. Safe to call from the main thread
+/// (e.g. the window-close handler): unlike `demo_player_stop` it's not an async
+/// command, so it can run in the `on_window_event` callback. Without this, hiding
+/// the launcher to the tray would leave the spawned engine process running with
+/// no UI to control it. Emits `demo-player-closed` so a still-mounted frontend
+/// resets its playing state.
+pub fn stop_active_session(app: &AppHandle) {
+    let session = {
+        let state = app.state::<AppState>();
+        let mut guard = state.demo_player.inner.lock().unwrap();
+        guard.take()
+    };
+    if let Some(s) = session {
+        stop_session(app, s);
+        app.emit("demo-player-closed", ()).ok();
+    }
 }
 
 #[cfg(test)]
