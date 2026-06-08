@@ -496,6 +496,11 @@
 
     onDeactivated(() => {
         active = false;
+        // Leaving the Demos tab while a demo plays: end playback and clear the
+        // overlay, so the engine stops and coming back shows just the demo list
+        // (not a stale player). Clearing the target unmounts the panel, which
+        // stops the engine.
+        playerTarget.value = null;
     });
 
     onUnmounted(() => {
