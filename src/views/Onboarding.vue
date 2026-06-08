@@ -213,7 +213,7 @@
 
 <template>
     <div class="min-h-full flex items-center justify-center p-6 overflow-y-auto">
-        <div class="max-w-xl w-full bg-neutral-900 border border-white/10 rounded-xl overflow-hidden flex flex-col max-h-[calc(100vh-3rem)]">
+        <div class="max-w-3xl w-full bg-neutral-900 border border-white/10 rounded-xl overflow-hidden flex flex-col max-h-[calc(100vh-3rem)]">
             <!-- progress -->
             <div class="h-1 bg-white/5 flex-shrink-0">
                 <div class="h-full bg-brand-500 transition-all" :style="{ width: (step * 25) + '%' }"></div>
@@ -285,17 +285,12 @@
                     <p class="text-sm text-neutral-400 leading-relaxed">
                         A token links the launcher to your defrag.racing account. It unlocks:
                     </p>
-                    <ul class="text-sm text-neutral-300 space-y-1 pl-1">
-                        <li class="flex gap-2"><span class="text-brand-400 mt-0.5">✓</span><span>Server browser with your personal best / rank per map</span></li>
-                        <li class="flex gap-2"><span class="text-brand-400 mt-0.5">✓</span><span>Notifications - record + system alerts for your account</span></li>
-                        <li class="flex gap-2">
-                            <span class="text-brand-400 mt-0.5">✓</span>
-                            <span>
-                                Optional auto-upload of new demos
-                                <span class="text-neutral-500">(off by default - you turn it on later with the Start button)</span>
-                            </span>
-                        </li>
+                    <ul class="text-sm text-neutral-300 space-y-1 pl-1 marker:text-brand-400">
+                        <TokenFeatureList />
                     </ul>
+                    <p class="text-xs text-neutral-500 leading-relaxed">
+                        Auto-upload of new demos stays <strong>off by default</strong> - you turn it on later with the Start button on the dashboard.
+                    </p>
                     <p class="text-xs text-neutral-500 leading-relaxed">
                         Without a token, only <code class="bg-black/40 px-1 rounded">defrag://</code> server-join links work. You can paste a token later from Settings.
                     </p>

@@ -4,6 +4,12 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.37
+
+- **Wider, easier-to-read onboarding.** The setup card is roomier so the feature lists wrap onto fewer lines instead of cramming into a narrow column.
+- **The token step now spells out everything a token unlocks** - the same full feature list used elsewhere - instead of a short 3-item summary that hid most of what you get.
+- **The launcher no longer offers its own bundled demo-player engine as a defrag:// engine.** The engine shipped for the embedded player is internal-only; it's now filtered out of the engine picker on Windows, macOS and Linux, so you only ever pick your real Defrag install.
+
 ## 0.1.36
 
 - **Watch your demos right inside the launcher.** Every demo in the Demos tab now has a **▶ Play instantly in launcher** button that plays it embedded in the window - no separate game launch, no setup. It uses a bundled engine, so it just works on Windows. Full transport bar underneath: separate **Play** and **Pause**, speed buttons from **0.1x to 8x**, and a scrub bar that previews the frame live as you drag it.

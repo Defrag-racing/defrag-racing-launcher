@@ -484,8 +484,17 @@ pub fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<(), String
 // ---- Engine detection ------------------------------------------------------
 
 #[tauri::command]
-pub fn detect_engines() -> Vec<EngineCandidate> {
-    engine::detect()
+pub fn detect_engines(app: tauri::AppHandle) -> Vec<EngineCandidate> {
+    use tauri::Manager;
+    // Hand the scanner our resolved resource directory so the bundled
+    // demo-player oDFe (resources/odfe/) is filtered out on every platform -
+    // on macOS/Linux it lives nowhere near the launcher exe, so current_exe()
+    // alone can't find it.
+    let resource_dir = app
+        .path()
+        .resolve("resources", tauri::path::BaseDirectory::Resource)
+        .ok();
+    engine::detect(resource_dir)
 }
 
 #[tauri::command]

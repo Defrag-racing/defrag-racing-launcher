@@ -36,9 +36,32 @@ pub enum EngineKind {
 
 const MAX_DEPTH: usize = 4;
 
-pub fn detect() -> Vec<EngineCandidate> {
+/// `extra_exclude` is the app's resolved resource directory (passed from the
+/// Tauri command). The launcher SHIPS its own purpose-built oDFe for the
+/// embedded demo player under that resource tree - on Windows it sits next to
+/// the launcher exe, but on macOS it's inside `.app/Contents/Resources` and on
+/// Linux under the bundled resource dir, none of which are reliably reachable
+/// from current_exe()'s parent. Excluding both the exe dir AND the resolved
+/// resource dir covers every platform.
+pub fn detect(extra_exclude: Option<PathBuf>) -> Vec<EngineCandidate> {
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
+
+    // That bundled binary is an internal implementation detail - it must NEVER
+    // be offered as a defrag:// engine (picking it would point join-links at
+    // the headless player build). Build the set of directories to skip.
+    let mut excludes: Vec<PathBuf> = Vec::new();
+    if let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
+        .and_then(|p| p.canonicalize().ok())
+    {
+        excludes.push(exe_dir);
+    }
+    if let Some(res) = extra_exclude.and_then(|p| p.canonicalize().ok().or(Some(p))) {
+        excludes.push(res);
+    }
+    let is_excluded = |path: &Path| excludes.iter().any(|b| path.starts_with(b));
 
     for root in candidate_roots() {
         if !root.exists() {
@@ -60,6 +83,9 @@ pub fn detect() -> Vec<EngineCandidate> {
                 // Canonicalize so two roots pointing at the same install
                 // (symlink + real path) don't both appear.
                 let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+                if is_excluded(&canonical) {
+                    continue;
+                }
                 if seen.insert(canonical.clone()) {
                     out.push(EngineCandidate {
                         kind,
@@ -87,6 +113,9 @@ pub fn detect() -> Vec<EngineCandidate> {
                 if let Some(kind) = classify(name_str) {
                     let p = entry.path();
                     let canonical = p.canonicalize().unwrap_or(p.clone());
+                    if is_excluded(&canonical) {
+                        continue;
+                    }
                     if seen.insert(canonical.clone()) {
                         out.push(EngineCandidate {
                             kind,
