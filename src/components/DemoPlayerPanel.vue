@@ -82,6 +82,9 @@
     const fineMax = ref(0);
     let scrubPressed = false; // pointer is down on the scrub handle
     let dwellTimer: number | null = null;
+    let lastMoveX = 0; // pointer position when the dwell timer was last (re)armed
+    let lastMoveY = 0;
+    const MOVE_THRESHOLD = 3; // px of movement that counts as "still moving"
 
     // Interaction guards (mirrors the validated test harness behaviour).
     let dragging = false;
@@ -345,26 +348,24 @@
         fineMode.value = false;
         clearDwell();
     };
-    // Keep the zoom usable when the user drags to an edge: slide the window so
-    // they can keep going past it without releasing.
-    const maybeShiftWindow = (ms: number) => {
-        const edge = 50; // ms from the window edge that triggers a shift
-        const span = maxLenMs.value;
-        if (ms <= fineMin.value + edge && fineMin.value > 0) {
-            const lo = Math.max(0, fineMin.value - FINE_WINDOW_MS / 2);
-            fineMin.value = lo;
-            fineMax.value = lo + FINE_WINDOW_MS;
-        } else if (ms >= fineMax.value - edge && (span === 0 || fineMax.value < span)) {
-            let hi = fineMax.value + FINE_WINDOW_MS / 2;
-            if (span > 0 && hi > span) hi = span;
-            fineMax.value = hi;
-            fineMin.value = Math.max(0, hi - FINE_WINDOW_MS);
-        }
-    };
-
-    const onScrubPointerDown = () => {
+    const onScrubPointerDown = (e: PointerEvent) => {
         scrubPressed = true;
+        lastMoveX = e.clientX;
+        lastMoveY = e.clientY;
         armDwell();
+    };
+    // Real mouse movement (not just value changes) cancels/restarts the dwell:
+    // with a 1 s step the slider fires no `input` while you drag within the same
+    // second, so without this the zoom would wrongly trigger mid-move. Any
+    // movement past a small threshold re-arms the timer, so the zoom only fires
+    // when the pointer is genuinely held still.
+    const onScrubPointerMove = (e: PointerEvent) => {
+        if (!scrubPressed || fineMode.value) return;
+        if (Math.abs(e.clientX - lastMoveX) + Math.abs(e.clientY - lastMoveY) >= MOVE_THRESHOLD) {
+            lastMoveX = e.clientX;
+            lastMoveY = e.clientY;
+            armDwell();
+        }
     };
     const onScrubPointerUp = () => {
         if (!scrubPressed) return;
@@ -382,11 +383,12 @@
         dragging = true;
         const v = Number((e.target as HTMLInputElement).value);
         if (fineMode.value) {
-            // value is milliseconds within the zoom window
-            const ms = v;
+            // value is milliseconds within the FIXED zoom window - the slider's
+            // min/max are the window bounds, so dragging can't leave it (you
+            // release to exit the zoom and scrub the full timeline again).
+            const ms = Math.min(Math.max(v, fineMin.value), fineMax.value);
             posMs.value = ms;
             posSec.value = ms / 1000;
-            maybeShiftWindow(ms);
             const t = now();
             if (t - lastScrubSeekAt >= 60) {
                 lastScrubSeekAt = t;
@@ -394,11 +396,11 @@
             }
             return;
         }
-        // Coarse (seconds). Movement resets the hold-still timer, so the zoom
-        // only triggers when the user actually stops on a spot.
+        // Coarse (seconds). The dwell timer is reset by real pointer movement
+        // (onScrubPointerMove), not here - a value change is too coarse (no
+        // `input` fires while dragging within the same second).
         posSec.value = v;
         posMs.value = v * 1000;
-        armDwell();
         // Live preview: seek the engine as the user drags so the picture
         // follows the handle, not just on release. Throttled so a fast drag
         // doesn't flood the control channel with seeks the engine can't keep
@@ -675,9 +677,10 @@
         unlistenKey = await listen<string>('demo-player-key', (e) => runShortcut(e.payload));
         unlistenMoved = await getCurrentWindow().onMoved(onWindowMoved);
         window.addEventListener('keydown', onKeydown);
-        // Pointer can release anywhere, not just over the slider.
+        // Pointer can release/move anywhere, not just over the slider.
         window.addEventListener('pointerup', onScrubPointerUp);
         window.addEventListener('pointercancel', onScrubPointerUp);
+        window.addEventListener('pointermove', onScrubPointerMove);
         if (embedRegion.value) {
             resizeObs = new ResizeObserver(onRegionResize);
             resizeObs.observe(embedRegion.value);
@@ -703,6 +706,7 @@
         window.removeEventListener('keydown', onKeydown);
         window.removeEventListener('pointerup', onScrubPointerUp);
         window.removeEventListener('pointercancel', onScrubPointerUp);
+        window.removeEventListener('pointermove', onScrubPointerMove);
         clearDwell();
         if (resizeObs) resizeObs.disconnect();
         if (resizeTimer !== null) window.clearTimeout(resizeTimer);
