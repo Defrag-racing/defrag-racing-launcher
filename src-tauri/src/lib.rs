@@ -252,6 +252,7 @@ pub fn run() {
             demo_player::demo_player_command,
             demo_player::demo_player_seek_relative,
             demo_player::demo_player_set_offset,
+            demo_player::demo_player_seek_pane,
             demo_player::demo_player_set_region,
             demo_player::demo_player_reposition,
             demo_player::demo_player_stop,

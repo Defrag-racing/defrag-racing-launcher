@@ -925,6 +925,19 @@ pub fn demo_player_set_offset(state: State<'_, AppState>, pane: u8, ms: i32) -> 
     Ok(())
 }
 
+/// Seek ONE pane to playhead `ms` (its sync offset applied), leaving the other
+/// pane untouched. Used when nudging demo B's alignment so demo A doesn't jump
+/// back on every click. Unknown pane indices are ignored.
+#[tauri::command]
+pub fn demo_player_seek_pane(state: State<'_, AppState>, pane: u8, ms: i32) -> Result<(), String> {
+    let guard = state.demo_player.inner.lock().unwrap();
+    if let Some(p) = guard.iter().find(|p| p.index == pane) {
+        let target = ms + p.offset.load(Ordering::Relaxed);
+        let _ = p.cmd_tx.send(format!("seekdemo {}", target.max(0)));
+    }
+    Ok(())
+}
+
 /// Reposition every pane's stage for a new region/aspect. `restart` issues a
 /// `vid_restart` per pane (needed when the client size changed); a plain move
 /// (window dragged) passes false so the engine needn't re-init.

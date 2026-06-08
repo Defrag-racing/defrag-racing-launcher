@@ -324,6 +324,10 @@ export const tauri = {
      *  pane 0 = left, 1 = right. The next synchronized seek applies it. */
     demoPlayerSetOffset: (pane: number, ms: number) =>
         invoke<void>('demo_player_set_offset', { pane, ms }),
+    /** Seek ONE pane to `ms` (its offset applied), leaving the other untouched.
+     *  Used to nudge demo B's alignment without making demo A jump back. */
+    demoPlayerSeekPane: (pane: number, ms: number) =>
+        invoke<void>('demo_player_seek_pane', { pane, ms }),
     /** Reposition the render region (window resize) + re-init the engine
      *  render window at the new size (vid_restart). */
     demoPlayerSetRegion: (

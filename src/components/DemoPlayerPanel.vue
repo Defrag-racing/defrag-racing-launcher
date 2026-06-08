@@ -425,21 +425,27 @@
 
     // ---- comparison sync offset --------------------------------------------
 
-    // Nudge pane 1 (right demo) by `deltaMs` so the two runs line up. Persists
-    // the offset in the backend and re-seeks to apply it live at the current
-    // playhead. Positive = demo B plays a bit later relative to A.
+    // Nudge offsets are MULTIPLES OF 8 ms: Quake's simulation runs at 125 fps
+    // (8 ms per frame), so 8 ms is one frame - the smallest meaningful step -
+    // and the presets are 1 / 5 / 10 / 100 frames.
+    const NUDGE_STEPS = [8, 40, 80, 800];
+
+    // Nudge ONLY demo B by `deltaMs` so the two runs line up. Clicking again
+    // keeps accumulating (it adds to the stored offset and never resets), and it
+    // re-seeks pane 1 alone, so demo A doesn't jump back on every click.
+    // Positive = demo B shifts later relative to A.
     const nudgeB = (deltaMs: number) => {
         if (!isCompare.value) return;
         offsetB.value += deltaMs;
         tauri.demoPlayerSetOffset(1, offsetB.value).catch(() => {});
-        seekTo(posMs.value);
+        tauri.demoPlayerSeekPane(1, Math.round(posMs.value)).catch(() => {});
         seekHoldUntil = now() + 300;
     };
     const resetOffsetB = () => {
         if (!isCompare.value) return;
         offsetB.value = 0;
         tauri.demoPlayerSetOffset(1, 0).catch(() => {});
-        seekTo(posMs.value);
+        tauri.demoPlayerSeekPane(1, Math.round(posMs.value)).catch(() => {});
         seekHoldUntil = now() + 300;
     };
 
@@ -755,15 +761,15 @@
 
             <!-- Comparison: nudge demo B against A to line up the runs. The engine
                  only knows each demo's file start, so this is the manual sync. -->
-            <div v-if="compare" class="mt-1.5 flex items-center gap-2 text-[11px] text-neutral-400">
-                <span class="text-amber-300 font-semibold">Sync demo B:</span>
-                <button class="nudge" @click="nudgeB(-100)">-100ms</button>
-                <button class="nudge" @click="nudgeB(-10)">-10ms</button>
-                <button class="nudge" @click="nudgeB(10)">+10ms</button>
-                <button class="nudge" @click="nudgeB(100)">+100ms</button>
-                <button class="nudge" @click="resetOffsetB">reset</button>
-                <span class="font-mono tabular-nums text-neutral-500">
+            <div v-if="compare" class="mt-1.5 flex items-center gap-1.5 text-[11px] text-neutral-400 flex-wrap">
+                <span class="text-amber-300 font-semibold mr-0.5">Sync demo B:</span>
+                <button v-for="s in NUDGE_STEPS" :key="'m'+s" class="nudge" @click="nudgeB(-s)">-{{ s }}</button>
+                <span class="text-neutral-600 mx-0.5">|</span>
+                <button v-for="s in NUDGE_STEPS" :key="'p'+s" class="nudge" @click="nudgeB(s)">+{{ s }}</button>
+                <button class="nudge ml-1" @click="resetOffsetB">reset</button>
+                <span class="font-mono tabular-nums ml-1" :class="offsetB ? 'text-amber-300' : 'text-neutral-500'">
                     offset {{ offsetB > 0 ? '+' : '' }}{{ offsetB }}ms
+                    <span v-if="offsetB" class="text-neutral-500">({{ (offsetB / 8).toFixed(offsetB % 8 ? 1 : 0) }}f)</span>
                 </span>
             </div>
             <!-- Keyboard legend: what the shortcuts do while a demo plays. -->
