@@ -4,6 +4,16 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.36
+
+- **Watch your demos right inside the launcher.** Every demo in the Demos tab now has a **▶ Play instantly in launcher** button that plays it embedded in the window - no separate game launch, no setup. It uses a bundled engine, so it just works on Windows. Full transport bar underneath: separate **Play** and **Pause**, speed buttons from **0.1x to 8x**, and a scrub bar that previews the frame live as you drag it.
+- **Keyboard shortcuts while watching:** **Space** pause/resume, **←/→** seek 5s (hold to scrub), **↑/↓** seek 10s, **Esc** to close. They work whether the launcher UI or the demo picture has focus - click anywhere and the keys still respond.
+- **End-of-demo is clearer.** When a run finishes it freezes on the last frame and shows as paused; hitting **Play** replays it from the start.
+- **The launcher remembers its window size and position** across restarts, instead of always reopening at the default size.
+- **Cleaner exit behaviour.** Leaving the Demos tab stops playback, and closing the launcher to the tray now also stops the demo engine - no more playback continuing in the background with no controls.
+- Removed the separate **Player** tab - demos play directly from the Demos tab, so there's one obvious place to do it.
+- Updates install more smoothly: the installer now closes a running demo engine first, so upgrading no longer fails with a "file in use" error.
+
 ## 0.1.35
 
 - **Offline Maps now finds maps in the `defrag` folder too, not just `baseq3`.** The engine loads pk3s from both the base game folder and the active mod folder (defrag), so maps you have under `defrag\` - e.g. ones auto-downloaded in-game - were being missed by the Offline tab. It now scans both folders and de-duplicates by map name (the copy the engine would actually load wins). A pk3 with no `maps/*.bsp` inside (texture/sound/config packs) is ignored, as before.
