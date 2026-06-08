@@ -26,6 +26,9 @@
     const isWindows = navigator.userAgent.includes('Windows');
 
     const playing = ref(false);
+    // True from clicking play until the engine reports its first frame (first
+    // launch builds the map cache and is slow) - drives the loading spinner.
+    const booting = ref(false);
     const playError = ref<string | null>(null);
 
     // Playhead state (ms), fed by demo-player-status events.
@@ -106,6 +109,10 @@
         }
         playError.value = null;
         resetPlayhead();
+        // Show the loading spinner from the click until the engine reports its
+        // first frame. The first oDFe launch is slow (it builds the map cache),
+        // so without this the user stares at a black area wondering if it hung.
+        booting.value = true;
         try {
             const dpr = window.devicePixelRatio || 1;
             const dw = Math.round(window.screen.width * dpr);
@@ -120,10 +127,12 @@
         } catch (e: any) {
             playError.value = e?.toString?.() ?? 'Failed to start playback';
             playing.value = false;
+            booting.value = false;
         }
     };
 
     const stop = async () => {
+        booting.value = false;
         if (!playing.value) return;
         playing.value = false;
         try {
@@ -272,6 +281,8 @@
         // idle panel (e.g. the Player tab while the Demos overlay plays) would
         // also run the measurement seeks against the same engine.
         if (!playing.value) return;
+        // First status from the engine = it's up and rendering; drop the spinner.
+        booting.value = false;
         posMs.value = Math.max(0, s.time - s.start);
         lenMs.value = s.total > s.start ? s.total - s.start : 0;
         paused.value = s.paused;
@@ -404,12 +415,23 @@
         <!-- Stage: black render region the engine draws into. -->
         <div class="flex-1 min-h-0 relative bg-black">
             <div ref="embedRegion" class="absolute inset-0"></div>
+            <!-- Booting: engine launched, waiting for its first frame. The first
+                 launch builds the map cache and is slow, so show a spinner. -->
             <div
-                v-if="!playing"
+                v-if="booting"
+                class="absolute inset-0 flex flex-col items-center justify-center text-neutral-300 pointer-events-none"
+            >
+                <div class="dr-spinner mb-4"></div>
+                <div class="text-sm font-semibold">Loading demo…</div>
+                <div class="text-xs text-neutral-500 mt-1">First launch builds the map cache - this can take a few seconds.</div>
+            </div>
+            <!-- Idle prompt (no demo playing, not booting). -->
+            <div
+                v-else-if="!playing"
                 class="absolute inset-0 flex flex-col items-center justify-center text-neutral-500 pointer-events-none"
             >
                 <div class="text-5xl mb-3">▶</div>
-                <div class="text-sm">{{ isWindows ? 'Loading demo…' : 'The demo player is only available on Windows.' }}</div>
+                <div class="text-sm">{{ isWindows ? 'Pick a demo to play' : 'The demo player is only available on Windows.' }}</div>
             </div>
         </div>
 
@@ -480,6 +502,18 @@
 </template>
 
 <style scoped>
+    .dr-spinner {
+        width: 2.5rem;
+        height: 2.5rem;
+        border-radius: 9999px;
+        border: 3px solid rgb(255 255 255 / 0.12);
+        border-top-color: var(--brand-500, #3b82f6);
+        animation: dr-spin 0.8s linear infinite;
+    }
+    @keyframes dr-spin {
+        to { transform: rotate(360deg); }
+    }
+
     .kbd {
         display: inline-flex;
         align-items: center;
