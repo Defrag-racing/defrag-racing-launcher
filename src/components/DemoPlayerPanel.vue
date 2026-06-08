@@ -45,6 +45,7 @@
     let measureAttemptAt = 0;
     let seekTarget = 0;
     let lastArrowAt = -10000;
+    let lastScrubSeekAt = 0;
 
     const embedRegion = ref<HTMLDivElement | null>(null);
     let unlisten: UnlistenFn | null = null;
@@ -145,16 +146,32 @@
         paused.value = false;
         speed.value = x;
     };
+    // Spacebar / external toggle: resume at the last speed if paused, else pause.
+    const togglePause = () => {
+        if (paused.value) setSpeed(speed.value || 1);
+        else doPause();
+    };
 
     const onScrubInput = (e: Event) => {
         dragging = true;
-        posSec.value = Number((e.target as HTMLInputElement).value);
+        const v = Number((e.target as HTMLInputElement).value);
+        posSec.value = v;
+        // Live preview: seek the engine as the user drags so the picture
+        // follows the handle, not just on release. Throttled so a fast drag
+        // doesn't flood the control channel with seeks the engine can't keep
+        // up with; the final exact seek still lands in onScrubChange.
+        const t = now();
+        if (t - lastScrubSeekAt >= 90) {
+            lastScrubSeekAt = t;
+            cmd(`seekdemo ${v * 1000}`);
+        }
     };
     const onScrubChange = (e: Event) => {
         const v = Number((e.target as HTMLInputElement).value);
         posSec.value = v;
         cmd(`seekdemo ${v * 1000}`);
         dragging = false;
+        lastScrubSeekAt = now();
         seekHoldUntil = now() + 700;
     };
 
@@ -173,10 +190,25 @@
     const onKeydown = (e: KeyboardEvent) => {
         if (!playing.value) return;
 
+        // Don't hijack keys while the user is typing in a text field (e.g. the
+        // demo filter box below the player) - Space/arrows belong to the input.
+        const el = e.target as HTMLElement | null;
+        const tag = el?.tagName;
+        if (tag === 'TEXTAREA' || (tag === 'INPUT' && (el as HTMLInputElement).type !== 'range')) {
+            return;
+        }
+
         // ESC quits the player entirely (same as the close button).
         if (e.key === 'Escape') {
             e.preventDefault();
             close();
+            return;
+        }
+
+        // Space toggles pause / resume.
+        if (e.key === ' ' || e.key === 'Spacebar') {
+            e.preventDefault();
+            togglePause();
             return;
         }
 
@@ -386,6 +418,10 @@
             </div>
             <!-- Keyboard legend: what the shortcuts do while a demo plays. -->
             <div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-neutral-500">
+                <span class="inline-flex items-center gap-1.5">
+                    <kbd class="kbd">Space</kbd>
+                    <span>pause / resume</span>
+                </span>
                 <span class="inline-flex items-center gap-1.5">
                     <kbd class="kbd">←</kbd><kbd class="kbd">→</kbd>
                     <span>seek 5 s <span class="text-neutral-600">(hold to scrub)</span></span>
