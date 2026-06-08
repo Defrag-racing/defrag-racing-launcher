@@ -213,7 +213,7 @@
 
 <template>
     <div class="min-h-full flex items-center justify-center p-6 overflow-y-auto">
-        <div class="max-w-3xl w-full bg-neutral-900 border border-white/10 rounded-xl overflow-hidden flex flex-col max-h-[calc(100vh-3rem)]">
+        <div class="max-w-5xl w-full bg-neutral-900 border border-white/10 rounded-xl overflow-hidden flex flex-col max-h-[calc(100vh-3rem)]">
             <!-- progress -->
             <div class="h-1 bg-white/5 flex-shrink-0">
                 <div class="h-full bg-brand-500 transition-all" :style="{ width: (step * 25) + '%' }"></div>
@@ -231,7 +231,7 @@
                         <a href="#" @click.prevent="openExternal('https://defrag.racing')" class="text-brand-400 hover:underline">defrag.racing</a>.
                         Here's what's inside:
                     </p>
-                    <ul class="text-sm text-neutral-300 space-y-1.5 pl-1">
+                    <ul class="text-sm text-neutral-300 grid sm:grid-cols-2 gap-x-8 gap-y-1.5 pl-1">
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
                             <span><strong>Auto-backup demos</strong> - every new <code class="text-xs bg-black/40 px-1 rounded">.dm_*</code> file in your demos folder gets uploaded to your account.</span>
