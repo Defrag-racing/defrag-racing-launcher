@@ -277,10 +277,11 @@ export const tauri = {
     /** List .dm_68 demos under the engine install's defrag/demos folder
      *  (what the bundled player engine can open). Newest first. */
     listPlayerDemos: () => invoke<PlayerDemo[]>('list_player_demos'),
-    /** Start (or restart) embedded playback of `demo` (path relative to
-     *  defrag/demos). `region` is the physical-pixel rect of the embed area
-     *  in the main window; `aspect` from engineDemoResolution. Resolves with
-     *  the control port. Errors on non-Windows. */
+    /** Start (or restart) embedded playback of the demo at absolute path
+     *  `demo` (must live inside a `demos` folder - the backend derives
+     *  fs_basepath/fs_game from it). `region` is the physical-pixel rect of the
+     *  embed area; `aspect` from engineDemoResolution. Resolves with the control
+     *  port. Errors on non-Windows. */
     demoPlayerStart: (
         demo: string,
         region: { x: number; y: number; w: number; h: number },
@@ -645,6 +646,8 @@ export interface RenderTarget {
  *  to defrag/demos (the engine `+demo` arg); `name` is the bare filename. */
 export interface PlayerDemo {
     rel: string;
+    /** Absolute path on disk - what demoPlayerStart wants. */
+    path: string;
     name: string;
     size: number;
     modified_ms: number;

@@ -1024,7 +1024,10 @@ pub fn engine_demo_resolution(
 /// extension kept; `name` is the bare filename for display.
 #[derive(serde::Serialize)]
 pub struct PlayerDemo {
+    /// Path relative to defrag/demos (kept for display/debug).
     pub rel: String,
+    /// Absolute path on disk - what the player's start command wants.
+    pub path: String,
     pub name: String,
     pub size: u64,
     pub modified_ms: u64,
@@ -1084,7 +1087,8 @@ pub fn list_player_demos() -> Result<Vec<PlayerDemo>, String> {
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
-        out.push(PlayerDemo { rel, name, size, modified_ms });
+        let path = p.to_string_lossy().to_string();
+        out.push(PlayerDemo { rel, path, name, size, modified_ms });
     }
     out.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms));
     Ok(out)

@@ -31,9 +31,19 @@
     import { useConfigStore } from '../stores/config';
     import DemosFolderChip from '../components/DemosFolderChip.vue';
     import TokenFeatureList from '../components/TokenFeatureList.vue';
+    import DemoPlayerPanel, { type PlayTarget } from '../components/DemoPlayerPanel.vue';
 
     const router = useRouter();
     const config = useConfigStore();
+
+    const isWindows = navigator.userAgent.includes('Windows');
+
+    // Embedded player overlay: set to a demo to cover the Demos section with the
+    // player; the panel's close button clears it.
+    const playerTarget = ref<PlayTarget | null>(null);
+    const playDemo = (d: DemoLibraryEntry) => {
+        playerTarget.value = { path: d.path, name: d.filename };
+    };
 
     // -- live session queue -------------------------------------------
     const queue = ref<UploadStateSnapshot>({
@@ -720,7 +730,13 @@
 </script>
 
 <template>
-    <div class="flex-1 flex flex-col min-h-0">
+    <div class="flex-1 flex flex-col min-h-0 relative">
+        <!-- Embedded player overlay: covers the whole Demos section while a
+             demo plays; the panel's ✕ closes it (stops + clears). -->
+        <div v-if="playerTarget" class="absolute inset-0 z-30 bg-neutral-950">
+            <DemoPlayerPanel :demo="playerTarget" @close="playerTarget = null" />
+        </div>
+
         <!-- top bar: auto-backup status + controls + folder chip -->
         <header class="px-5 py-3 border-b border-white/10 flex items-start justify-between gap-3">
             <div class="flex items-start gap-2 min-w-0">
@@ -967,6 +983,14 @@
                         :title="`Re-queue ${d.filename} for upload`"
                         @click.stop="retryUpload(d.path)"
                     >{{ retrying.has(d.path) ? 'Retrying…' : 'Retry' }}</button>
+
+                    <!-- play embedded (Windows only) -->
+                    <button
+                        v-if="isWindows"
+                        class="px-3 py-1 rounded text-xs font-semibold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 flex-shrink-0 flex items-center gap-1"
+                        title="Play this demo in the launcher"
+                        @click.stop="playDemo(d)"
+                    >▶ Play</button>
 
                     <!-- render -->
                     <button

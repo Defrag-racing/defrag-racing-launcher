@@ -113,6 +113,41 @@ fn letterbox(rx: i32, ry: i32, rw: i32, rh: i32, aspect: f32) -> (i32, i32, i32,
     (sx, sy, sw.max(1), sh.max(1))
 }
 
+/// Derive `(fs_basepath, fs_game, demo_arg)` from a demo's absolute path. Defrag
+/// demos live at `<base>/<game>/demos/<sub...>/<file>.dm_68`; the engine plays
+/// `+demo <demo_arg>` with `fs_basepath=<base>` / `fs_game=<game>`, where
+/// `demo_arg` is the path relative to the `demos` folder (forward-slashed). The
+/// nearest ancestor named `demos` defines the layout, so demos in subfolders
+/// work too. Errors if the demo isn't inside a `demos` folder (the engine can't
+/// load it then).
+fn derive_demo_launch(demo: &std::path::Path) -> Result<(std::path::PathBuf, String, String), String> {
+    let demos_dir = demo
+        .ancestors()
+        .skip(1) // skip the file itself
+        .find(|a| {
+            a.file_name()
+                .map_or(false, |n| n.eq_ignore_ascii_case("demos"))
+        })
+        .ok_or_else(|| "This demo isn't inside a 'demos' folder, so the engine can't load it.".to_string())?;
+    let game_dir = demos_dir
+        .parent()
+        .ok_or_else(|| "Could not resolve the game folder from the demo path.".to_string())?;
+    let base = game_dir
+        .parent()
+        .ok_or_else(|| "Could not resolve the install folder from the demo path.".to_string())?;
+    let fs_game = game_dir
+        .file_name()
+        .ok_or_else(|| "Could not resolve fs_game from the demo path.".to_string())?
+        .to_string_lossy()
+        .to_string();
+    let demo_arg = demo
+        .strip_prefix(demos_dir)
+        .map_err(|_| "Could not resolve the demo path.".to_string())?
+        .to_string_lossy()
+        .replace('\\', "/");
+    Ok((base.to_path_buf(), fs_game, demo_arg))
+}
+
 // ---- native stage window ---------------------------------------------------
 //
 // The stage is an OWNED top-level WS_POPUP window (not a child) placed over the
@@ -450,16 +485,13 @@ pub async fn demo_player_start(
             return Err("No demo selected.".to_string());
         }
 
-        // The user's configured engine tells us where their Defrag install
-        // lives (baseq3/defrag/demos); we point our bundled engine at it.
-        let cfg = crate::config::Config::load().map_err(|e| e.to_string())?;
-        let user_engine = cfg
-            .engine_path
-            .ok_or_else(|| "No engine configured - pick one in Settings first.".to_string())?;
-        let basepath = user_engine
-            .parent()
-            .ok_or_else(|| "Engine path has no parent folder.".to_string())?
-            .to_path_buf();
+        // `demo` is the absolute path to a .dm_68. The Defrag layout is
+        // <base>/<game>/demos/<sub...>/<file>, so derive fs_basepath=<base>,
+        // fs_game=<game>, and the `+demo` arg relative to the demos folder.
+        // This lets us play a demo from anywhere the user keeps them, and
+        // finds the maps/paks that live in that same install.
+        let (basepath, fs_game, demo_arg) =
+            derive_demo_launch(std::path::Path::new(&demo))?;
 
         // Our shipped engine + its renderer DLL live under resources/odfe.
         let exe = app
@@ -519,9 +551,9 @@ pub async fn demo_player_start(
             .arg(basepath.to_string_lossy().to_string())
             .arg("+set")
             .arg("fs_game")
-            .arg("defrag")
+            .arg(&fs_game)
             .arg("+demo")
-            .arg(&demo);
+            .arg(&demo_arg);
 
         let child = match cmd.spawn() {
             Ok(c) => c,
@@ -684,5 +716,30 @@ mod tests {
     fn parse_status_rejects_other_lines() {
         assert!(parse_status("hello world").is_none());
         assert!(parse_status("").is_none());
+    }
+
+    #[test]
+    fn derive_demo_launch_standard_layout() {
+        let (base, game, arg) =
+            derive_demo_launch(std::path::Path::new("/q3/defrag/demos/map[df].dm_68")).unwrap();
+        assert_eq!(base, std::path::PathBuf::from("/q3"));
+        assert_eq!(game, "defrag");
+        assert_eq!(arg, "map[df].dm_68");
+    }
+
+    #[test]
+    fn derive_demo_launch_subfolder() {
+        let (base, game, arg) = derive_demo_launch(std::path::Path::new(
+            "/q3/defrag/demos/sub/dir/run.dm_68",
+        ))
+        .unwrap();
+        assert_eq!(base, std::path::PathBuf::from("/q3"));
+        assert_eq!(game, "defrag");
+        assert_eq!(arg, "sub/dir/run.dm_68");
+    }
+
+    #[test]
+    fn derive_demo_launch_rejects_non_demos() {
+        assert!(derive_demo_launch(std::path::Path::new("/q3/defrag/foo.dm_68")).is_err());
     }
 }
