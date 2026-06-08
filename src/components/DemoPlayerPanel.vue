@@ -37,13 +37,13 @@
 
     // Per-pane mirror of the playhead, for each demo's own timer. Index = pane.
     // Pane 0 also feeds the primary refs below (it drives the shared scrub).
-    interface PaneTimer { posMs: number; lenMs: number; posSec: number; lenSec: number; measured: boolean }
+    interface PaneTimer { posMs: number; lenMs: number; posSec: number; lenSec: number; measured: boolean; atEnd: boolean }
     const paneTimers = ref<PaneTimer[]>([]);
     // Sync offset (ms) per pane so runs with different lead-ins line up. Pane 0
     // is the anchor (offset 0); panes 1+ are nudged against it.
     const offsets = ref<number[]>([]);
 
-    const blankTimer = (): PaneTimer => ({ posMs: 0, lenMs: 0, posSec: 0, lenSec: 0, measured: false });
+    const blankTimer = (): PaneTimer => ({ posMs: 0, lenMs: 0, posSec: 0, lenSec: 0, measured: false, atEnd: false });
     const initPaneArrays = () => {
         const n = paneCount.value;
         paneTimers.value = Array.from({ length: n }, blankTimer);
@@ -301,7 +301,7 @@
     // move milliseconds.
     const enterFineMode = () => {
         const center = Math.round(posMs.value);
-        const span = Math.max(lenMs.value, 0);
+        const span = Math.max(maxLenMs.value, 0);
         const frac = span > 0 ? Math.min(Math.max(center / span, 0), 1) : 0.5;
         let lo = Math.round(center - frac * FINE_WINDOW_MS);
         if (lo < 0) lo = 0;
@@ -322,7 +322,7 @@
     // they can keep going past it without releasing.
     const maybeShiftWindow = (ms: number) => {
         const edge = 50; // ms from the window edge that triggers a shift
-        const span = lenMs.value;
+        const span = maxLenMs.value;
         if (ms <= fineMin.value + edge && fineMin.value > 0) {
             const lo = Math.max(0, fineMin.value - FINE_WINDOW_MS / 2);
             fineMin.value = lo;
@@ -403,10 +403,10 @@
         const base = now() < seekHoldUntil ? seekTarget : posMs.value;
         seekTarget = base + deltaMs;
         if (seekTarget < 0) seekTarget = 0;
-        if (lenMs.value > 0 && seekTarget > lenMs.value) seekTarget = lenMs.value;
+        if (maxLenMs.value > 0 && seekTarget > maxLenMs.value) seekTarget = maxLenMs.value;
         seekTo(seekTarget);
         const sec = Math.round(seekTarget / 1000);
-        posSec.value = Math.min(Math.max(sec, 0), lenSec.value || sec);
+        posSec.value = Math.min(Math.max(sec, 0), scrubMax.value || sec);
         seekHoldUntil = now() + 300;
     };
 
@@ -422,10 +422,10 @@
         }
         lastArrowAt = t;
         if (seekTarget < 0) seekTarget = 0;
-        if (lenMs.value > 0 && seekTarget > lenMs.value) seekTarget = lenMs.value;
+        if (maxLenMs.value > 0 && seekTarget > maxLenMs.value) seekTarget = maxLenMs.value;
         seekTo(seekTarget);
         const sec = Math.round(seekTarget / 1000);
-        posSec.value = Math.min(Math.max(sec, 0), lenSec.value || sec);
+        posSec.value = Math.min(Math.max(sec, 0), scrubMax.value || sec);
         seekHoldUntil = t + 300;
     };
 
@@ -512,6 +512,7 @@
         if (pt) {
             pt.posMs = Math.max(0, s.time - s.start);
             pt.lenMs = s.total > s.start ? s.total - s.start : 0;
+            pt.atEnd = s.atend;
             if (pt.lenMs > 0) {
                 pt.lenSec = Math.max(1, Math.round(pt.lenMs / 1000));
                 pt.measured = true;
@@ -521,47 +522,64 @@
             }
         }
 
-        // Only pane 0 drives the shared scrub bar + play/pause state.
-        if (s.pane !== 0) return;
+        // Only pane 0 drives measurement + the play/pause state.
+        if (s.pane === 0) {
+            lenMs.value = s.total > s.start ? s.total - s.start : 0;
+            paused.value = s.paused;
 
-        posMs.value = Math.max(0, s.time - s.start);
-        lenMs.value = s.total > s.start ? s.total - s.start : 0;
-        paused.value = s.paused;
-
-        if (!measured) {
-            // Length is measured by seeking to a huge time (which transiently
-            // hits the end), then back to 0 - so ignore `atend` until measured,
-            // or the Pause indicator would flash on at startup. In comparison
-            // mode the same seek measures EVERY engine (it's broadcast), so wait
-            // until all panes' lengths are known before settling back to 0.
-            const allMeasured = !isCompare.value || paneTimers.value.every((p) => p.lenMs > 0);
-            if (lenMs.value > 0 && allMeasured) {
-                lenSec.value = Math.max(1, Math.round(lenMs.value / 1000));
-                seekTo(0);
-                measured = true;
-                seekHoldUntil = now() + 500;
-            } else if (now() - measureAttemptAt > 1200) {
-                measureAttemptAt = now();
-                seekTo(86400000);
+            if (!measured) {
+                // Length is measured by seeking to a huge time (which transiently
+                // hits the end), then back to 0 - so ignore `atend` until
+                // measured. In comparison mode the broadcast seek measures EVERY
+                // engine, so wait until all panes' lengths are known.
+                const allMeasured = !isCompare.value || paneTimers.value.every((p) => p.lenMs > 0);
+                if (lenMs.value > 0 && allMeasured) {
+                    lenSec.value = Math.max(1, Math.round(lenMs.value / 1000));
+                    seekTo(0);
+                    measured = true;
+                    seekHoldUntil = now() + 500;
+                } else if (now() - measureAttemptAt > 1200) {
+                    measureAttemptAt = now();
+                    seekTo(86400000);
+                }
+                return;
             }
-            return;
+            if (lenMs.value > 0) {
+                const maxSec = Math.round(lenMs.value / 1000);
+                if (maxSec > 0) lenSec.value = maxSec;
+            }
         }
 
-        atEnd.value = s.atend;
+        if (!measured) return;
 
-        if (lenMs.value > 0) {
-            const maxSec = Math.round(lenMs.value / 1000);
-            if (maxSec > 0) lenSec.value = maxSec;
+        // Shared playhead tracks the demo that's FURTHEST along, so when a
+        // shorter demo freezes at its end the handle keeps moving with the
+        // longer ones until they all finish. Each pane reports its own demo time
+        // (which includes its sync offset), so subtract the offset to recover
+        // the common playhead. "Ended" is only true once EVERY demo has ended.
+        if (!(dragging || now() < seekHoldUntil)) {
+            let head = 0;
+            let allEnded = true;
+            paneTimers.value.forEach((p, i) => {
+                head = Math.max(head, p.posMs - (offsets.value[i] ?? 0));
+                if (!p.atEnd) allEnded = false;
+            });
+            posMs.value = Math.max(0, head);
+            posSec.value = Math.min(Math.max(Math.round(posMs.value / 1000), 0), scrubMax.value);
+            atEnd.value = isCompare.value ? allEnded : (paneTimers.value[0]?.atEnd ?? false);
         }
-        if (dragging || now() < seekHoldUntil) return;
-        posSec.value = Math.min(Math.max(Math.round(posMs.value / 1000), 0), lenSec.value || 0);
     };
 
-    // Scrub bar spans the longest run across all compared demos.
+    // Longest run across all compared demos, in seconds (scrub max) and ms.
     const scrubMax = computed(() => {
         let m = lenSec.value;
         if (isCompare.value) for (const p of paneTimers.value) m = Math.max(m, p.lenSec);
         return m || 1;
+    });
+    const maxLenMs = computed(() => {
+        let m = lenMs.value;
+        if (isCompare.value) for (const p of paneTimers.value) m = Math.max(m, p.lenMs);
+        return m;
     });
 
     // ---- resize / move -----------------------------------------------------
