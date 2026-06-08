@@ -5,6 +5,7 @@
     import { openExternal } from '../lib/open';
     import { tauri, type EngineCandidate, type HealthItem, type LaunchProfile } from '../lib/tauri';
     import TokenFeatureList from '../components/TokenFeatureList.vue';
+    import TokenFreeFeatures from '../components/TokenFreeFeatures.vue';
     import UpdateBanner from '../components/UpdateBanner.vue';
     import { useConfigStore } from '../stores/config';
     import { useUpdaterStore } from '../stores/updater';
@@ -462,7 +463,11 @@
                     <button class="btn-danger" @click="clearToken">Clear</button>
                 </div>
                 <div v-else class="text-sm text-amber-300">
-                    No token saved - the features above are disabled. Only <code class="bg-black/40 px-1 rounded">defrag://</code> server-join links work.
+                    No token saved - the features above are disabled.
+                    <div class="text-emerald-300 font-semibold mt-2">Works without a token:</div>
+                    <ul class="text-xs text-emerald-200/90 mt-1 space-y-0.5 pl-1">
+                        <TokenFreeFeatures />
+                    </ul>
                 </div>
 
                 <div v-if="!config.hasToken || showTokenForm" class="flex gap-2">

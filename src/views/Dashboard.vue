@@ -31,6 +31,7 @@
     import { useConfigStore } from '../stores/config';
     import DemosFolderChip from '../components/DemosFolderChip.vue';
     import TokenFeatureList from '../components/TokenFeatureList.vue';
+    import TokenFreeFeatures from '../components/TokenFreeFeatures.vue';
     import DemoPlayerPanel, { type PlayTarget } from '../components/DemoPlayerPanel.vue';
 
     const router = useRouter();
@@ -829,10 +830,11 @@
             <ul class="space-y-0.5 pl-1 mb-2">
                 <TokenFeatureList />
             </ul>
-            <div class="flex items-center justify-between gap-2">
-                <span class="text-amber-100/80">
-                    Only <code class="bg-black/40 px-1 rounded">defrag://</code> server-join links work without one.
-                </span>
+            <div class="font-semibold text-emerald-300 mb-1">Works without a token:</div>
+            <ul class="space-y-0.5 pl-1 mb-2 text-emerald-200/90">
+                <TokenFreeFeatures />
+            </ul>
+            <div class="flex items-center justify-end gap-2">
                 <button
                     class="px-3 py-1 rounded bg-amber-500/30 hover:bg-amber-500/40 text-amber-100 font-semibold flex-shrink-0"
                     @click="router.push({ name: 'settings' })"

@@ -6,6 +6,7 @@
     import { tauri, type EngineCandidate } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
     import TokenFeatureList from '../components/TokenFeatureList.vue';
+    import TokenFreeFeatures from '../components/TokenFreeFeatures.vue';
 
     const router = useRouter();
     const config = useConfigStore();
@@ -214,6 +215,10 @@
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
+                            <span><strong>Instant demo player</strong> - hit play on any demo and watch it <strong>right inside the launcher</strong>, no separate game launch. Scrub, pause, change speed, seek with the keyboard.</span>
+                        </li>
+                        <li class="flex gap-2">
+                            <span class="text-brand-400 mt-0.5">•</span>
                             <span><strong>Demos</strong> - browse every local demo and queue YouTube renders from one click, right next to the live auto-backup status.</span>
                         </li>
                         <li class="flex gap-2">
@@ -347,14 +352,16 @@
                         <div class="max-w-md w-full bg-neutral-900 border border-amber-500/40 rounded-xl p-5 space-y-3">
                             <h3 class="text-lg font-bold text-amber-200">Continue without a token?</h3>
                             <p class="text-sm text-neutral-300">
-                                Without a token the launcher runs in <strong>defrag:// only</strong> mode. These features will be <strong>disabled</strong> and visibly empty:
+                                Without a token these features will be <strong>disabled</strong> and visibly empty:
                             </p>
                             <ul class="text-xs text-amber-100 space-y-0.5 pl-1 rounded border border-amber-500/30 bg-amber-500/10 p-3">
                                 <TokenFeatureList />
                             </ul>
-                            <p class="text-xs text-neutral-500">
-                                Only <code class="bg-black/40 px-1 rounded">defrag://</code> server-join links will work. You can paste a token anytime later from Settings.
-                            </p>
+                            <div class="text-xs text-emerald-300 font-semibold">These still work without a token:</div>
+                            <ul class="text-xs text-emerald-200/90 space-y-0.5 pl-1 rounded border border-emerald-500/30 bg-emerald-500/10 p-3">
+                                <TokenFreeFeatures />
+                            </ul>
+                            <p class="text-xs text-neutral-500">You can paste a token anytime later from Settings.</p>
                             <div class="flex justify-end gap-2 pt-1">
                                 <button class="btn-ghost" @click="showSkipConfirm = false">Back - I'll add a token</button>
                                 <button
@@ -481,8 +488,11 @@
                         <ul class="space-y-0.5 pl-1">
                             <TokenFeatureList />
                         </ul>
+                        <div class="font-semibold text-emerald-300 pt-1">These still work without a token:</div>
+                        <ul class="space-y-0.5 pl-1 text-emerald-200/90">
+                            <TokenFreeFeatures />
+                        </ul>
                         <div class="pt-1">
-                            Only <code class="bg-black/40 px-1 rounded">defrag://</code> server-join links will work.
                             You can add a token anytime from
                             <strong class="text-amber-200">Settings → Auto-upload token</strong>.
                         </div>
