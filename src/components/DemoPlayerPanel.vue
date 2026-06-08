@@ -66,6 +66,18 @@
     const posSec = ref(0);
     const lenSec = ref(0);
 
+    // Fine scrub: hold the scrub handle still for a moment and the bar "zooms"
+    // to a narrow window around that point with 1 ms resolution, so you can land
+    // on an exact millisecond. The whole bar then spans FINE_WINDOW_MS instead
+    // of the full demo; releasing returns to the normal seconds bar.
+    const FINE_WINDOW_MS = 3000; // total width of the zoomed window
+    const FINE_DWELL_MS = 380; // hold-still time before zooming in
+    const fineMode = ref(false);
+    const fineMin = ref(0); // window bounds (ms)
+    const fineMax = ref(0);
+    let scrubPressed = false; // pointer is down on the scrub handle
+    let dwellTimer: number | null = null;
+
     // Interaction guards (mirrors the validated test harness behaviour).
     let dragging = false;
     let seekHoldUntil = 0;
@@ -122,6 +134,10 @@
         measureAttemptAt = 0;
         seekTarget = 0;
         seekHoldUntil = 0;
+        // fine scrub
+        fineMode.value = false;
+        scrubPressed = false;
+        clearDwell();
         // pane 1 (comparison)
         pos1Ms.value = 0;
         len1Ms.value = 0;
@@ -250,10 +266,106 @@
         else doPause();
     };
 
+    // ---- fine (millisecond) scrub ------------------------------------------
+
+    // Slider binds in seconds normally, in milliseconds while zoomed.
+    const sliderMin = computed(() => (fineMode.value ? fineMin.value : 0));
+    const sliderMax = computed(() => (fineMode.value ? fineMax.value : scrubMax.value));
+    const sliderStep = computed(() => (fineMode.value ? 1 : 1)); // 1 ms vs 1 s
+    const sliderValue = computed(() => (fineMode.value ? Math.round(posMs.value) : posSec.value));
+
+    const clearDwell = () => {
+        if (dwellTimer !== null) {
+            window.clearTimeout(dwellTimer);
+            dwellTimer = null;
+        }
+    };
+    // (Re)start the hold-still timer: if the handle doesn't move for FINE_DWELL_MS
+    // while pressed, zoom in around the current position.
+    const armDwell = () => {
+        clearDwell();
+        if (fineMode.value || !scrubPressed) return;
+        dwellTimer = window.setTimeout(() => {
+            if (scrubPressed && !fineMode.value) enterFineMode();
+        }, FINE_DWELL_MS);
+    };
+    // Zoom in around the current playhead. The window is placed so the thumb
+    // keeps the same on-screen position (no jump): its fraction of the bar is
+    // preserved, so the pixel under the cursor stays put and small drags now
+    // move milliseconds.
+    const enterFineMode = () => {
+        const center = Math.round(posMs.value);
+        const span = Math.max(lenMs.value, 0);
+        const frac = span > 0 ? Math.min(Math.max(center / span, 0), 1) : 0.5;
+        let lo = Math.round(center - frac * FINE_WINDOW_MS);
+        if (lo < 0) lo = 0;
+        let hi = lo + FINE_WINDOW_MS;
+        if (span > 0 && hi > span) {
+            hi = span;
+            lo = Math.max(0, hi - FINE_WINDOW_MS);
+        }
+        fineMin.value = lo;
+        fineMax.value = hi;
+        fineMode.value = true;
+    };
+    const exitFineMode = () => {
+        fineMode.value = false;
+        clearDwell();
+    };
+    // Keep the zoom usable when the user drags to an edge: slide the window so
+    // they can keep going past it without releasing.
+    const maybeShiftWindow = (ms: number) => {
+        const edge = 50; // ms from the window edge that triggers a shift
+        const span = lenMs.value;
+        if (ms <= fineMin.value + edge && fineMin.value > 0) {
+            const lo = Math.max(0, fineMin.value - FINE_WINDOW_MS / 2);
+            fineMin.value = lo;
+            fineMax.value = lo + FINE_WINDOW_MS;
+        } else if (ms >= fineMax.value - edge && (span === 0 || fineMax.value < span)) {
+            let hi = fineMax.value + FINE_WINDOW_MS / 2;
+            if (span > 0 && hi > span) hi = span;
+            fineMax.value = hi;
+            fineMin.value = Math.max(0, hi - FINE_WINDOW_MS);
+        }
+    };
+
+    const onScrubPointerDown = () => {
+        scrubPressed = true;
+        armDwell();
+    };
+    const onScrubPointerUp = () => {
+        if (!scrubPressed) return;
+        scrubPressed = false;
+        clearDwell();
+        // On release, lock in the exact position and drop back to the full bar.
+        if (fineMode.value) {
+            seekTo(posMs.value);
+            seekHoldUntil = now() + 700;
+            exitFineMode();
+        }
+    };
+
     const onScrubInput = (e: Event) => {
         dragging = true;
         const v = Number((e.target as HTMLInputElement).value);
+        if (fineMode.value) {
+            // value is milliseconds within the zoom window
+            const ms = v;
+            posMs.value = ms;
+            posSec.value = ms / 1000;
+            maybeShiftWindow(ms);
+            const t = now();
+            if (t - lastScrubSeekAt >= 60) {
+                lastScrubSeekAt = t;
+                seekTo(ms);
+            }
+            return;
+        }
+        // Coarse (seconds). Movement resets the hold-still timer, so the zoom
+        // only triggers when the user actually stops on a spot.
         posSec.value = v;
+        posMs.value = v * 1000;
+        armDwell();
         // Live preview: seek the engine as the user drags so the picture
         // follows the handle, not just on release. Throttled so a fast drag
         // doesn't flood the control channel with seeks the engine can't keep
@@ -266,8 +378,15 @@
     };
     const onScrubChange = (e: Event) => {
         const v = Number((e.target as HTMLInputElement).value);
-        posSec.value = v;
-        seekTo(v * 1000);
+        if (fineMode.value) {
+            posMs.value = v;
+            posSec.value = v / 1000;
+            seekTo(v);
+        } else {
+            posSec.value = v;
+            posMs.value = v * 1000;
+            seekTo(v * 1000);
+        }
         dragging = false;
         lastScrubSeekAt = now();
         seekHoldUntil = now() + 700;
@@ -459,6 +578,14 @@
         const s = Math.floor(sec % 60);
         return `${m}:${s.toString().padStart(2, '0')}`;
     };
+    // Millisecond-precise readout for fine scrub: m:ss.mmm
+    const fmtMs = (ms: number) => {
+        const total = Math.max(0, Math.round(ms));
+        const m = Math.floor(total / 60000);
+        const s = Math.floor((total % 60000) / 1000);
+        const mmm = total % 1000;
+        return `${m}:${s.toString().padStart(2, '0')}.${mmm.toString().padStart(3, '0')}`;
+    };
 
     // ---- lifecycle ---------------------------------------------------------
 
@@ -489,6 +616,9 @@
         unlistenKey = await listen<string>('demo-player-key', (e) => runShortcut(e.payload));
         unlistenMoved = await getCurrentWindow().onMoved(onWindowMoved);
         window.addEventListener('keydown', onKeydown);
+        // Pointer can release anywhere, not just over the slider.
+        window.addEventListener('pointerup', onScrubPointerUp);
+        window.addEventListener('pointercancel', onScrubPointerUp);
         if (embedRegion.value) {
             resizeObs = new ResizeObserver(onRegionResize);
             resizeObs.observe(embedRegion.value);
@@ -512,6 +642,9 @@
         if (unlistenKey) unlistenKey();
         if (unlistenMoved) unlistenMoved();
         window.removeEventListener('keydown', onKeydown);
+        window.removeEventListener('pointerup', onScrubPointerUp);
+        window.removeEventListener('pointercancel', onScrubPointerUp);
+        clearDwell();
         if (resizeObs) resizeObs.disconnect();
         if (resizeTimer !== null) window.clearTimeout(resizeTimer);
         if (moveRaf !== null) window.cancelAnimationFrame(moveRaf);
@@ -590,24 +723,33 @@
                     @click="setSpeed(x)"
                 >{{ x + 'x' }}</button>
 
-                <input
-                    type="range"
-                    class="flex-1 mx-2 accent-brand-500"
-                    min="0"
-                    :max="scrubMax"
-                    step="1"
-                    :value="posSec"
-                    @input="onScrubInput"
-                    @change="onScrubChange"
-                />
+                <div class="flex-1 mx-2 relative">
+                    <input
+                        type="range"
+                        class="w-full accent-brand-500"
+                        :class="{ 'accent-amber-400': fineMode }"
+                        :min="sliderMin"
+                        :max="sliderMax"
+                        :step="sliderStep"
+                        :value="sliderValue"
+                        @input="onScrubInput"
+                        @change="onScrubChange"
+                        @pointerdown="onScrubPointerDown"
+                    />
+                    <!-- Zoomed badge: shows you're in millisecond mode + the window. -->
+                    <div
+                        v-if="fineMode"
+                        class="absolute -top-5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-200 text-[10px] font-mono whitespace-nowrap pointer-events-none"
+                    >ms zoom · {{ fmt(Math.floor(sliderMin/1000)) }}–{{ fmt(Math.ceil(sliderMax/1000)) }}</div>
+                </div>
                 <!-- Comparison: two timers (A / B) so you can read both runs. -->
                 <span v-if="compare" class="font-mono text-sm tabular-nums text-right leading-tight">
-                    <span class="text-sky-300">{{ fmt(posSec) }}/{{ fmt(lenSec) }}</span>
+                    <span class="text-sky-300">{{ fineMode ? fmtMs(posMs) : fmt(posSec) }}/{{ fmt(lenSec) }}</span>
                     <span class="text-neutral-600 mx-1">·</span>
                     <span class="text-amber-300">{{ fmt(pos1Sec) }}/{{ fmt(len1Sec) }}</span>
                 </span>
-                <span v-else class="font-mono text-sm tabular-nums w-24 text-right">
-                    {{ fmt(posSec) }} / {{ fmt(lenSec) }}
+                <span v-else class="font-mono text-sm tabular-nums w-28 text-right" :class="{ 'text-amber-300': fineMode }">
+                    {{ fineMode ? fmtMs(posMs) : fmt(posSec) }} / {{ fmt(lenSec) }}
                 </span>
             </div>
 
@@ -641,6 +783,10 @@
                 <span class="inline-flex items-center gap-1.5">
                     <kbd class="kbd">Esc</kbd>
                     <span>close player</span>
+                </span>
+                <span class="inline-flex items-center gap-1.5">
+                    <span class="text-amber-400">⤢</span>
+                    <span>hold the scrub still to zoom to milliseconds</span>
                 </span>
             </div>
         </div>
