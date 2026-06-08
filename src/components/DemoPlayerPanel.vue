@@ -825,15 +825,17 @@
             <!-- Speeds (timescale) on their own row: there are a lot of them and
                  they ate most of the width, leaving the scrub bar cramped. Giving
                  them a dedicated row lets the scrub bar below span the full width. -->
-            <div class="flex items-center gap-1.5 flex-wrap mb-1.5">
+            <div class="flex items-center justify-center gap-1.5 flex-wrap mb-1.5">
                 <span class="text-[11px] uppercase tracking-wide text-neutral-500 mr-1">Speed</span>
-                <button
-                    v-for="x in SPEEDS"
-                    :key="x"
-                    class="px-2.5 py-1 rounded text-sm font-semibold"
-                    :class="speed === x ? 'bg-brand-500/30 text-brand-200' : 'bg-white/5 hover:bg-white/10 text-neutral-300'"
-                    @click="setSpeed(x)"
-                >{{ x + 'x' }}</button>
+                <template v-for="x in SPEEDS" :key="x">
+                    <!-- small gap between the fractional speeds and the whole-number ones -->
+                    <span v-if="x === 1" class="w-2 flex-shrink-0" aria-hidden="true"></span>
+                    <button
+                        class="px-2.5 py-1 rounded text-sm font-semibold"
+                        :class="speed === x ? 'bg-brand-500/30 text-brand-200' : 'bg-white/5 hover:bg-white/10 text-neutral-300'"
+                        @click="setSpeed(x)"
+                    >{{ x + 'x' }}</button>
+                </template>
             </div>
 
             <!-- Playback + scrub -->

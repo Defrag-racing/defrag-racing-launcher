@@ -4,6 +4,10 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.43
+
+- **Playback speeds are centered**, with a small gap separating the slow-motion speeds (0.1x-0.75x) from the normal/fast ones (1x-8x) so the two groups read apart at a glance.
+
 ## 0.1.42
 
 - **Zooming the scrub bar no longer flickers/resizes the demo.** Holding the scrub handle to zoom into milliseconds used to grow the transport bar (the longer millisecond timer wrapped onto a second line), which shrank the demo area and forced the engine to resize and refresh its window - then again when you released. The transport bar now keeps a constant height, and the "ms zoom" readout sits on its own fixed line, so zooming in and out is seamless.
