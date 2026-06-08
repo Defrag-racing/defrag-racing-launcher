@@ -11,7 +11,9 @@ const router = createRouter({
         { path: '/servers', name: 'servers', component: () => import('./views/Servers.vue') },
         { path: '/records', name: 'records', component: () => import('./views/Records.vue') },
         { path: '/maps', name: 'maps', component: () => import('./views/Maps.vue') },
-        { path: '/demo-player', name: 'demo-player', component: () => import('./views/DemoPlayer.vue') },
+        // Standalone Player tab removed - demos play embedded from the Demos view.
+        // Keep the path as a redirect so any lingering nav still lands somewhere.
+        { path: '/demo-player', redirect: '/dashboard' },
         // Library merged into the Demos (dashboard) view - keep the path
         // as a redirect so any lingering deep link / nav still lands somewhere.
         { path: '/library', redirect: '/dashboard' },

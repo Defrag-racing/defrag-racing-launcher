@@ -247,7 +247,6 @@ pub fn run() {
             commands::list_offline_maps,
             commands::offline_map_thumb,
             commands::engine_demo_resolution,
-            commands::list_player_demos,
             demo_player::demo_player_start,
             demo_player::demo_player_command,
             demo_player::demo_player_set_region,
