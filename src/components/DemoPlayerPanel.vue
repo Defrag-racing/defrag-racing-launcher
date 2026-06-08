@@ -20,10 +20,9 @@
         name: string;
     }
 
-    /** Two demos to compare side by side (premium feature). */
+    /** 2-4 demos to compare, tiled into a grid (premium feature). */
     export interface CompareTarget {
-        a: PlayTarget;
-        b: PlayTarget;
+        demos: PlayTarget[];
     }
 
     const props = defineProps<{
@@ -32,18 +31,24 @@
     }>();
     const emit = defineEmits<{ (e: 'close'): void }>();
 
-    // Comparison mode: two engines side by side, driven in lockstep.
-    const isCompare = computed(() => !!props.compare);
+    // Comparison mode: 2-4 engines tiled in a grid, driven in lockstep.
+    const isCompare = computed(() => !!props.compare && props.compare.demos.length >= 2);
+    const paneCount = computed(() => (props.compare ? props.compare.demos.length : 1));
 
-    // Pane 1 (right, comparison only) mirror of the playhead, for its own timer.
-    const pos1Ms = ref(0);
-    const len1Ms = ref(0);
-    const pos1Sec = ref(0);
-    const len1Sec = ref(0);
-    let measured1 = false;
-    // Sync offset (ms) applied to pane 1 so two runs with different lead-ins line
-    // up. Adjusted with the nudge buttons; persisted in the backend per pane.
-    const offsetB = ref(0);
+    // Per-pane mirror of the playhead, for each demo's own timer. Index = pane.
+    // Pane 0 also feeds the primary refs below (it drives the shared scrub).
+    interface PaneTimer { posMs: number; lenMs: number; posSec: number; lenSec: number; measured: boolean }
+    const paneTimers = ref<PaneTimer[]>([]);
+    // Sync offset (ms) per pane so runs with different lead-ins line up. Pane 0
+    // is the anchor (offset 0); panes 1+ are nudged against it.
+    const offsets = ref<number[]>([]);
+
+    const blankTimer = (): PaneTimer => ({ posMs: 0, lenMs: 0, posSec: 0, lenSec: 0, measured: false });
+    const initPaneArrays = () => {
+        const n = paneCount.value;
+        paneTimers.value = Array.from({ length: n }, blankTimer);
+        offsets.value = Array.from({ length: n }, () => 0);
+    };
 
     const isWindows = navigator.userAgent.includes('Windows');
 
@@ -99,7 +104,13 @@
 
     const now = () => Date.now();
 
-    const SPEEDS = [0.1, 0.25, 0.5, 1, 2, 4, 8];
+    const SPEEDS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1, 2, 4, 8];
+
+    // Per-pane accent colour + letter (A/B/C/D) so each demo is identifiable in
+    // the name bar, the timers, and its sync row.
+    const PANE_COLORS = ['text-sky-300', 'text-amber-300', 'text-emerald-300', 'text-fuchsia-300'];
+    const paneColor = (i: number) => PANE_COLORS[i % PANE_COLORS.length];
+    const paneLetter = (i: number) => String.fromCharCode(65 + i);
 
     // Parse "map[physics]MM.SS.mmm(player.country).dm_68" into a readable line.
     const formatDemoName = (name: string): string => {
@@ -138,13 +149,8 @@
         fineMode.value = false;
         scrubPressed = false;
         clearDwell();
-        // pane 1 (comparison)
-        pos1Ms.value = 0;
-        len1Ms.value = 0;
-        pos1Sec.value = 0;
-        len1Sec.value = 0;
-        measured1 = false;
-        offsetB.value = 0;
+        // comparison panes
+        initPaneArrays();
     };
 
     // Seek the playhead to `ms`. In comparison mode this goes through the backend
@@ -203,7 +209,7 @@
 
             const region = computeRegion();
             if (!region) throw new Error('Render area not ready');
-            await tauri.demoPlayerCompareStart(c.a.path, c.b.path, region, lastAspect);
+            await tauri.demoPlayerCompareStart(c.demos.map((d) => d.path), region, lastAspect);
             playing.value = true;
         } catch (e: any) {
             playError.value = e?.toString?.() ?? 'Failed to start comparison';
@@ -426,26 +432,27 @@
     // ---- comparison sync offset --------------------------------------------
 
     // Nudge offsets are MULTIPLES OF 8 ms: Quake's simulation runs at 125 fps
-    // (8 ms per frame), so 8 ms is one frame - the smallest meaningful step -
-    // and the presets are 1 / 5 / 10 / 100 frames.
-    const NUDGE_STEPS = [8, 40, 80, 800];
+    // (8 ms per frame), so 8 ms is one frame - the smallest meaningful step.
+    // Presets: 1 / 5 / 10 / 100 / 1000 frames. Rendered as -8000..-8 | +8..+8000
+    // so -8 sits right next to +8.
+    const NUDGE_STEPS = [8, 40, 80, 800, 8000];
+    const NUDGE_STEPS_DESC = [...NUDGE_STEPS].reverse();
 
-    // Nudge ONLY demo B by `deltaMs` so the two runs line up. Clicking again
-    // keeps accumulating (it adds to the stored offset and never resets), and it
-    // re-seeks pane 1 alone, so demo A doesn't jump back on every click.
-    // Positive = demo B shifts later relative to A.
-    const nudgeB = (deltaMs: number) => {
-        if (!isCompare.value) return;
-        offsetB.value += deltaMs;
-        tauri.demoPlayerSetOffset(1, offsetB.value).catch(() => {});
-        tauri.demoPlayerSeekPane(1, Math.round(posMs.value)).catch(() => {});
+    // Nudge ONLY pane `idx` by `deltaMs` so its run lines up with the anchor
+    // (pane 0). Clicking again keeps accumulating (never resets), and it
+    // re-seeks that pane alone, so the others don't jump back on every click.
+    const nudgePane = (idx: number, deltaMs: number) => {
+        if (!isCompare.value || idx <= 0 || idx >= offsets.value.length) return;
+        offsets.value[idx] += deltaMs;
+        tauri.demoPlayerSetOffset(idx, offsets.value[idx]).catch(() => {});
+        tauri.demoPlayerSeekPane(idx, Math.round(posMs.value)).catch(() => {});
         seekHoldUntil = now() + 300;
     };
-    const resetOffsetB = () => {
-        if (!isCompare.value) return;
-        offsetB.value = 0;
-        tauri.demoPlayerSetOffset(1, 0).catch(() => {});
-        tauri.demoPlayerSeekPane(1, Math.round(posMs.value)).catch(() => {});
+    const resetOffset = (idx: number) => {
+        if (!isCompare.value || idx <= 0 || idx >= offsets.value.length) return;
+        offsets.value[idx] = 0;
+        tauri.demoPlayerSetOffset(idx, 0).catch(() => {});
+        tauri.demoPlayerSeekPane(idx, Math.round(posMs.value)).catch(() => {});
         seekHoldUntil = now() + 300;
     };
 
@@ -500,25 +507,23 @@
         // First status from any engine = it's up and rendering; drop the spinner.
         booting.value = false;
 
-        // Pane 1 (comparison right) only feeds its own timer + length.
-        if (s.pane === 1) {
-            pos1Ms.value = Math.max(0, s.time - s.start);
-            len1Ms.value = s.total > s.start ? s.total - s.start : 0;
-            if (!measured1 && len1Ms.value > 0) {
-                len1Sec.value = Math.max(1, Math.round(len1Ms.value / 1000));
-                measured1 = true;
-            }
-            if (len1Ms.value > 0) {
-                const maxSec = Math.round(len1Ms.value / 1000);
-                if (maxSec > 0) len1Sec.value = maxSec;
+        // Update this pane's own timer (used for its label + the measure check).
+        const pt = paneTimers.value[s.pane];
+        if (pt) {
+            pt.posMs = Math.max(0, s.time - s.start);
+            pt.lenMs = s.total > s.start ? s.total - s.start : 0;
+            if (pt.lenMs > 0) {
+                pt.lenSec = Math.max(1, Math.round(pt.lenMs / 1000));
+                pt.measured = true;
             }
             if (!(dragging || now() < seekHoldUntil)) {
-                pos1Sec.value = Math.min(Math.max(Math.round(pos1Ms.value / 1000), 0), len1Sec.value || 0);
+                pt.posSec = Math.min(Math.max(Math.round(pt.posMs / 1000), 0), pt.lenSec || 0);
             }
-            return;
         }
 
-        // Pane 0 = primary (drives play/pause state + the shared scrub bar).
+        // Only pane 0 drives the shared scrub bar + play/pause state.
+        if (s.pane !== 0) return;
+
         posMs.value = Math.max(0, s.time - s.start);
         lenMs.value = s.total > s.start ? s.total - s.start : 0;
         paused.value = s.paused;
@@ -527,12 +532,11 @@
             // Length is measured by seeking to a huge time (which transiently
             // hits the end), then back to 0 - so ignore `atend` until measured,
             // or the Pause indicator would flash on at startup. In comparison
-            // mode the same seek measures BOTH engines (it's broadcast), so wait
-            // until pane 1's length is known too before settling back to 0.
-            const haveOther = !isCompare.value || len1Ms.value > 0;
-            if (lenMs.value > 0 && haveOther) {
+            // mode the same seek measures EVERY engine (it's broadcast), so wait
+            // until all panes' lengths are known before settling back to 0.
+            const allMeasured = !isCompare.value || paneTimers.value.every((p) => p.lenMs > 0);
+            if (lenMs.value > 0 && allMeasured) {
                 lenSec.value = Math.max(1, Math.round(lenMs.value / 1000));
-                if (len1Ms.value > 0) len1Sec.value = Math.max(1, Math.round(len1Ms.value / 1000));
                 seekTo(0);
                 measured = true;
                 seekHoldUntil = now() + 500;
@@ -553,8 +557,12 @@
         posSec.value = Math.min(Math.max(Math.round(posMs.value / 1000), 0), lenSec.value || 0);
     };
 
-    // Scrub bar spans the longer of the two runs in comparison mode.
-    const scrubMax = computed(() => Math.max(lenSec.value, isCompare.value ? len1Sec.value : 0) || 1);
+    // Scrub bar spans the longest run across all compared demos.
+    const scrubMax = computed(() => {
+        let m = lenSec.value;
+        if (isCompare.value) for (const p of paneTimers.value) m = Math.max(m, p.lenSec);
+        return m || 1;
+    });
 
     // ---- resize / move -----------------------------------------------------
 
@@ -599,7 +607,7 @@
     // both are cleared. Keyed on identity (paths) so an unrelated re-render
     // doesn't relaunch the engines.
     watch(
-        () => [props.demo?.path ?? null, props.compare?.a.path ?? null, props.compare?.b.path ?? null].join('|'),
+        () => [props.demo?.path ?? null, ...(props.compare?.demos.map((d) => d.path) ?? [])].join('|'),
         () => {
             if (props.compare) startCompare(props.compare);
             else if (props.demo) start(props.demo);
@@ -663,9 +671,12 @@
              native overlay window doesn't cover it. -->
         <div class="flex-shrink-0 flex items-center gap-2 px-3 py-2 bg-neutral-900 border-b border-white/10">
             <span v-if="compare" class="flex-1 flex items-center justify-center gap-2 text-sm font-semibold truncate">
-                <span class="truncate text-sky-300" :title="compare.a.name">{{ formatDemoName(compare.a.name) }}</span>
-                <span class="text-neutral-500 flex-shrink-0">vs</span>
-                <span class="truncate text-amber-300" :title="compare.b.name">{{ formatDemoName(compare.b.name) }}</span>
+                <template v-for="(d, i) in compare.demos" :key="i">
+                    <span v-if="i > 0" class="text-neutral-500 flex-shrink-0">vs</span>
+                    <span class="truncate" :class="paneColor(i)" :title="d.name">
+                        <span class="opacity-60">{{ paneLetter(i) }}</span> {{ formatDemoName(d.name) }}
+                    </span>
+                </template>
             </span>
             <span v-else class="flex-1 text-center text-sm font-semibold text-neutral-100 truncate">
                 {{ demo ? formatDemoName(demo.name) : 'Demo player' }}
@@ -748,29 +759,38 @@
                         class="absolute -top-5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-200 text-[10px] font-mono whitespace-nowrap pointer-events-none"
                     >ms zoom · {{ fmt(Math.floor(sliderMin/1000)) }}–{{ fmt(Math.ceil(sliderMax/1000)) }}</div>
                 </div>
-                <!-- Comparison: two timers (A / B) so you can read both runs. -->
-                <span v-if="compare" class="font-mono text-sm tabular-nums text-right leading-tight">
-                    <span class="text-sky-300">{{ fineMode ? fmtMs(posMs) : fmt(posSec) }}/{{ fmt(lenSec) }}</span>
-                    <span class="text-neutral-600 mx-1">·</span>
-                    <span class="text-amber-300">{{ fmt(pos1Sec) }}/{{ fmt(len1Sec) }}</span>
+                <!-- Comparison: one timer per demo so you can read every run. -->
+                <span v-if="compare" class="font-mono text-xs tabular-nums text-right leading-tight">
+                    <template v-for="(p, i) in paneTimers" :key="i">
+                        <span v-if="i > 0" class="text-neutral-600 mx-1">·</span>
+                        <span :class="paneColor(i)">{{ (i === 0 && fineMode) ? fmtMs(posMs) : fmt(p.posSec) }}/{{ fmt(p.lenSec) }}</span>
+                    </template>
                 </span>
                 <span v-else class="font-mono text-sm tabular-nums w-28 text-right" :class="{ 'text-amber-300': fineMode }">
                     {{ fineMode ? fmtMs(posMs) : fmt(posSec) }} / {{ fmt(lenSec) }}
                 </span>
             </div>
 
-            <!-- Comparison: nudge demo B against A to line up the runs. The engine
-                 only knows each demo's file start, so this is the manual sync. -->
-            <div v-if="compare" class="mt-1.5 flex items-center gap-1.5 text-[11px] text-neutral-400 flex-wrap">
-                <span class="text-amber-300 font-semibold mr-0.5">Sync demo B:</span>
-                <button v-for="s in NUDGE_STEPS" :key="'m'+s" class="nudge" @click="nudgeB(-s)">-{{ s }}</button>
-                <span class="text-neutral-600 mx-0.5">|</span>
-                <button v-for="s in NUDGE_STEPS" :key="'p'+s" class="nudge" @click="nudgeB(s)">+{{ s }}</button>
-                <button class="nudge ml-1" @click="resetOffsetB">reset</button>
-                <span class="font-mono tabular-nums ml-1" :class="offsetB ? 'text-amber-300' : 'text-neutral-500'">
-                    offset {{ offsetB > 0 ? '+' : '' }}{{ offsetB }}ms
-                    <span v-if="offsetB" class="text-neutral-500">({{ (offsetB / 8).toFixed(offsetB % 8 ? 1 : 0) }}f)</span>
-                </span>
+            <!-- Comparison: nudge each demo against demo A to line the runs up.
+                 The engine only knows each demo's file start, so this is the
+                 manual sync. One row per demo (A is the anchor). Steps are
+                 multiples of 8 ms = whole frames; -8 sits next to +8. -->
+            <div v-if="compare && offsets.length" class="mt-1.5 space-y-1">
+                <div
+                    v-for="i in (paneCount - 1)"
+                    :key="i"
+                    class="flex items-center gap-1.5 text-[11px] text-neutral-400 flex-wrap"
+                >
+                    <span class="font-semibold mr-0.5" :class="paneColor(i)">Sync {{ paneLetter(i) }}:</span>
+                    <button v-for="s in NUDGE_STEPS_DESC" :key="'m'+s" class="nudge" @click="nudgePane(i, -s)">-{{ s }}</button>
+                    <span class="text-neutral-600 mx-0.5">|</span>
+                    <button v-for="s in NUDGE_STEPS" :key="'p'+s" class="nudge" @click="nudgePane(i, s)">+{{ s }}</button>
+                    <button class="nudge ml-1" @click="resetOffset(i)">reset</button>
+                    <span class="font-mono tabular-nums ml-1" :class="(offsets[i] ?? 0) ? paneColor(i) : 'text-neutral-500'">
+                        {{ (offsets[i] ?? 0) > 0 ? '+' : '' }}{{ offsets[i] ?? 0 }}ms
+                        <span v-if="offsets[i]" class="text-neutral-500">({{ ((offsets[i] ?? 0) / 8).toFixed((offsets[i] ?? 0) % 8 ? 1 : 0) }}f)</span>
+                    </span>
+                </div>
             </div>
             <!-- Keyboard legend: what the shortcuts do while a demo plays. -->
             <div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-neutral-500">

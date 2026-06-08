@@ -292,19 +292,17 @@ export const tauri = {
             h: region.h,
             aspect,
         }),
-    /** Start a side-by-side comparison: two engines, pane 0 (left) plays
-     *  `demoA`, pane 1 (right) plays `demoB`, driven in lockstep. `region` is the
-     *  full embed rect; the backend splits it into two halves. Token-gated in
-     *  the UI. Resolves with the started pane count (2). Errors on non-Windows. */
+    /** Start a comparison of 2-4 demos, each in its own engine tiled into a grid
+     *  and driven in lockstep. `demos[i]` becomes pane i. `region` is the full
+     *  embed rect; the backend splits it. Token-gated in the UI. Resolves with
+     *  the started pane count. Errors on non-Windows. */
     demoPlayerCompareStart: (
-        demoA: string,
-        demoB: string,
+        demos: string[],
         region: { x: number; y: number; w: number; h: number },
         aspect: number,
     ) =>
         invoke<number>('demo_player_compare_start', {
-            demoA,
-            demoB,
+            demos,
             x: region.x,
             y: region.y,
             w: region.w,

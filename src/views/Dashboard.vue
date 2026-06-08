@@ -48,35 +48,47 @@
     };
 
     // -- side-by-side comparison (premium, token-gated) ---------------
-    // Two demos play in two engines, locked together. Selection is two-step:
-    // click Compare on demo A -> the list enters "pick the second demo" mode
-    // (same-map demos float to the top) -> click Select on demo B -> launch.
-    const compareTarget = ref<{ a: PlayTarget; b: PlayTarget } | null>(null);
-    const compareA = ref<DemoLibraryEntry | null>(null);
+    // 2-4 demos play in their own engines, tiled and locked together. Selection
+    // is two-step: click Compare on the first demo -> the list enters pick mode
+    // (same-map demos float to the top) -> Add up to 4 -> Start compare.
+    const MAX_COMPARE = 4;
+    const compareTarget = ref<{ demos: PlayTarget[] } | null>(null);
+    const compareSel = ref<DemoLibraryEntry[]>([]);
     const compareMapKey = computed(() =>
-        compareA.value ? (mapNameFromFilename(compareA.value.filename) ?? '').toLowerCase() : '',
+        compareSel.value.length
+            ? (mapNameFromFilename(compareSel.value[0].filename) ?? '').toLowerCase()
+            : '',
     );
-    // Begin picking: remember A and switch the list into pick-second mode.
+    // Index of `d` in the current selection (-1 = not selected). Doubles as the
+    // pane letter (0=A, 1=B, ...).
+    const compareIndexOf = (d: DemoLibraryEntry) =>
+        compareSel.value.findIndex((x) => x.path === d.path);
+    // Begin picking: seed the selection with the first demo, enter pick mode.
     const startComparePick = (d: DemoLibraryEntry) => {
         if (!config.hasToken) return; // premium
-        compareA.value = d;
+        compareSel.value = [d];
     };
     const cancelComparePick = () => {
-        compareA.value = null;
+        compareSel.value = [];
     };
-    // Complete the pair and launch the side-by-side player.
-    const pickCompareB = (d: DemoLibraryEntry) => {
-        const a = compareA.value;
-        if (!a || d.path === a.path) return;
+    // Add/remove a demo from the selection (capped at MAX_COMPARE).
+    const toggleCompareSel = (d: DemoLibraryEntry) => {
+        const i = compareIndexOf(d);
+        if (i >= 0) compareSel.value.splice(i, 1);
+        else if (compareSel.value.length < MAX_COMPARE) compareSel.value.push(d);
+    };
+    // Launch the comparison with the picked demos.
+    const launchCompare = () => {
+        if (compareSel.value.length < 2) return;
         playerTarget.value = null;
         compareTarget.value = {
-            a: { path: a.path, name: a.filename },
-            b: { path: d.path, name: d.filename },
+            demos: compareSel.value.map((d) => ({ path: d.path, name: d.filename })),
         };
-        compareA.value = null;
+        compareSel.value = [];
     };
-    // True when `d` shares demo A's map (same-map comparisons are the useful
-    // case, so they're surfaced first and the rest is de-emphasized).
+    const compareLetter = (i: number) => String.fromCharCode(65 + i);
+    // True when `d` shares the first pick's map (same-map comparisons are the
+    // useful case, so they're surfaced first and the rest is de-emphasized).
     const isSameMapAsA = (d: DemoLibraryEntry) =>
         !!compareMapKey.value &&
         (mapNameFromFilename(d.filename) ?? '').toLowerCase() === compareMapKey.value;
@@ -325,7 +337,7 @@
         // While picking the second demo to compare, float same-map demos to the
         // top so the obvious choices are right there (stable - keeps the sort
         // above within each group).
-        if (compareA.value && compareMapKey.value) {
+        if (compareSel.value.length && compareMapKey.value) {
             result.sort((a, b) => Number(isSameMapAsA(b)) - Number(isSameMapAsA(a)));
         }
         return result;
@@ -544,7 +556,7 @@
         // stops the engine(s).
         playerTarget.value = null;
         compareTarget.value = null;
-        compareA.value = null;
+        compareSel.value = [];
     });
 
     onUnmounted(() => {
@@ -973,19 +985,25 @@
             <span class="text-neutral-500 ml-auto">{{ filteredDemos.length }} / {{ allRows.length }}</span>
         </div>
 
-        <!-- Comparison pick-second banner: shown after Compare is clicked on a
-             demo. Same-map demos float to the top of the list below. -->
+        <!-- Comparison pick banner: shown after Compare is clicked on a demo.
+             Add up to 4 demos (same-map ones float to the top), then Start. -->
         <div
-            v-if="compareA"
+            v-if="compareSel.length"
             class="flex-shrink-0 flex items-center gap-2 px-5 py-2 bg-amber-500/10 border-b border-amber-500/30 text-sm"
         >
-            <span class="text-amber-200 font-semibold flex-shrink-0">Comparing:</span>
-            <span class="text-amber-100 truncate min-w-0" :title="compareA.filename">{{ compareA.filename }}</span>
-            <span class="text-amber-300/70 flex-shrink-0">- now pick the second demo (same map first)</span>
-            <button
-                class="ml-auto flex-shrink-0 px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 text-xs"
-                @click="cancelComparePick"
-            >Cancel</button>
+            <span class="text-amber-200 font-semibold flex-shrink-0">Compare ({{ compareSel.length }}/{{ MAX_COMPARE }}):</span>
+            <span class="text-amber-300/70 flex-shrink-0 truncate">pick {{ compareSel.length < 2 ? 'at least one more' : 'up to ' + MAX_COMPARE }} demo, same map first</span>
+            <div class="ml-auto flex items-center gap-2 flex-shrink-0">
+                <button
+                    class="px-3 py-1 rounded text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed bg-purple-500/25 hover:bg-purple-500/35 text-purple-200"
+                    :disabled="compareSel.length < 2"
+                    @click="launchCompare"
+                >Start compare ⚖ ({{ compareSel.length }})</button>
+                <button
+                    class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 text-xs"
+                    @click="cancelComparePick"
+                >Cancel</button>
+            </div>
         </div>
 
         <!-- the list -->
@@ -1021,8 +1039,8 @@
                     :key="d.path"
                     class="absolute left-0 right-0 px-5 flex items-center gap-3 overflow-hidden border-b border-white/[0.04] hover:bg-white/[0.02]"
                     :class="{
-                        'opacity-40': compareA && d.path !== compareA.path && !isSameMapAsA(d),
-                        'bg-amber-500/[0.06]': compareA && d.path === compareA.path,
+                        'opacity-40': compareSel.length && compareIndexOf(d) < 0 && !isSameMapAsA(d),
+                        'bg-amber-500/[0.06]': compareIndexOf(d) >= 0,
                     }"
                     :style="{ top: top + 'px', height: ROW_H + 'px' }"
                     @contextmenu="openContextMenu($event, d)"
@@ -1058,18 +1076,21 @@
                         @click.stop="retryUpload(d.path)"
                     >{{ retrying.has(d.path) ? 'Retrying…' : 'Retry' }}</button>
 
-                    <!-- comparison pick mode: this row becomes the B selector -->
-                    <template v-if="compareA">
-                        <span
-                            v-if="d.path === compareA.path"
-                            class="px-3 py-1 rounded text-xs font-semibold bg-amber-500/20 text-amber-300 flex-shrink-0 whitespace-nowrap"
-                        >Demo A</span>
+                    <!-- comparison pick mode: rows become add/remove selectors -->
+                    <template v-if="compareSel.length">
+                        <button
+                            v-if="compareIndexOf(d) >= 0"
+                            class="px-3 py-1 rounded text-xs font-semibold bg-amber-500/30 hover:bg-amber-500/40 text-amber-200 flex-shrink-0 whitespace-nowrap"
+                            title="Remove from comparison"
+                            @click.stop="toggleCompareSel(d)"
+                        >✓ Demo {{ compareLetter(compareIndexOf(d)) }} (remove)</button>
                         <button
                             v-else
-                            class="px-3 py-1 rounded text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 flex-shrink-0 whitespace-nowrap"
-                            :title="isSameMapAsA(d) ? 'Compare this run against demo A' : 'Different map than demo A - compare anyway'"
-                            @click.stop="pickCompareB(d)"
-                        >Select as B ⚖</button>
+                            class="px-3 py-1 rounded text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 flex-shrink-0 whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
+                            :disabled="compareSel.length >= MAX_COMPARE"
+                            :title="compareSel.length >= MAX_COMPARE ? 'Maximum of 4 demos' : (isSameMapAsA(d) ? 'Add this run to the comparison' : 'Different map - add anyway')"
+                            @click.stop="toggleCompareSel(d)"
+                        >+ Add ⚖</button>
                     </template>
 
                     <!-- normal mode actions (hidden while picking a comparison) -->

@@ -122,21 +122,40 @@ fn letterbox(rx: i32, ry: i32, rw: i32, rh: i32, aspect: f32) -> (i32, i32, i32,
     (sx, sy, sw.max(1), sh.max(1))
 }
 
+/// Grid dimensions (cols, rows) for `count` comparison panes: 1 = 1x1, 2 = 2x1,
+/// 3 = 3x1 (a row of three), 4 = 2x2.
+fn grid_dims(count: u8) -> (u8, u8) {
+    match count {
+        0 | 1 => (1, 1),
+        2 => (2, 1),
+        3 => (3, 1),
+        _ => (2, 2),
+    }
+}
+
 /// Split a render region into the sub-region for `pane` of `count` panes laid
-/// out left-to-right, leaving a thin gutter between them so the two demos read
-/// as distinct panels. For count == 1 it returns the whole region unchanged.
+/// out in a grid (see `grid_dims`), leaving a thin gutter between cells so the
+/// demos read as distinct panels. For count == 1 it returns the whole region.
 fn pane_region(pane: u8, count: u8, rx: i32, ry: i32, rw: i32, rh: i32) -> (i32, i32, i32, i32) {
     if count <= 1 {
         return (rx, ry, rw, rh);
     }
-    const GUTTER: i32 = 6; // px between the two panels
-    let half = (rw - GUTTER) / 2;
-    if pane == 0 {
-        (rx, ry, half.max(1), rh)
-    } else {
-        let left = rx + half + GUTTER;
-        (left, ry, (rx + rw - left).max(1), rh)
-    }
+    const GUTTER: i32 = 6; // px between cells
+    let (cols, rows) = grid_dims(count);
+    let col = (pane % cols) as i32;
+    let row = (pane / cols) as i32;
+    let cols = cols as i32;
+    let rows = rows as i32;
+
+    // Cell width/height after removing the gutters between cells.
+    let cw = (rw - GUTTER * (cols - 1)) / cols;
+    let ch = (rh - GUTTER * (rows - 1)) / rows;
+    let cx = rx + col * (cw + GUTTER);
+    let cy = ry + row * (ch + GUTTER);
+    // Last column/row absorbs rounding remainder so panes meet the region edge.
+    let w = if col == cols - 1 { (rx + rw - cx).max(1) } else { cw.max(1) };
+    let h = if row == rows - 1 { (ry + rh - cy).max(1) } else { ch.max(1) };
+    (cx, cy, w, h)
 }
 
 /// Derive `(fs_basepath, fs_game, demo_arg)` from a demo's absolute path. Defrag
@@ -809,17 +828,16 @@ pub async fn demo_player_start(
     }
 }
 
-/// Start a side-by-side comparison of two demos (premium/token-gated in the UI).
-/// Pane 0 (left) plays `demo_a`, pane 1 (right) plays `demo_b`, each in its own
-/// engine. They are driven in lockstep by the shared transport, and relative
-/// seeks align on each demo's run-start (see `demo_player_seek_relative`).
+/// Start a comparison of 2-4 demos (premium/token-gated in the UI). Each demo
+/// plays in its own engine, tiled into a grid (see `pane_region`), all driven in
+/// lockstep by the shared transport. Per-pane sync offsets (`demo_player_set_offset`)
+/// let the user line runs up.
 #[tauri::command]
 #[cfg_attr(not(windows), allow(unused_variables))]
 pub async fn demo_player_compare_start(
     app: AppHandle,
     state: State<'_, AppState>,
-    demo_a: String,
-    demo_b: String,
+    demos: Vec<String>,
     x: i32,
     y: i32,
     w: i32,
@@ -832,9 +850,14 @@ pub async fn demo_player_compare_start(
     }
     #[cfg(windows)]
     {
-        if demo_a.trim().is_empty() || demo_b.trim().is_empty() {
-            return Err("Pick two demos to compare.".to_string());
+        let demos: Vec<String> = demos.into_iter().filter(|d| !d.trim().is_empty()).collect();
+        if demos.len() < 2 {
+            return Err("Pick at least two demos to compare.".to_string());
         }
+        if demos.len() > 4 {
+            return Err("You can compare at most four demos at once.".to_string());
+        }
+        let count = demos.len() as u8;
 
         let (exe, exe_dir) = resolve_engine(&app)?;
         let win = app
@@ -848,36 +871,36 @@ pub async fn demo_player_compare_start(
             stop_all(&app, panes);
         }
 
-        // Isolate each engine's writable config so the two don't fight over
-        // q3config.cfg on quit.
         let tmp = std::env::temp_dir();
-        let (l0, l1, w0, w1) = (
-            pane_region(0, 2, x, y, w, h),
-            pane_region(1, 2, x, y, w, h),
-            tmp.join("drl-demo-pane0"),
-            tmp.join("drl-demo-pane1"),
-        );
-
-        let pane0 = spawn_pane(
-            &app, &exe, &exe_dir, &demo_a, 0, parent, l0.0, l0.1, l0.2, l0.3, aspect, Some(w0),
-        )?;
-        let pane1 = match spawn_pane(
-            &app, &exe, &exe_dir, &demo_b, 1, parent, l1.0, l1.1, l1.2, l1.3, aspect, Some(w1),
-        ) {
-            Ok(p) => p,
-            Err(e) => {
-                // Roll back pane 0 so we never leave a half-started comparison.
-                stop_pane(&app, pane0);
-                return Err(e);
+        let mut started: Vec<Pane> = Vec::with_capacity(demos.len());
+        for (i, demo) in demos.iter().enumerate() {
+            let idx = i as u8;
+            let (cx, cy, cw, ch) = pane_region(idx, count, x, y, w, h);
+            // Isolate each engine's writable config so they don't fight over
+            // q3config.cfg on quit.
+            let homepath = tmp.join(format!("drl-demo-pane{idx}"));
+            match spawn_pane(
+                &app, &exe, &exe_dir, demo, idx, parent, cx, cy, cw, ch, aspect, Some(homepath),
+            ) {
+                Ok(p) => started.push(p),
+                Err(e) => {
+                    // Roll back any panes already started so we never leave a
+                    // half-started comparison.
+                    for p in started.drain(..) {
+                        stop_pane(&app, p);
+                    }
+                    return Err(e);
+                }
             }
-        };
+        }
 
-        install_key_hook(&app, vec![pane_focus_key(&pane0), pane_focus_key(&pane1)]);
+        install_key_hook(&app, started.iter().map(pane_focus_key).collect());
 
         let mut guard = state.demo_player.inner.lock().unwrap();
-        guard.push(pane0);
-        guard.push(pane1);
-        Ok(2)
+        for p in started {
+            guard.push(p);
+        }
+        Ok(count as u16)
     }
 }
 
@@ -1071,6 +1094,31 @@ mod tests {
         assert_eq!((rx, ry, rw, rh), (403, 0, 397, 600));
         // the two halves + gutter never exceed the region width
         assert!(lw + 6 + rw <= 800);
+    }
+
+    #[test]
+    fn grid_dims_layouts() {
+        assert_eq!(grid_dims(1), (1, 1));
+        assert_eq!(grid_dims(2), (2, 1));
+        assert_eq!(grid_dims(3), (3, 1));
+        assert_eq!(grid_dims(4), (2, 2));
+    }
+
+    #[test]
+    fn pane_region_four_is_2x2_quadrants() {
+        // 800x600, 6px gutters: cells ~397x297; quadrants tile and reach edges.
+        let tl = pane_region(0, 4, 0, 0, 800, 600);
+        let tr = pane_region(1, 4, 0, 0, 800, 600);
+        let bl = pane_region(2, 4, 0, 0, 800, 600);
+        let br = pane_region(3, 4, 0, 0, 800, 600);
+        assert_eq!(tl, (0, 0, 397, 297));
+        assert_eq!(tr.0, 403); // right column starts past gutter
+        assert_eq!(tr.1, 0);
+        assert_eq!(bl.0, 0);
+        assert_eq!(bl.1, 303); // bottom row starts past gutter
+        // bottom-right reaches the region's far corner
+        assert_eq!(br.0 + br.2, 800);
+        assert_eq!(br.1 + br.3, 600);
     }
 
     #[test]
