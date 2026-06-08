@@ -43,8 +43,43 @@
     // player; the panel's close button clears it.
     const playerTarget = ref<PlayTarget | null>(null);
     const playDemo = (d: DemoLibraryEntry) => {
+        compareTarget.value = null;
         playerTarget.value = { path: d.path, name: d.filename };
     };
+
+    // -- side-by-side comparison (premium, token-gated) ---------------
+    // Two demos play in two engines, locked together. Selection is two-step:
+    // click Compare on demo A -> the list enters "pick the second demo" mode
+    // (same-map demos float to the top) -> click Select on demo B -> launch.
+    const compareTarget = ref<{ a: PlayTarget; b: PlayTarget } | null>(null);
+    const compareA = ref<DemoLibraryEntry | null>(null);
+    const compareMapKey = computed(() =>
+        compareA.value ? (mapNameFromFilename(compareA.value.filename) ?? '').toLowerCase() : '',
+    );
+    // Begin picking: remember A and switch the list into pick-second mode.
+    const startComparePick = (d: DemoLibraryEntry) => {
+        if (!config.hasToken) return; // premium
+        compareA.value = d;
+    };
+    const cancelComparePick = () => {
+        compareA.value = null;
+    };
+    // Complete the pair and launch the side-by-side player.
+    const pickCompareB = (d: DemoLibraryEntry) => {
+        const a = compareA.value;
+        if (!a || d.path === a.path) return;
+        playerTarget.value = null;
+        compareTarget.value = {
+            a: { path: a.path, name: a.filename },
+            b: { path: d.path, name: d.filename },
+        };
+        compareA.value = null;
+    };
+    // True when `d` shares demo A's map (same-map comparisons are the useful
+    // case, so they're surfaced first and the rest is de-emphasized).
+    const isSameMapAsA = (d: DemoLibraryEntry) =>
+        !!compareMapKey.value &&
+        (mapNameFromFilename(d.filename) ?? '').toLowerCase() === compareMapKey.value;
 
     // -- live session queue -------------------------------------------
     const queue = ref<UploadStateSnapshot>({
@@ -287,6 +322,12 @@
                 }
             }
         });
+        // While picking the second demo to compare, float same-map demos to the
+        // top so the obvious choices are right there (stable - keeps the sort
+        // above within each group).
+        if (compareA.value && compareMapKey.value) {
+            result.sort((a, b) => Number(isSameMapAsA(b)) - Number(isSameMapAsA(a)));
+        }
         return result;
     });
 
@@ -500,8 +541,10 @@
         // Leaving the Demos tab while a demo plays: end playback and clear the
         // overlay, so the engine stops and coming back shows just the demo list
         // (not a stale player). Clearing the target unmounts the panel, which
-        // stops the engine.
+        // stops the engine(s).
         playerTarget.value = null;
+        compareTarget.value = null;
+        compareA.value = null;
     });
 
     onUnmounted(() => {
@@ -738,9 +781,14 @@
 <template>
     <div class="flex-1 flex flex-col min-h-0 relative">
         <!-- Embedded player overlay: covers the whole Demos section while a
-             demo plays; the panel's ✕ closes it (stops + clears). -->
-        <div v-if="playerTarget" class="absolute inset-0 z-30 bg-neutral-950">
-            <DemoPlayerPanel :demo="playerTarget" @close="playerTarget = null" />
+             demo plays; the panel's ✕ closes it (stops + clears). Same overlay
+             hosts the two-engine comparison when compareTarget is set. -->
+        <div v-if="playerTarget || compareTarget" class="absolute inset-0 z-30 bg-neutral-950">
+            <DemoPlayerPanel
+                :demo="playerTarget"
+                :compare="compareTarget"
+                @close="playerTarget = null; compareTarget = null"
+            />
         </div>
 
         <!-- top bar: auto-backup status + controls + folder chip -->
@@ -925,6 +973,21 @@
             <span class="text-neutral-500 ml-auto">{{ filteredDemos.length }} / {{ allRows.length }}</span>
         </div>
 
+        <!-- Comparison pick-second banner: shown after Compare is clicked on a
+             demo. Same-map demos float to the top of the list below. -->
+        <div
+            v-if="compareA"
+            class="flex-shrink-0 flex items-center gap-2 px-5 py-2 bg-amber-500/10 border-b border-amber-500/30 text-sm"
+        >
+            <span class="text-amber-200 font-semibold flex-shrink-0">Comparing:</span>
+            <span class="text-amber-100 truncate min-w-0" :title="compareA.filename">{{ compareA.filename }}</span>
+            <span class="text-amber-300/70 flex-shrink-0">- now pick the second demo (same map first)</span>
+            <button
+                class="ml-auto flex-shrink-0 px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 text-xs"
+                @click="cancelComparePick"
+            >Cancel</button>
+        </div>
+
         <!-- the list -->
         <div ref="scrollEl" class="flex-1 overflow-auto queue-scroll" @scroll="onListScroll">
             <div v-if="listLoading && !allRows.length" class="p-8 text-center text-sm text-neutral-500">
@@ -957,6 +1020,10 @@
                     v-for="{ d, top } in visibleDemos"
                     :key="d.path"
                     class="absolute left-0 right-0 px-5 flex items-center gap-3 overflow-hidden border-b border-white/[0.04] hover:bg-white/[0.02]"
+                    :class="{
+                        'opacity-40': compareA && d.path !== compareA.path && !isSameMapAsA(d),
+                        'bg-amber-500/[0.06]': compareA && d.path === compareA.path,
+                    }"
                     :style="{ top: top + 'px', height: ROW_H + 'px' }"
                     @contextmenu="openContextMenu($event, d)"
                 >
@@ -991,6 +1058,22 @@
                         @click.stop="retryUpload(d.path)"
                     >{{ retrying.has(d.path) ? 'Retrying…' : 'Retry' }}</button>
 
+                    <!-- comparison pick mode: this row becomes the B selector -->
+                    <template v-if="compareA">
+                        <span
+                            v-if="d.path === compareA.path"
+                            class="px-3 py-1 rounded text-xs font-semibold bg-amber-500/20 text-amber-300 flex-shrink-0 whitespace-nowrap"
+                        >Demo A</span>
+                        <button
+                            v-else
+                            class="px-3 py-1 rounded text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 flex-shrink-0 whitespace-nowrap"
+                            :title="isSameMapAsA(d) ? 'Compare this run against demo A' : 'Different map than demo A - compare anyway'"
+                            @click.stop="pickCompareB(d)"
+                        >Select as B ⚖</button>
+                    </template>
+
+                    <!-- normal mode actions (hidden while picking a comparison) -->
+                    <template v-else>
                     <!-- play embedded (Windows only) -->
                     <button
                         v-if="isWindows"
@@ -998,6 +1081,14 @@
                         title="Plays right here in the launcher - instant, no rendering or upload needed"
                         @click.stop="playDemo(d)"
                     >▶ Play instantly in launcher</button>
+
+                    <!-- compare two demos side by side (premium, token-gated) -->
+                    <button
+                        v-if="isWindows && config.hasToken"
+                        class="px-3 py-1 rounded text-xs font-semibold bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 flex-shrink-0 flex items-center gap-1 whitespace-nowrap"
+                        title="Compare this run side by side with another demo - two engines, locked together"
+                        @click.stop="startComparePick(d)"
+                    >⚖ Compare</button>
 
                     <!-- render / play YouTube -->
                     <button
@@ -1019,6 +1110,7 @@
                         <svg v-if="renderIsCompleted(d)" class="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"/><path d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#0a0a0a"/></svg>
                         <span>{{ renderLabelFor(d) }}</span>
                     </button>
+                    </template>
                 </li>
             </ul>
         </div>

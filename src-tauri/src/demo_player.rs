@@ -33,7 +33,7 @@
 // dead code.
 #![cfg_attr(not(windows), allow(dead_code))]
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -43,8 +43,13 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::commands::AppState;
 
-/// Live playback session. Present only while a demo is loaded.
-struct Session {
+/// One running engine instance ("pane"). A normal playback is a single pane;
+/// the side-by-side demo comparison runs two (pane 0 = left, pane 1 = right),
+/// driven in lockstep. Everything that used to be "the session" is now a pane,
+/// and the player holds a `Vec<Pane>` (0, 1 or 2 entries).
+struct Pane {
+    /// Which half this pane occupies: 0 = sole/left, 1 = right.
+    index: u8,
     /// The engine process. Shared with the control thread so it can notice the
     /// user closing the engine; `stop()` kills it from the command side.
     child: Arc<Mutex<std::process::Child>>,
@@ -59,13 +64,19 @@ struct Session {
     /// re-map the stage's client rect to screen coordinates after the launcher
     /// is moved.
     parent: isize,
+    /// Per-pane seek offset (ms), default 0. A synchronized relative seek of `t`
+    /// lands this pane at `t + offset`. Used in comparison to nudge one demo
+    /// against the other so the runs line up (the engine reports only the demo-
+    /// FILE start, not the defrag timer start, so the user fine-tunes the sync).
+    offset: Arc<AtomicI32>,
     join: Option<JoinHandle<()>>,
 }
 
-/// App-state holder for the (at most one) active demo player session.
+/// App-state holder for the active demo player. Empty = nothing playing; one
+/// pane = normal playback; two panes = side-by-side comparison.
 #[derive(Default)]
 pub struct DemoPlayer {
-    inner: Mutex<Option<Session>>,
+    inner: Mutex<Vec<Pane>>,
 }
 
 /// Status snapshot pushed to the frontend ~10x/sec while a demo plays.
@@ -74,6 +85,8 @@ pub struct DemoPlayer {
 /// `total - start` (total is 0 until the launcher seeks once to measure it).
 #[derive(Clone, serde::Serialize)]
 struct StatusEvent {
+    /// Which pane this status is from: 0 = sole/left, 1 = right (comparison).
+    pane: u8,
     time: i32,
     start: i32,
     total: i32,
@@ -107,6 +120,23 @@ fn letterbox(rx: i32, ry: i32, rw: i32, rh: i32, aspect: f32) -> (i32, i32, i32,
     let sx = rx + (rw - sw) / 2;
     let sy = ry + (rh - sh) / 2;
     (sx, sy, sw.max(1), sh.max(1))
+}
+
+/// Split a render region into the sub-region for `pane` of `count` panes laid
+/// out left-to-right, leaving a thin gutter between them so the two demos read
+/// as distinct panels. For count == 1 it returns the whole region unchanged.
+fn pane_region(pane: u8, count: u8, rx: i32, ry: i32, rw: i32, rh: i32) -> (i32, i32, i32, i32) {
+    if count <= 1 {
+        return (rx, ry, rw, rh);
+    }
+    const GUTTER: i32 = 6; // px between the two panels
+    let half = (rw - GUTTER) / 2;
+    if pane == 0 {
+        (rx, ry, half.max(1), rh)
+    } else {
+        let left = rx + half + GUTTER;
+        (left, ry, (rx + rw - left).max(1), rh)
+    }
 }
 
 /// Derive `(fs_basepath, fs_game, demo_arg)` from a demo's absolute path. Defrag
@@ -302,11 +332,12 @@ fn destroy_stage_on_main(app: &AppHandle, hwnd: isize) {
 // swallowed so nothing else also reacts.
 
 /// Context the hook needs: where to emit, and how to recognize "demo focused".
+/// `panes` is one `(stage hwnd, engine pid)` per running pane, so a key fires
+/// when EITHER pane (in comparison mode) holds focus.
 #[cfg(windows)]
 struct KeyHookCtx {
     app: AppHandle,
-    stage: isize,
-    engine_pid: u32,
+    panes: Vec<(isize, u32)>,
 }
 
 #[cfg(windows)]
@@ -346,14 +377,14 @@ unsafe extern "system" fn ll_keyboard_proc(
             if let Some(name) = name {
                 if let Ok(guard) = KEY_HOOK_CTX.lock() {
                     if let Some(ctx) = guard.as_ref() {
-                        // Is the demo the focused context?
+                        // Is ANY of our demo panes the focused context?
                         let fg = GetForegroundWindow();
-                        let mut in_demo = fg.0 as isize == ctx.stage;
-                        if !in_demo {
-                            let mut pid = 0u32;
-                            GetWindowThreadProcessId(fg, Some(&mut pid));
-                            in_demo = pid != 0 && pid == ctx.engine_pid;
-                        }
+                        let fg_isize = fg.0 as isize;
+                        let mut fg_pid = 0u32;
+                        GetWindowThreadProcessId(fg, Some(&mut fg_pid));
+                        let in_demo = ctx.panes.iter().any(|(stage, pid)| {
+                            fg_isize == *stage || (fg_pid != 0 && fg_pid == *pid)
+                        });
                         if in_demo {
                             ctx.app.emit("demo-player-key", name.to_string()).ok();
                             return LRESULT(1); // swallow - nothing else reacts
@@ -366,14 +397,14 @@ unsafe extern "system" fn ll_keyboard_proc(
     CallNextHookEx(None, code, wparam, lparam)
 }
 
-/// Start intercepting transport keys for the active session.
-fn install_key_hook(app: &AppHandle, stage: isize, engine_pid: u32) {
+/// Start intercepting transport keys for the active panes (one `(stage, pid)`
+/// per pane). Installs the system hook once; safe to call after all panes exist.
+fn install_key_hook(app: &AppHandle, panes: Vec<(isize, u32)>) {
     #[cfg(windows)]
     {
         *KEY_HOOK_CTX.lock().unwrap() = Some(KeyHookCtx {
             app: app.clone(),
-            stage,
-            engine_pid,
+            panes,
         });
         // LL hooks fire on the installing thread's message loop - install on the
         // main (UI) thread, which Tauri pumps.
@@ -388,7 +419,7 @@ fn install_key_hook(app: &AppHandle, stage: isize, engine_pid: u32) {
     }
     #[cfg(not(windows))]
     {
-        let _ = (app, stage, engine_pid);
+        let _ = (app, panes);
     }
 }
 
@@ -445,6 +476,7 @@ fn parse_status(line: &str) -> Option<StatusEvent> {
         }
     }
     Some(StatusEvent {
+        pane: 0, // filled in by the caller (run_control knows its pane)
         time,
         start,
         total,
@@ -460,6 +492,7 @@ fn parse_status(line: &str) -> Option<StatusEvent> {
 /// is gone, emitting `demo-player-closed` in the latter case.
 fn run_control(
     app: AppHandle,
+    pane: u8,
     port: u16,
     child: Arc<Mutex<std::process::Child>>,
     cmd_rx: Receiver<String>,
@@ -525,7 +558,8 @@ fn run_control(
                     while let Some(nl) = acc.find('\n') {
                         let line: String = acc.drain(..=nl).collect();
                         let line = line.trim_end();
-                        if let Some(ev) = parse_status(line) {
+                        if let Some(mut ev) = parse_status(line) {
+                            ev.pane = pane;
                             app.emit("demo-player-status", ev).ok();
                         } else if let Some(key) = line.strip_prefix("key ") {
                             // The engine forwards a transport key it swallowed
@@ -561,19 +595,30 @@ fn child_exited(child: &Arc<Mutex<std::process::Child>>) -> bool {
 
 // ---- session lifecycle -----------------------------------------------------
 
-/// Tear down a running session: signal the thread, kill the engine, drop the
-/// stage window.
-fn stop_session(app: &AppHandle, mut s: Session) {
-    remove_key_hook(app);
-    s.stop.store(true, Ordering::Relaxed);
-    if let Ok(mut c) = s.child.lock() {
+/// Tear down a single pane: signal its thread, kill the engine, drop its stage
+/// window. Does NOT touch the shared key hook (see `stop_all`).
+fn stop_pane(app: &AppHandle, mut p: Pane) {
+    p.stop.store(true, Ordering::Relaxed);
+    if let Ok(mut c) = p.child.lock() {
         let _ = c.kill();
         let _ = c.wait();
     }
-    if let Some(j) = s.join.take() {
+    if let Some(j) = p.join.take() {
         let _ = j.join();
     }
-    destroy_stage_on_main(app, s.stage);
+    destroy_stage_on_main(app, p.stage);
+}
+
+/// Tear down every active pane (single playback or a comparison pair) and remove
+/// the shared transport-key hook once.
+fn stop_all(app: &AppHandle, panes: Vec<Pane>) {
+    if panes.is_empty() {
+        return;
+    }
+    remove_key_hook(app);
+    for p in panes {
+        stop_pane(app, p);
+    }
 }
 
 /// Pick an ephemeral free TCP port for the control channel. Small race window
@@ -585,6 +630,125 @@ fn pick_port() -> u16 {
         .and_then(|l| l.local_addr().ok())
         .map(|a| a.port())
         .unwrap_or(28961)
+}
+
+// ---- pane spawning ---------------------------------------------------------
+
+/// Resolve the bundled engine exe and its directory (shared by single + compare).
+#[cfg(windows)]
+fn resolve_engine(app: &AppHandle) -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
+    let exe = app
+        .path()
+        .resolve("resources/odfe/oDFe.x64.exe", tauri::path::BaseDirectory::Resource)
+        .map_err(|e| format!("Could not locate the bundled demo-player engine: {e}"))?;
+    if !exe.exists() {
+        return Err(format!("Bundled demo-player engine missing at {}", exe.display()));
+    }
+    let exe_dir = exe
+        .parent()
+        .ok_or_else(|| "Bundled engine path has no parent.".to_string())?
+        .to_path_buf();
+    Ok((exe, exe_dir))
+}
+
+/// Spawn one embedded engine pane: create its stage at the aspect-correct
+/// sub-rect of the outer region `(rx,ry,rw,rh)`, launch the engine into it over
+/// a fresh control port, and wire up the control thread. Does NOT install the
+/// key hook - the caller does that once after every pane exists. `homepath`, if
+/// set, isolates this instance's writable config dir so two engines comparing
+/// side by side don't clobber each other's `q3config.cfg`.
+#[cfg(windows)]
+#[allow(clippy::too_many_arguments)]
+fn spawn_pane(
+    app: &AppHandle,
+    exe: &std::path::Path,
+    exe_dir: &std::path::Path,
+    demo_abs: &str,
+    index: u8,
+    parent: isize,
+    rx: i32,
+    ry: i32,
+    rw: i32,
+    rh: i32,
+    aspect: f32,
+    homepath: Option<std::path::PathBuf>,
+) -> Result<Pane, String> {
+    let (basepath, fs_game, demo_arg) = derive_demo_launch(std::path::Path::new(demo_abs))?;
+
+    let (sx, sy, sw, sh) = letterbox(rx, ry, rw, rh, aspect);
+    let stage = create_stage_on_main(app, parent, sx, sy, sw, sh);
+    if stage == 0 {
+        return Err("Failed to create the demo render window.".to_string());
+    }
+
+    let port = pick_port();
+    let mut cmd = std::process::Command::new(exe);
+    cmd.current_dir(exe_dir)
+        .arg("+set")
+        .arg("in_embedParent")
+        .arg(stage.to_string())
+        .arg("+set")
+        .arg("in_controlPort")
+        .arg(port.to_string())
+        .arg("+set")
+        .arg("r_fullscreen")
+        .arg("0")
+        .arg("+set")
+        .arg("con_notifytime")
+        .arg("0")
+        .arg("+set")
+        .arg("fs_basepath")
+        .arg(basepath.to_string_lossy().to_string());
+    if let Some(hp) = &homepath {
+        std::fs::create_dir_all(hp).ok();
+        cmd.arg("+set").arg("fs_homepath").arg(hp.to_string_lossy().to_string());
+    }
+    cmd.arg("+set")
+        .arg("fs_game")
+        .arg(&fs_game)
+        .arg("+demo")
+        .arg(&demo_arg);
+
+    let child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            destroy_stage_on_main(app, stage);
+            return Err(format!("Failed to launch the demo-player engine: {e}"));
+        }
+    };
+
+    let child = Arc::new(Mutex::new(child));
+    let stop = Arc::new(AtomicBool::new(false));
+    let offset = Arc::new(AtomicI32::new(0));
+    let (cmd_tx, cmd_rx) = mpsc::channel::<String>();
+
+    let join = {
+        let app = app.clone();
+        let child = child.clone();
+        let stop = stop.clone();
+        std::thread::Builder::new()
+            .name(format!("demo-player-control-{index}"))
+            .spawn(move || run_control(app, index, port, child, cmd_rx, stop))
+            .ok()
+    };
+
+    Ok(Pane {
+        index,
+        child,
+        stop,
+        cmd_tx,
+        stage,
+        parent,
+        offset,
+        join,
+    })
+}
+
+/// The `(stage, engine pid)` of a pane, for the focus check in the key hook.
+#[cfg(windows)]
+fn pane_focus_key(p: &Pane) -> (isize, u32) {
+    let pid = p.child.lock().map(|c| c.id()).unwrap_or(0);
+    (p.stage, pid)
 }
 
 // ---- Tauri commands --------------------------------------------------------
@@ -620,29 +784,7 @@ pub async fn demo_player_start(
             return Err("No demo selected.".to_string());
         }
 
-        // `demo` is the absolute path to a .dm_68. The Defrag layout is
-        // <base>/<game>/demos/<sub...>/<file>, so derive fs_basepath=<base>,
-        // fs_game=<game>, and the `+demo` arg relative to the demos folder.
-        // This lets us play a demo from anywhere the user keeps them, and
-        // finds the maps/paks that live in that same install.
-        let (basepath, fs_game, demo_arg) =
-            derive_demo_launch(std::path::Path::new(&demo))?;
-
-        // Our shipped engine + its renderer DLL live under resources/odfe.
-        let exe = app
-            .path()
-            .resolve("resources/odfe/oDFe.x64.exe", tauri::path::BaseDirectory::Resource)
-            .map_err(|e| format!("Could not locate the bundled demo-player engine: {e}"))?;
-        if !exe.exists() {
-            return Err(format!(
-                "Bundled demo-player engine missing at {}",
-                exe.display()
-            ));
-        }
-        let exe_dir = exe
-            .parent()
-            .ok_or_else(|| "Bundled engine path has no parent.".to_string())?
-            .to_path_buf();
+        let (exe, exe_dir) = resolve_engine(&app)?;
 
         // Parent the stage to the launcher's main window.
         let win = app
@@ -652,99 +794,162 @@ pub async fn demo_player_start(
 
         // Replace any existing session before creating the new one.
         {
-            let mut guard = state.demo_player.inner.lock().unwrap();
-            if let Some(old) = guard.take() {
-                stop_session(&app, old);
-            }
+            let panes: Vec<Pane> = state.demo_player.inner.lock().unwrap().drain(..).collect();
+            stop_all(&app, panes);
         }
 
-        // Create the aspect-correct stage window (owned popup over `parent`).
-        let (sx, sy, sw, sh) = letterbox(x, y, w, h, aspect);
-        let stage = create_stage_on_main(&app, parent, sx, sy, sw, sh);
-        if stage == 0 {
-            return Err("Failed to create the demo render window.".to_string());
-        }
-
-        // Spawn the engine embedded in the stage, driven over a control port.
-        let port = pick_port();
-        let mut cmd = std::process::Command::new(&exe);
-        cmd.current_dir(&exe_dir)
-            .arg("+set")
-            .arg("in_embedParent")
-            .arg(stage.to_string())
-            .arg("+set")
-            .arg("in_controlPort")
-            .arg(port.to_string())
-            .arg("+set")
-            .arg("r_fullscreen")
-            .arg("0")
-            .arg("+set")
-            .arg("con_notifytime")
-            .arg("0")
-            .arg("+set")
-            .arg("fs_basepath")
-            .arg(basepath.to_string_lossy().to_string())
-            .arg("+set")
-            .arg("fs_game")
-            .arg(&fs_game)
-            .arg("+demo")
-            .arg(&demo_arg);
-
-        let child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                destroy_stage_on_main(&app, stage);
-                return Err(format!("Failed to launch the demo-player engine: {e}"));
-            }
-        };
-
-        // Intercept transport keys while the demo (engine window) has focus.
-        let engine_pid = child.id();
-        install_key_hook(&app, stage, engine_pid);
-
-        let child = Arc::new(Mutex::new(child));
-        let stop = Arc::new(AtomicBool::new(false));
-        let (cmd_tx, cmd_rx) = mpsc::channel::<String>();
-
-        let join = {
-            let app = app.clone();
-            let child = child.clone();
-            let stop = stop.clone();
-            std::thread::Builder::new()
-                .name("demo-player-control".into())
-                .spawn(move || run_control(app, port, child, cmd_rx, stop))
-                .ok()
-        };
+        let pane = spawn_pane(&app, &exe, &exe_dir, &demo, 0, parent, x, y, w, h, aspect, None)?;
+        install_key_hook(&app, vec![pane_focus_key(&pane)]);
 
         let mut guard = state.demo_player.inner.lock().unwrap();
-        *guard = Some(Session {
-            child,
-            stop,
-            cmd_tx,
-            stage,
-            parent,
-            join,
-        });
-
-        Ok(port)
+        guard.push(pane);
+        // The frontend reads playback via status events; the return value is
+        // just a started-pane count kept for command-signature compatibility.
+        Ok(1)
     }
 }
 
-/// Send a verbatim console line to the running engine (transport control:
-/// `timescale 0.5`, `demopause 1`, `seekdemo <ms>`, ...). No-op (Ok) if no
-/// session is active.
+/// Start a side-by-side comparison of two demos (premium/token-gated in the UI).
+/// Pane 0 (left) plays `demo_a`, pane 1 (right) plays `demo_b`, each in its own
+/// engine. They are driven in lockstep by the shared transport, and relative
+/// seeks align on each demo's run-start (see `demo_player_seek_relative`).
+#[tauri::command]
+#[cfg_attr(not(windows), allow(unused_variables))]
+pub async fn demo_player_compare_start(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    demo_a: String,
+    demo_b: String,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    aspect: f32,
+) -> Result<u16, String> {
+    #[cfg(not(windows))]
+    {
+        Err("The embedded demo player is only available on Windows.".to_string())
+    }
+    #[cfg(windows)]
+    {
+        if demo_a.trim().is_empty() || demo_b.trim().is_empty() {
+            return Err("Pick two demos to compare.".to_string());
+        }
+
+        let (exe, exe_dir) = resolve_engine(&app)?;
+        let win = app
+            .get_webview_window("main")
+            .ok_or_else(|| "Main window not available.".to_string())?;
+        let parent: isize = win.hwnd().map_err(|e| e.to_string())?.0 as isize;
+
+        // Replace whatever is playing.
+        {
+            let panes: Vec<Pane> = state.demo_player.inner.lock().unwrap().drain(..).collect();
+            stop_all(&app, panes);
+        }
+
+        // Isolate each engine's writable config so the two don't fight over
+        // q3config.cfg on quit.
+        let tmp = std::env::temp_dir();
+        let (l0, l1, w0, w1) = (
+            pane_region(0, 2, x, y, w, h),
+            pane_region(1, 2, x, y, w, h),
+            tmp.join("drl-demo-pane0"),
+            tmp.join("drl-demo-pane1"),
+        );
+
+        let pane0 = spawn_pane(
+            &app, &exe, &exe_dir, &demo_a, 0, parent, l0.0, l0.1, l0.2, l0.3, aspect, Some(w0),
+        )?;
+        let pane1 = match spawn_pane(
+            &app, &exe, &exe_dir, &demo_b, 1, parent, l1.0, l1.1, l1.2, l1.3, aspect, Some(w1),
+        ) {
+            Ok(p) => p,
+            Err(e) => {
+                // Roll back pane 0 so we never leave a half-started comparison.
+                stop_pane(&app, pane0);
+                return Err(e);
+            }
+        };
+
+        install_key_hook(&app, vec![pane_focus_key(&pane0), pane_focus_key(&pane1)]);
+
+        let mut guard = state.demo_player.inner.lock().unwrap();
+        guard.push(pane0);
+        guard.push(pane1);
+        Ok(2)
+    }
+}
+
+/// Send a verbatim console line to EVERY running pane (transport control:
+/// `timescale 0.5`, `demopause 1`, ...). In comparison mode this fans the same
+/// command out to both engines so they stay in lockstep. No-op (Ok) if nothing
+/// is playing. NOTE: absolute `seekdemo` should NOT go through here in
+/// comparison mode - use `demo_player_seek_relative`, which aligns per pane.
 #[tauri::command]
 pub fn demo_player_command(state: State<'_, AppState>, line: String) -> Result<(), String> {
     let guard = state.demo_player.inner.lock().unwrap();
-    if let Some(s) = guard.as_ref() {
-        s.cmd_tx
-            .send(line)
-            .map_err(|_| "Demo player is not accepting commands.".to_string())?;
+    for p in guard.iter() {
+        // Ignore individual send errors (a pane whose engine just died); the
+        // control thread will surface the close.
+        let _ = p.cmd_tx.send(line.clone());
     }
     Ok(())
 }
 
-/// Resize the stage to a new region/aspect (window/layout resize) and tell the
+/// Seek every pane to the same playhead `ms` (0 = each demo's start), applying
+/// that pane's sync offset. With both offsets 0 this just lands both engines at
+/// the same position; nudging a pane's offset (see `demo_player_set_offset`)
+/// shifts it so two runs recorded with different lead-ins line up. `seekdemo` is
+/// measured from the demo's first frame, so a single pane (offset 0) behaves
+/// exactly like a plain absolute seek.
+#[tauri::command]
+pub fn demo_player_seek_relative(state: State<'_, AppState>, ms: i32) -> Result<(), String> {
+    let guard = state.demo_player.inner.lock().unwrap();
+    for p in guard.iter() {
+        let target = ms + p.offset.load(Ordering::Relaxed);
+        let _ = p.cmd_tx.send(format!("seekdemo {}", target.max(0)));
+    }
+    Ok(())
+}
+
+/// Set a pane's sync offset (ms) for comparison alignment. The next synchronized
+/// seek lands that pane at `playhead + offset`. Out-of-range pane indices are
+/// ignored. Returns Ok always (best effort).
+#[tauri::command]
+pub fn demo_player_set_offset(state: State<'_, AppState>, pane: u8, ms: i32) -> Result<(), String> {
+    let guard = state.demo_player.inner.lock().unwrap();
+    if let Some(p) = guard.iter().find(|p| p.index == pane) {
+        p.offset.store(ms, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+/// Reposition every pane's stage for a new region/aspect. `restart` issues a
+/// `vid_restart` per pane (needed when the client size changed); a plain move
+/// (window dragged) passes false so the engine needn't re-init.
+fn relayout(app: &AppHandle, state: &State<'_, AppState>, x: i32, y: i32, w: i32, h: i32, aspect: f32, restart: bool) {
+    // Snapshot what each pane needs (index, parent, stage, tx) plus the total
+    // count, so we drop the lock before doing Win32 / channel work.
+    let layout: Vec<(u8, isize, isize, Sender<String>)> = {
+        let guard = state.demo_player.inner.lock().unwrap();
+        guard
+            .iter()
+            .map(|p| (p.index, p.parent, p.stage, p.cmd_tx.clone()))
+            .collect()
+    };
+    let count = layout.len() as u8;
+    for (index, parent, stage, tx) in layout {
+        let (rx, ry, rw, rh) = pane_region(index, count, x, y, w, h);
+        let (sx, sy, sw, sh) = letterbox(rx, ry, rw, rh, aspect);
+        reposition_stage_on_main(app, parent, stage, sx, sy, sw, sh);
+        if restart {
+            let _ = tx.send("vid_restart".to_string());
+        }
+    }
+}
+
+/// Resize the stages to a new region/aspect (window/layout resize) and tell each
 /// engine to re-create its render window at the new size via `vid_restart`.
 #[tauri::command]
 pub async fn demo_player_set_region(
@@ -756,22 +961,13 @@ pub async fn demo_player_set_region(
     h: i32,
     aspect: f32,
 ) -> Result<(), String> {
-    let (parent, stage, tx) = {
-        let guard = state.demo_player.inner.lock().unwrap();
-        match guard.as_ref() {
-            Some(s) => (s.parent, s.stage, s.cmd_tx.clone()),
-            None => return Ok(()),
-        }
-    };
-    let (sx, sy, sw, sh) = letterbox(x, y, w, h, aspect);
-    reposition_stage_on_main(&app, parent, stage, sx, sy, sw, sh);
-    let _ = tx.send("vid_restart".to_string());
+    relayout(&app, &state, x, y, w, h, aspect, true);
     Ok(())
 }
 
-/// Reposition the stage to a new region/aspect WITHOUT a `vid_restart`. Used on
+/// Reposition the stages to a new region/aspect WITHOUT a `vid_restart`. Used on
 /// window MOVE (the launcher's client rect is unchanged, only its screen
-/// position moved, so the owned popup must follow but the engine needn't
+/// position moved, so the owned popups must follow but the engines needn't
 /// re-init). Cheap enough to call on every move event.
 #[tauri::command]
 pub async fn demo_player_reposition(
@@ -783,28 +979,18 @@ pub async fn demo_player_reposition(
     h: i32,
     aspect: f32,
 ) -> Result<(), String> {
-    let (parent, stage) = {
-        let guard = state.demo_player.inner.lock().unwrap();
-        match guard.as_ref() {
-            Some(s) => (s.parent, s.stage),
-            None => return Ok(()),
-        }
-    };
-    let (sx, sy, sw, sh) = letterbox(x, y, w, h, aspect);
-    reposition_stage_on_main(&app, parent, stage, sx, sy, sw, sh);
+    relayout(&app, &state, x, y, w, h, aspect, false);
     Ok(())
 }
 
-/// Stop playback: kill the engine, close the control channel, destroy the stage.
+/// Stop playback: kill every engine, close the control channels, destroy stages.
 #[tauri::command]
 pub async fn demo_player_stop(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let session = {
+    let panes: Vec<Pane> = {
         let mut guard = state.demo_player.inner.lock().unwrap();
-        guard.take()
+        guard.drain(..).collect()
     };
-    if let Some(s) = session {
-        stop_session(&app, s);
-    }
+    stop_all(&app, panes);
     Ok(())
 }
 
@@ -815,13 +1001,13 @@ pub async fn demo_player_stop(app: AppHandle, state: State<'_, AppState>) -> Res
 /// no UI to control it. Emits `demo-player-closed` so a still-mounted frontend
 /// resets its playing state.
 pub fn stop_active_session(app: &AppHandle) {
-    let session = {
+    let panes: Vec<Pane> = {
         let state = app.state::<AppState>();
         let mut guard = state.demo_player.inner.lock().unwrap();
-        guard.take()
+        guard.drain(..).collect()
     };
-    if let Some(s) = session {
-        stop_session(app, s);
+    if !panes.is_empty() {
+        stop_all(app, panes);
         app.emit("demo-player-closed", ()).ok();
     }
 }
@@ -855,6 +1041,23 @@ mod tests {
         let (x, y, _, _) = letterbox(100, 50, 800, 450, 16.0 / 9.0);
         // exact aspect match -> fills region, origin preserved
         assert_eq!((x, y), (100, 50));
+    }
+
+    #[test]
+    fn pane_region_single_is_whole() {
+        assert_eq!(pane_region(0, 1, 10, 20, 800, 600), (10, 20, 800, 600));
+    }
+
+    #[test]
+    fn pane_region_splits_two_with_gutter() {
+        // 800 wide, 6px gutter -> each half (800-6)/2 = 397.
+        let (lx, ly, lw, lh) = pane_region(0, 2, 0, 0, 800, 600);
+        assert_eq!((lx, ly, lw, lh), (0, 0, 397, 600));
+        let (rx, ry, rw, rh) = pane_region(1, 2, 0, 0, 800, 600);
+        // right starts after left + gutter; spans to the region's right edge.
+        assert_eq!((rx, ry, rw, rh), (403, 0, 397, 600));
+        // the two halves + gutter never exceed the region width
+        assert!(lw + 6 + rw <= 800);
     }
 
     #[test]

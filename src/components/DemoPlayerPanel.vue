@@ -9,7 +9,7 @@
     // src-tauri/src/demo_player.rs; this component only measures the render
     // region, forwards transport commands, and renders the playhead.
 
-    import { onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
+    import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { getCurrentWindow } from '@tauri-apps/api/window';
     import { tauri, type DemoPlayerStatus } from '../lib/tauri';
@@ -20,8 +20,30 @@
         name: string;
     }
 
-    const props = defineProps<{ demo: PlayTarget | null }>();
+    /** Two demos to compare side by side (premium feature). */
+    export interface CompareTarget {
+        a: PlayTarget;
+        b: PlayTarget;
+    }
+
+    const props = defineProps<{
+        demo: PlayTarget | null;
+        compare?: CompareTarget | null;
+    }>();
     const emit = defineEmits<{ (e: 'close'): void }>();
+
+    // Comparison mode: two engines side by side, driven in lockstep.
+    const isCompare = computed(() => !!props.compare);
+
+    // Pane 1 (right, comparison only) mirror of the playhead, for its own timer.
+    const pos1Ms = ref(0);
+    const len1Ms = ref(0);
+    const pos1Sec = ref(0);
+    const len1Sec = ref(0);
+    let measured1 = false;
+    // Sync offset (ms) applied to pane 1 so two runs with different lead-ins line
+    // up. Adjusted with the nudge buttons; persisted in the backend per pane.
+    const offsetB = ref(0);
 
     const isWindows = navigator.userAgent.includes('Windows');
 
@@ -100,6 +122,22 @@
         measureAttemptAt = 0;
         seekTarget = 0;
         seekHoldUntil = 0;
+        // pane 1 (comparison)
+        pos1Ms.value = 0;
+        len1Ms.value = 0;
+        pos1Sec.value = 0;
+        len1Sec.value = 0;
+        measured1 = false;
+        offsetB.value = 0;
+    };
+
+    // Seek the playhead to `ms`. In comparison mode this goes through the backend
+    // so BOTH engines move together (each applying its sync offset); otherwise
+    // it's a plain absolute seek on the single engine.
+    const seekTo = (ms: number) => {
+        const t = Math.round(ms);
+        if (isCompare.value) tauri.demoPlayerSeekRelative(t).catch(() => {});
+        else cmd(`seekdemo ${t}`);
     };
 
     const start = async (target: PlayTarget) => {
@@ -131,6 +169,39 @@
         }
     };
 
+    // Start a side-by-side comparison of two demos (two engines, lockstep).
+    const startCompare = async (c: CompareTarget) => {
+        if (!isWindows) {
+            playError.value = 'The embedded demo player is only available on Windows.';
+            return;
+        }
+        playError.value = null;
+        resetPlayhead();
+        booting.value = true;
+        try {
+            const dpr = window.devicePixelRatio || 1;
+            const dw = Math.round(window.screen.width * dpr);
+            const dh = Math.round(window.screen.height * dpr);
+            const rt = await tauri.engineDemoResolution(dw, dh).catch(() => null);
+            lastAspect = rt && rt.aspect > 0 ? rt.aspect : 16 / 9;
+
+            const region = computeRegion();
+            if (!region) throw new Error('Render area not ready');
+            await tauri.demoPlayerCompareStart(c.a.path, c.b.path, region, lastAspect);
+            playing.value = true;
+        } catch (e: any) {
+            playError.value = e?.toString?.() ?? 'Failed to start comparison';
+            playing.value = false;
+            booting.value = false;
+        }
+    };
+
+    // Start whichever mode the props request.
+    const startActive = () => {
+        if (props.compare) startCompare(props.compare);
+        else if (props.demo) start(props.demo);
+    };
+
     const stop = async () => {
         booting.value = false;
         if (!playing.value) return;
@@ -160,10 +231,10 @@
         paused.value = true;
     };
     // Resume playback at the current speed. If the demo is frozen at its end,
-    // seek back to the start first so Play replays it.
+    // seek back to the start first so Play replays it (offset-aware in compare).
     const play = () => {
-        const seek = atEnd.value ? 'seekdemo 0; ' : '';
-        cmd(`${seek}demopause 0; timescale ${speed.value || 1}`);
+        if (atEnd.value) seekTo(0);
+        cmd(`demopause 0; timescale ${speed.value || 1}`);
         paused.value = false;
         atEnd.value = false;
     };
@@ -190,13 +261,13 @@
         const t = now();
         if (t - lastScrubSeekAt >= 90) {
             lastScrubSeekAt = t;
-            cmd(`seekdemo ${v * 1000}`);
+            seekTo(v * 1000);
         }
     };
     const onScrubChange = (e: Event) => {
         const v = Number((e.target as HTMLInputElement).value);
         posSec.value = v;
-        cmd(`seekdemo ${v * 1000}`);
+        seekTo(v * 1000);
         dragging = false;
         lastScrubSeekAt = now();
         seekHoldUntil = now() + 700;
@@ -208,7 +279,7 @@
         seekTarget = base + deltaMs;
         if (seekTarget < 0) seekTarget = 0;
         if (lenMs.value > 0 && seekTarget > lenMs.value) seekTarget = lenMs.value;
-        cmd(`seekdemo ${Math.round(seekTarget)}`);
+        seekTo(seekTarget);
         const sec = Math.round(seekTarget / 1000);
         posSec.value = Math.min(Math.max(sec, 0), lenSec.value || sec);
         seekHoldUntil = now() + 300;
@@ -227,10 +298,30 @@
         lastArrowAt = t;
         if (seekTarget < 0) seekTarget = 0;
         if (lenMs.value > 0 && seekTarget > lenMs.value) seekTarget = lenMs.value;
-        cmd(`seekdemo ${Math.round(seekTarget)}`);
+        seekTo(seekTarget);
         const sec = Math.round(seekTarget / 1000);
         posSec.value = Math.min(Math.max(sec, 0), lenSec.value || sec);
         seekHoldUntil = t + 300;
+    };
+
+    // ---- comparison sync offset --------------------------------------------
+
+    // Nudge pane 1 (right demo) by `deltaMs` so the two runs line up. Persists
+    // the offset in the backend and re-seeks to apply it live at the current
+    // playhead. Positive = demo B plays a bit later relative to A.
+    const nudgeB = (deltaMs: number) => {
+        if (!isCompare.value) return;
+        offsetB.value += deltaMs;
+        tauri.demoPlayerSetOffset(1, offsetB.value).catch(() => {});
+        seekTo(posMs.value);
+        seekHoldUntil = now() + 300;
+    };
+    const resetOffsetB = () => {
+        if (!isCompare.value) return;
+        offsetB.value = 0;
+        tauri.demoPlayerSetOffset(1, 0).catch(() => {});
+        seekTo(posMs.value);
+        seekHoldUntil = now() + 300;
     };
 
     // Run a transport shortcut by normalized name. Shared by real keydowns
@@ -281,8 +372,28 @@
         // idle panel (e.g. the Player tab while the Demos overlay plays) would
         // also run the measurement seeks against the same engine.
         if (!playing.value) return;
-        // First status from the engine = it's up and rendering; drop the spinner.
+        // First status from any engine = it's up and rendering; drop the spinner.
         booting.value = false;
+
+        // Pane 1 (comparison right) only feeds its own timer + length.
+        if (s.pane === 1) {
+            pos1Ms.value = Math.max(0, s.time - s.start);
+            len1Ms.value = s.total > s.start ? s.total - s.start : 0;
+            if (!measured1 && len1Ms.value > 0) {
+                len1Sec.value = Math.max(1, Math.round(len1Ms.value / 1000));
+                measured1 = true;
+            }
+            if (len1Ms.value > 0) {
+                const maxSec = Math.round(len1Ms.value / 1000);
+                if (maxSec > 0) len1Sec.value = maxSec;
+            }
+            if (!(dragging || now() < seekHoldUntil)) {
+                pos1Sec.value = Math.min(Math.max(Math.round(pos1Ms.value / 1000), 0), len1Sec.value || 0);
+            }
+            return;
+        }
+
+        // Pane 0 = primary (drives play/pause state + the shared scrub bar).
         posMs.value = Math.max(0, s.time - s.start);
         lenMs.value = s.total > s.start ? s.total - s.start : 0;
         paused.value = s.paused;
@@ -290,15 +401,19 @@
         if (!measured) {
             // Length is measured by seeking to a huge time (which transiently
             // hits the end), then back to 0 - so ignore `atend` until measured,
-            // or the Pause indicator would flash on at startup.
-            if (lenMs.value > 0) {
+            // or the Pause indicator would flash on at startup. In comparison
+            // mode the same seek measures BOTH engines (it's broadcast), so wait
+            // until pane 1's length is known too before settling back to 0.
+            const haveOther = !isCompare.value || len1Ms.value > 0;
+            if (lenMs.value > 0 && haveOther) {
                 lenSec.value = Math.max(1, Math.round(lenMs.value / 1000));
-                cmd('seekdemo 0');
+                if (len1Ms.value > 0) len1Sec.value = Math.max(1, Math.round(len1Ms.value / 1000));
+                seekTo(0);
                 measured = true;
                 seekHoldUntil = now() + 500;
             } else if (now() - measureAttemptAt > 1200) {
                 measureAttemptAt = now();
-                cmd('seekdemo 86400000');
+                seekTo(86400000);
             }
             return;
         }
@@ -312,6 +427,9 @@
         if (dragging || now() < seekHoldUntil) return;
         posSec.value = Math.min(Math.max(Math.round(posMs.value / 1000), 0), lenSec.value || 0);
     };
+
+    // Scrub bar spans the longer of the two runs in comparison mode.
+    const scrubMax = computed(() => Math.max(lenSec.value, isCompare.value ? len1Sec.value : 0) || 1);
 
     // ---- resize / move -----------------------------------------------------
 
@@ -344,11 +462,14 @@
 
     // ---- lifecycle ---------------------------------------------------------
 
-    // Restart when the target demo changes; stop when it's cleared.
+    // Restart when the target demo OR the comparison pair changes; stop when
+    // both are cleared. Keyed on identity (paths) so an unrelated re-render
+    // doesn't relaunch the engines.
     watch(
-        () => props.demo,
-        (d) => {
-            if (d) start(d);
+        () => [props.demo?.path ?? null, props.compare?.a.path ?? null, props.compare?.b.path ?? null].join('|'),
+        () => {
+            if (props.compare) startCompare(props.compare);
+            else if (props.demo) start(props.demo);
             else stop();
         },
     );
@@ -372,13 +493,13 @@
             resizeObs = new ResizeObserver(onRegionResize);
             resizeObs.observe(embedRegion.value);
         }
-        if (props.demo) start(props.demo);
+        startActive();
     });
 
     // keep-alive: stop the engine when the host view is backgrounded, resume
-    // when it returns (the parent keeps the same `demo` prop).
+    // when it returns (the parent keeps the same demo/compare props).
     onActivated(() => {
-        if (props.demo && !playing.value) start(props.demo);
+        if ((props.demo || props.compare) && !playing.value) startActive();
     });
     onDeactivated(() => {
         stop();
@@ -402,7 +523,12 @@
         <!-- Top bar: demo name + close. Kept ABOVE the render area so the
              native overlay window doesn't cover it. -->
         <div class="flex-shrink-0 flex items-center gap-2 px-3 py-2 bg-neutral-900 border-b border-white/10">
-            <span class="flex-1 text-center text-sm font-semibold text-neutral-100 truncate">
+            <span v-if="compare" class="flex-1 flex items-center justify-center gap-2 text-sm font-semibold truncate">
+                <span class="truncate text-sky-300" :title="compare.a.name">{{ formatDemoName(compare.a.name) }}</span>
+                <span class="text-neutral-500 flex-shrink-0">vs</span>
+                <span class="truncate text-amber-300" :title="compare.b.name">{{ formatDemoName(compare.b.name) }}</span>
+            </span>
+            <span v-else class="flex-1 text-center text-sm font-semibold text-neutral-100 truncate">
                 {{ demo ? formatDemoName(demo.name) : 'Demo player' }}
             </span>
             <button
@@ -468,14 +594,34 @@
                     type="range"
                     class="flex-1 mx-2 accent-brand-500"
                     min="0"
-                    :max="lenSec || 1"
+                    :max="scrubMax"
                     step="1"
                     :value="posSec"
                     @input="onScrubInput"
                     @change="onScrubChange"
                 />
-                <span class="font-mono text-sm tabular-nums w-24 text-right">
+                <!-- Comparison: two timers (A / B) so you can read both runs. -->
+                <span v-if="compare" class="font-mono text-sm tabular-nums text-right leading-tight">
+                    <span class="text-sky-300">{{ fmt(posSec) }}/{{ fmt(lenSec) }}</span>
+                    <span class="text-neutral-600 mx-1">·</span>
+                    <span class="text-amber-300">{{ fmt(pos1Sec) }}/{{ fmt(len1Sec) }}</span>
+                </span>
+                <span v-else class="font-mono text-sm tabular-nums w-24 text-right">
                     {{ fmt(posSec) }} / {{ fmt(lenSec) }}
+                </span>
+            </div>
+
+            <!-- Comparison: nudge demo B against A to line up the runs. The engine
+                 only knows each demo's file start, so this is the manual sync. -->
+            <div v-if="compare" class="mt-1.5 flex items-center gap-2 text-[11px] text-neutral-400">
+                <span class="text-amber-300 font-semibold">Sync demo B:</span>
+                <button class="nudge" @click="nudgeB(-100)">-100ms</button>
+                <button class="nudge" @click="nudgeB(-10)">-10ms</button>
+                <button class="nudge" @click="nudgeB(10)">+10ms</button>
+                <button class="nudge" @click="nudgeB(100)">+100ms</button>
+                <button class="nudge" @click="resetOffsetB">reset</button>
+                <span class="font-mono tabular-nums text-neutral-500">
+                    offset {{ offsetB > 0 ? '+' : '' }}{{ offsetB }}ms
                 </span>
             </div>
             <!-- Keyboard legend: what the shortcuts do while a demo plays. -->
@@ -512,6 +658,18 @@
     }
     @keyframes dr-spin {
         to { transform: rotate(360deg); }
+    }
+
+    .nudge {
+        padding: 0.1rem 0.45rem;
+        border-radius: 0.25rem;
+        background: rgb(255 255 255 / 0.06);
+        color: rgb(212 212 212);
+        font-size: 11px;
+        line-height: 1.2;
+    }
+    .nudge:hover {
+        background: rgb(255 255 255 / 0.12);
     }
 
     .kbd {

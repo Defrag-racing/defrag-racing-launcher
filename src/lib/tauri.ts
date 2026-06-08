@@ -292,9 +292,38 @@ export const tauri = {
             h: region.h,
             aspect,
         }),
-    /** Send a raw console line to the engine: `timescale 0.5`, `demopause 1`,
-     *  `seekdemo <ms>`, etc. */
+    /** Start a side-by-side comparison: two engines, pane 0 (left) plays
+     *  `demoA`, pane 1 (right) plays `demoB`, driven in lockstep. `region` is the
+     *  full embed rect; the backend splits it into two halves. Token-gated in
+     *  the UI. Resolves with the started pane count (2). Errors on non-Windows. */
+    demoPlayerCompareStart: (
+        demoA: string,
+        demoB: string,
+        region: { x: number; y: number; w: number; h: number },
+        aspect: number,
+    ) =>
+        invoke<number>('demo_player_compare_start', {
+            demoA,
+            demoB,
+            x: region.x,
+            y: region.y,
+            w: region.w,
+            h: region.h,
+            aspect,
+        }),
+    /** Send a raw console line to EVERY pane: `timescale 0.5`, `demopause 1`,
+     *  etc. In comparison mode it fans out to both engines. For seeking in
+     *  comparison mode use demoPlayerSeekRelative so the panes stay aligned. */
     demoPlayerCommand: (line: string) => invoke<void>('demo_player_command', { line }),
+    /** Seek every pane to the same playhead (ms from each demo's start), applying
+     *  each pane's sync offset. Use this instead of `seekdemo` whenever a
+     *  comparison is active so both engines stay locked together. */
+    demoPlayerSeekRelative: (ms: number) =>
+        invoke<void>('demo_player_seek_relative', { ms }),
+    /** Set a pane's sync offset (ms) so two runs with different lead-ins line up.
+     *  pane 0 = left, 1 = right. The next synchronized seek applies it. */
+    demoPlayerSetOffset: (pane: number, ms: number) =>
+        invoke<void>('demo_player_set_offset', { pane, ms }),
     /** Reposition the render region (window resize) + re-init the engine
      *  render window at the new size (vid_restart). */
     demoPlayerSetRegion: (
@@ -643,6 +672,9 @@ export interface RenderTarget {
  *  Playhead = time - start; length = total - start (total is 0 until the
  *  view seeks once to measure it). */
 export interface DemoPlayerStatus {
+    /** Which engine this status is from: 0 = sole/left pane, 1 = right pane
+     *  (only ever 1 during a side-by-side comparison). */
+    pane: number;
     time: number;
     start: number;
     total: number;

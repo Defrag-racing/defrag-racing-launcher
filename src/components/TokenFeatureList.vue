@@ -8,6 +8,7 @@
      History is absent: the History tab is the local defrag:// join log. -->
 <template>
     <li>• Play demos instantly in the launcher - embedded player, no separate game launch</li>
+    <li>• Compare two demos side by side - two synced engines, run vs run</li>
     <li>• Auto-backup of recorded demos</li>
     <li>• YouTube renders straight from the Demos list</li>
     <li>• Server browser with your PB and rank per map</li>
