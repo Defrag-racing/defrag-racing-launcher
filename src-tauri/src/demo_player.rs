@@ -392,8 +392,14 @@ fn run_control(
                     acc.push_str(&String::from_utf8_lossy(&buf[..n]));
                     while let Some(nl) = acc.find('\n') {
                         let line: String = acc.drain(..=nl).collect();
-                        if let Some(ev) = parse_status(line.trim_end()) {
+                        let line = line.trim_end();
+                        if let Some(ev) = parse_status(line) {
                             app.emit("demo-player-status", ev).ok();
+                        } else if let Some(key) = line.strip_prefix("key ") {
+                            // The engine forwards a transport key it swallowed
+                            // while its render window held focus; surface it so
+                            // the frontend runs the matching shortcut.
+                            app.emit("demo-player-key", key.trim().to_string()).ok();
                         }
                     }
                     // guard against an unbounded line with no newline

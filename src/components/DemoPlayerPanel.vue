@@ -50,6 +50,7 @@
     const embedRegion = ref<HTMLDivElement | null>(null);
     let unlisten: UnlistenFn | null = null;
     let unlistenClosed: UnlistenFn | null = null;
+    let unlistenKey: UnlistenFn | null = null;
     let unlistenMoved: UnlistenFn | null = null;
     let resizeObs: ResizeObserver | null = null;
     let resizeTimer: number | null = null;
@@ -187,44 +188,8 @@
         seekHoldUntil = now() + 300;
     };
 
-    const onKeydown = (e: KeyboardEvent) => {
-        if (!playing.value) return;
-
-        // Don't hijack keys while the user is typing in a text field (e.g. the
-        // demo filter box below the player) - Space/arrows belong to the input.
-        const el = e.target as HTMLElement | null;
-        const tag = el?.tagName;
-        if (tag === 'TEXTAREA' || (tag === 'INPUT' && (el as HTMLInputElement).type !== 'range')) {
-            return;
-        }
-
-        // ESC quits the player entirely (same as the close button).
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            close();
-            return;
-        }
-
-        // Space toggles pause / resume.
-        if (e.key === ' ' || e.key === 'Spacebar') {
-            e.preventDefault();
-            togglePause();
-            return;
-        }
-
-        // Up / Down jump 10 s back/forward.
-        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-            e.preventDefault();
-            seekBy(e.key === 'ArrowUp' ? 10000 : -10000);
-            return;
-        }
-
-        // Left / Right: 5 s nudge, accelerating to a 2 s scrub when held.
-        let dir = 0;
-        if (e.key === 'ArrowRight') dir = 1;
-        else if (e.key === 'ArrowLeft') dir = -1;
-        if (dir === 0) return;
-        e.preventDefault();
+    // Left / Right seek: 5 s nudge, accelerating to a 2 s scrub when held.
+    const arrowSeek = (dir: number) => {
         const t = now();
         const gap = t - lastArrowAt;
         if (gap > 350) {
@@ -240,6 +205,47 @@
         const sec = Math.round(seekTarget / 1000);
         posSec.value = Math.min(Math.max(sec, 0), lenSec.value || sec);
         seekHoldUntil = t + 300;
+    };
+
+    // Run a transport shortcut by normalized name. Shared by real keydowns
+    // (when the launcher UI has focus) and by keys the engine forwards over the
+    // control channel (when the demo render window has focus instead).
+    const runShortcut = (name: string) => {
+        if (!playing.value) return;
+        switch (name) {
+            case 'esc':   close(); break;
+            case 'space': togglePause(); break;
+            case 'up':    seekBy(10000); break;
+            case 'down':  seekBy(-10000); break;
+            case 'left':  arrowSeek(-1); break;
+            case 'right': arrowSeek(1); break;
+        }
+    };
+
+    const onKeydown = (e: KeyboardEvent) => {
+        if (!playing.value) return;
+
+        // Don't hijack keys while the user is typing in a text field (e.g. the
+        // demo filter box below the player) - Space/arrows belong to the input.
+        const el = e.target as HTMLElement | null;
+        const tag = el?.tagName;
+        if (tag === 'TEXTAREA' || (tag === 'INPUT' && (el as HTMLInputElement).type !== 'range')) {
+            return;
+        }
+
+        let name = '';
+        switch (e.key) {
+            case 'Escape':     name = 'esc'; break;
+            case ' ':
+            case 'Spacebar':   name = 'space'; break;
+            case 'ArrowUp':    name = 'up'; break;
+            case 'ArrowDown':  name = 'down'; break;
+            case 'ArrowLeft':  name = 'left'; break;
+            case 'ArrowRight': name = 'right'; break;
+            default: return;
+        }
+        e.preventDefault();
+        runShortcut(name);
     };
 
     // ---- status events -----------------------------------------------------
@@ -324,6 +330,9 @@
             playing.value = false;
             emit('close');
         });
+        // Keys the engine forwarded because its render window had focus instead
+        // of the launcher UI - run the same shortcut handler.
+        unlistenKey = await listen<string>('demo-player-key', (e) => runShortcut(e.payload));
         unlistenMoved = await getCurrentWindow().onMoved(onWindowMoved);
         window.addEventListener('keydown', onKeydown);
         if (embedRegion.value) {
@@ -346,6 +355,7 @@
         stop();
         if (unlisten) unlisten();
         if (unlistenClosed) unlistenClosed();
+        if (unlistenKey) unlistenKey();
         if (unlistenMoved) unlistenMoved();
         window.removeEventListener('keydown', onKeydown);
         if (resizeObs) resizeObs.disconnect();
