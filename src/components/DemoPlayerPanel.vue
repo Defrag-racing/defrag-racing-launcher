@@ -111,6 +111,16 @@
     const PANE_COLORS = ['text-sky-300', 'text-amber-300', 'text-emerald-300', 'text-fuchsia-300'];
     const paneColor = (i: number) => PANE_COLORS[i % PANE_COLORS.length];
     const paneLetter = (i: number) => String.fromCharCode(65 + i);
+    // Border accent colours (sky/amber/emerald/fuchsia 400), matching the names
+    // and sync rows, drawn as a frame around each pane so you know which is which.
+    const PANE_BORDERS = ['#38bdf8', '#fbbf24', '#34d399', '#e879f9'];
+    // Grid layout mirroring the backend's pane_region: 2=2x1, 3=3x1, 4=2x2.
+    const gridLayout = computed(() => {
+        const n = paneCount.value;
+        if (n <= 2) return { cols: n, rows: 1 };
+        if (n === 3) return { cols: 3, rows: 1 };
+        return { cols: 2, rows: 2 };
+    });
 
     // Parse "map[physics]MM.SS.mmm(player.country).dm_68" into a readable line.
     const formatDemoName = (name: string): string => {
@@ -709,6 +719,26 @@
         <!-- Stage: black render region the engine draws into. -->
         <div class="flex-1 min-h-0 relative bg-black">
             <div ref="embedRegion" class="absolute inset-0"></div>
+            <!-- Comparison: a coloured frame per pane so you can tell which demo
+                 is which. The engines are inset inside their cells (backend), so
+                 these borders sit in the margin and stay visible. -->
+            <div
+                v-if="isCompare && compare"
+                class="absolute inset-0 pointer-events-none"
+                :style="{
+                    display: 'grid',
+                    gridTemplateColumns: `repeat(${gridLayout.cols}, 1fr)`,
+                    gridTemplateRows: `repeat(${gridLayout.rows}, 1fr)`,
+                    gap: '6px',
+                }"
+            >
+                <div
+                    v-for="n in paneCount"
+                    :key="n"
+                    class="rounded-sm"
+                    :style="{ border: `2px solid ${PANE_BORDERS[(n - 1) % PANE_BORDERS.length]}`, boxSizing: 'border-box' }"
+                ></div>
+            </div>
             <!-- Booting: engine launched, waiting for its first frame. The first
                  launch builds the map cache and is slow, so show a spinner. -->
             <div
@@ -799,15 +829,15 @@
                     :key="i"
                     class="flex items-center gap-1.5 text-[11px] text-neutral-400 flex-wrap"
                 >
-                    <span class="font-semibold mr-0.5" :class="paneColor(i)">Sync {{ paneLetter(i) }}:</span>
+                    <span class="font-semibold mr-0.5 w-12 flex-shrink-0" :class="paneColor(i)">Sync {{ paneLetter(i) }}:</span>
                     <button v-for="s in NUDGE_STEPS_DESC" :key="'m'+s" class="nudge" @click="nudgePane(i, -s)">-{{ s }}</button>
                     <span class="text-neutral-600 mx-0.5">|</span>
                     <button v-for="s in NUDGE_STEPS" :key="'p'+s" class="nudge" @click="nudgePane(i, s)">+{{ s }}</button>
-                    <button class="nudge ml-1" @click="resetOffset(i)">reset</button>
-                    <span class="font-mono tabular-nums ml-1" :class="(offsets[i] ?? 0) ? paneColor(i) : 'text-neutral-500'">
+                    <span class="font-mono tabular-nums ml-1.5 w-24" :class="(offsets[i] ?? 0) ? paneColor(i) : 'text-neutral-500'">
                         {{ (offsets[i] ?? 0) > 0 ? '+' : '' }}{{ offsets[i] ?? 0 }}ms
                         <span v-if="offsets[i]" class="text-neutral-500">({{ ((offsets[i] ?? 0) / 8).toFixed((offsets[i] ?? 0) % 8 ? 1 : 0) }}f)</span>
                     </span>
+                    <button class="nudge-reset ml-1" @click="resetOffset(i)" title="Reset this demo's sync to 0">reset</button>
                 </div>
             </div>
             <!-- Keyboard legend: what the shortcuts do while a demo plays. -->
@@ -860,6 +890,17 @@
     }
     .nudge:hover {
         background: rgb(255 255 255 / 0.12);
+    }
+    .nudge-reset {
+        padding: 0.1rem 0.55rem;
+        border-radius: 0.25rem;
+        background: rgb(244 63 94 / 0.14); /* rose */
+        color: rgb(253 164 175);
+        font-size: 11px;
+        line-height: 1.2;
+    }
+    .nudge-reset:hover {
+        background: rgb(244 63 94 / 0.26);
     }
 
     .kbd {

@@ -141,6 +141,11 @@ fn pane_region(pane: u8, count: u8, rx: i32, ry: i32, rw: i32, rh: i32) -> (i32,
         return (rx, ry, rw, rh);
     }
     const GUTTER: i32 = 6; // px between cells
+    // Each engine is inset inside its cell so the launcher can paint a coloured
+    // identification border in the margin (the webview shows through there). The
+    // frontend draws the border at the even cell boundary; INSET keeps the
+    // engine from covering it.
+    const INSET: i32 = 4;
     let (cols, rows) = grid_dims(count);
     let col = (pane % cols) as i32;
     let row = (pane / cols) as i32;
@@ -155,7 +160,7 @@ fn pane_region(pane: u8, count: u8, rx: i32, ry: i32, rw: i32, rh: i32) -> (i32,
     // Last column/row absorbs rounding remainder so panes meet the region edge.
     let w = if col == cols - 1 { (rx + rw - cx).max(1) } else { cw.max(1) };
     let h = if row == rows - 1 { (ry + rh - cy).max(1) } else { ch.max(1) };
-    (cx, cy, w, h)
+    (cx + INSET, cy + INSET, (w - 2 * INSET).max(1), (h - 2 * INSET).max(1))
 }
 
 /// Derive `(fs_basepath, fs_game, demo_arg)` from a demo's absolute path. Defrag
@@ -1097,14 +1102,15 @@ mod tests {
 
     #[test]
     fn pane_region_splits_two_with_gutter() {
-        // 800 wide, 6px gutter -> each half (800-6)/2 = 397.
+        // 800 wide, 6px gutter -> each half (800-6)/2 = 397, then inset 4px/side.
         let (lx, ly, lw, lh) = pane_region(0, 2, 0, 0, 800, 600);
-        assert_eq!((lx, ly, lw, lh), (0, 0, 397, 600));
+        assert_eq!((lx, ly, lw, lh), (4, 4, 389, 592));
         let (rx, ry, rw, rh) = pane_region(1, 2, 0, 0, 800, 600);
-        // right starts after left + gutter; spans to the region's right edge.
-        assert_eq!((rx, ry, rw, rh), (403, 0, 397, 600));
-        // the two halves + gutter never exceed the region width
-        assert!(lw + 6 + rw <= 800);
+        // right cell starts at 403 (half + gutter), inset by 4.
+        assert_eq!((rx, ry, rw, rh), (407, 4, 389, 592));
+        // the two inset halves never overlap and stay within the region
+        assert!(lx + lw <= rx);
+        assert!(rx + rw <= 800);
     }
 
     #[test]
@@ -1117,19 +1123,19 @@ mod tests {
 
     #[test]
     fn pane_region_four_is_2x2_quadrants() {
-        // 800x600, 6px gutters: cells ~397x297; quadrants tile and reach edges.
+        // 800x600, 6px gutters: cells ~397x297; quadrants tile, inset 4px/side.
         let tl = pane_region(0, 4, 0, 0, 800, 600);
         let tr = pane_region(1, 4, 0, 0, 800, 600);
         let bl = pane_region(2, 4, 0, 0, 800, 600);
         let br = pane_region(3, 4, 0, 0, 800, 600);
-        assert_eq!(tl, (0, 0, 397, 297));
-        assert_eq!(tr.0, 403); // right column starts past gutter
-        assert_eq!(tr.1, 0);
-        assert_eq!(bl.0, 0);
-        assert_eq!(bl.1, 303); // bottom row starts past gutter
-        // bottom-right reaches the region's far corner
-        assert_eq!(br.0 + br.2, 800);
-        assert_eq!(br.1 + br.3, 600);
+        assert_eq!(tl, (4, 4, 389, 289));
+        assert_eq!(tr.0, 407); // right column starts past gutter + inset
+        assert_eq!(tr.1, 4);
+        assert_eq!(bl.0, 4);
+        assert_eq!(bl.1, 307); // bottom row starts past gutter + inset
+        // bottom-right reaches near the region's far corner (minus inset)
+        assert_eq!(br.0 + br.2, 796);
+        assert_eq!(br.1 + br.3, 596);
     }
 
     #[test]
