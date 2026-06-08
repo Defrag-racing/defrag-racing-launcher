@@ -607,10 +607,10 @@
     };
 
     const renderLabelFor = (d: DemoLibraryEntry): string => {
-        if (!d.hash) return 'Render to video';
+        if (!d.hash) return 'Render to YouTube';
         if (rendering.value.has(d.hash)) return 'Working…';
         const st = renderState.value[d.hash];
-        if (!st || !st.has_render) return 'Render to video';
+        if (!st || !st.has_render) return 'Render to YouTube';
         switch (st.status) {
             case 'completed': return 'Watch on YouTube';
             case 'pending':   return 'Queued';
@@ -988,9 +988,9 @@
                     <button
                         v-if="isWindows"
                         class="px-3 py-1 rounded text-xs font-semibold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 flex-shrink-0 flex items-center gap-1 whitespace-nowrap"
-                        title="Watch this run instantly in the embedded player - no rendering or upload needed"
+                        title="Plays right here in the launcher - instant, no rendering or upload needed"
                         @click.stop="playDemo(d)"
-                    >▶ Play in launcher</button>
+                    >▶ Play instantly in launcher</button>
 
                     <!-- render / play YouTube -->
                     <button
