@@ -4,6 +4,11 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.41
+
+- **The demo player now works on Linux.** Watching demos in the launcher and the side-by-side comparison - previously Windows-only - now run on Linux too. The bundled engine renders right inside the launcher window just like on Windows: same transport bar, scrubbing, speeds, multi-demo grid and per-pane sync. It runs on X11 and, on Wayland desktops, through XWayland automatically (the launcher pins itself to the X11 backend on startup). If you're on a native-Wayland-only setup the launcher tells you how to switch to an X11 session instead of just showing a black area.
+- Transport keyboard shortcuts (Esc / Space / arrows) work over the demo on Linux as well - the engine hands them back to the launcher, so they do the same thing whether the launcher UI or the demo has focus.
+
 ## 0.1.40
 
 - **History auto-refreshes.** The History tab now reloads itself every 30 seconds while it's open and the launcher window is focused, so connections you make in-game show up without pressing Refresh. It stays quiet when the window is in the background or you're on another tab.

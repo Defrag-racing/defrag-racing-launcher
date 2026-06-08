@@ -1,10 +1,17 @@
-//! Embedded demo player (Windows only).
+//! Embedded demo player (Windows + Linux).
 //!
 //! Plays a Quake3 `.dm_68` Defrag demo *inside* the launcher window. We ship a
 //! purpose-built oDFe engine build (resources/odfe/) that can render into a
 //! launcher-supplied child window and be driven over a loopback control
-//! channel - see the engine's `code/win32/win_glimp.c` (`in_embedParent`) and
+//! channel - see the engine's `code/win32/win_glimp.c` (`in_embedParent`, Win32)
+//! and `code/sdl/sdl_embed.c` (X11 reparenting, Linux) plus
 //! `code/client/cl_control.c` (`in_controlPort`).
+//!
+//! Platform note: on Windows the "stage" is an owned WS_POPUP window over the
+//! WebView2; on Linux it's an X11 child window of the launcher's GTK toplevel
+//! that the engine reparents into (works on X11 and, via XWayland, on Wayland -
+//! we force the launcher onto the X11 GDK backend at startup). macOS is not
+//! supported (no embed path) and returns an error.
 //!
 //! How a session works:
 //!   1. We create a native WS_CHILD "stage" window inside the launcher's main
@@ -219,7 +226,7 @@ mod stage {
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassW, SetWindowPos, HMENU,
-        HWND_TOP, SWP_NOACTIVATE, WINDOW_EX_STYLE, WNDCLASSW, WS_CLIPCHILDREN, WS_EX_NOACTIVATE,
+        HWND_TOP, SWP_NOACTIVATE, WNDCLASSW, WS_CLIPCHILDREN, WS_EX_NOACTIVATE,
         WS_EX_TOOLWINDOW, WS_POPUP, WS_VISIBLE,
     };
 
@@ -307,7 +314,109 @@ mod stage {
     }
 }
 
-#[cfg(not(windows))]
+// Linux stage: a raw X11 child window of the launcher's GTK toplevel. The engine
+// (a separate process) reparents its own X11 window into this one - X11 allows
+// reparenting into a window owned by another client given its id. Because it's a
+// child of the toplevel, it follows the launcher automatically when the window
+// moves (no per-move reposition needed, unlike the Windows owned popup); we still
+// move/resize it on layout changes. All calls run on the main (GTK) thread.
+#[cfg(target_os = "linux")]
+mod stage {
+    use std::os::raw::{c_int, c_uint, c_ulong};
+    use std::sync::Mutex;
+    use x11::xlib;
+
+    // One shared Xlib connection for every stage window, opened lazily. A Display*
+    // isn't Send, so we stash it as a usize behind a mutex; it's only ever touched
+    // on the main thread (all stage helpers dispatch there), and kept open for the
+    // process lifetime so the windows it owns survive.
+    static DISPLAY: Mutex<usize> = Mutex::new(0);
+
+    fn display() -> *mut xlib::Display {
+        let mut g = DISPLAY.lock().unwrap();
+        if *g == 0 {
+            let d = unsafe { xlib::XOpenDisplay(std::ptr::null()) };
+            *g = d as usize;
+        }
+        *g as *mut xlib::Display
+    }
+
+    /// Create a black child window of `owner` (the launcher toplevel's X11 window)
+    /// at owner-relative (cx,cy,w,h). The engine reparents its render window into
+    /// this. Returns the new window id, or 0 on failure.
+    pub fn create(owner: isize, cx: i32, cy: i32, w: i32, h: i32) -> isize {
+        if owner == 0 {
+            return 0;
+        }
+        let dpy = display();
+        if dpy.is_null() {
+            return 0;
+        }
+        unsafe {
+            let screen = xlib::XDefaultScreen(dpy);
+            let black = xlib::XBlackPixel(dpy, screen);
+            let win = xlib::XCreateSimpleWindow(
+                dpy,
+                owner as c_ulong,
+                cx as c_int,
+                cy as c_int,
+                w.max(1) as c_uint,
+                h.max(1) as c_uint,
+                0,
+                black,
+                black,
+            );
+            if win == 0 {
+                return 0;
+            }
+            xlib::XMapWindow(dpy, win);
+            xlib::XRaiseWindow(dpy, win);
+            xlib::XSync(dpy, 0);
+            win as isize
+        }
+    }
+
+    /// Move/resize the stage to a new owner-relative rect and keep it on top.
+    /// `_owner` is unused (the window remembers its parent); kept for signature
+    /// parity with the Windows backend.
+    pub fn reposition(_owner: isize, win: isize, cx: i32, cy: i32, w: i32, h: i32) {
+        if win == 0 {
+            return;
+        }
+        let dpy = display();
+        if dpy.is_null() {
+            return;
+        }
+        unsafe {
+            xlib::XMoveResizeWindow(
+                dpy,
+                win as c_ulong,
+                cx as c_int,
+                cy as c_int,
+                w.max(1) as c_uint,
+                h.max(1) as c_uint,
+            );
+            xlib::XRaiseWindow(dpy, win as c_ulong);
+            xlib::XSync(dpy, 0);
+        }
+    }
+
+    pub fn destroy(win: isize) {
+        if win == 0 {
+            return;
+        }
+        let dpy = display();
+        if dpy.is_null() {
+            return;
+        }
+        unsafe {
+            xlib::XDestroyWindow(dpy, win as c_ulong);
+            xlib::XSync(dpy, 0);
+        }
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 mod stage {
     pub fn create(_owner: isize, _cx: i32, _cy: i32, _w: i32, _h: i32) -> isize {
         0
@@ -658,12 +767,19 @@ fn pick_port() -> u16 {
 
 // ---- pane spawning ---------------------------------------------------------
 
-/// Resolve the bundled engine exe and its directory (shared by single + compare).
-#[cfg(windows)]
+/// Resolve the bundled engine binary and its directory (shared by single +
+/// compare). The filename is platform-specific (.exe on Windows, no extension on
+/// Linux); both ship in resources/odfe/.
+#[cfg(any(windows, target_os = "linux"))]
 fn resolve_engine(app: &AppHandle) -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
+    #[cfg(windows)]
+    const ENGINE_REL: &str = "resources/odfe/oDFe.x64.exe";
+    #[cfg(target_os = "linux")]
+    const ENGINE_REL: &str = "resources/odfe/oDFe.x64";
+
     let exe = app
         .path()
-        .resolve("resources/odfe/oDFe.x64.exe", tauri::path::BaseDirectory::Resource)
+        .resolve(ENGINE_REL, tauri::path::BaseDirectory::Resource)
         .map_err(|e| format!("Could not locate the bundled demo-player engine: {e}"))?;
     if !exe.exists() {
         return Err(format!("Bundled demo-player engine missing at {}", exe.display()));
@@ -675,13 +791,45 @@ fn resolve_engine(app: &AppHandle) -> Result<(std::path::PathBuf, std::path::Pat
     Ok((exe, exe_dir))
 }
 
+/// Resolve the launcher main window's native parent handle for the stage: the
+/// HWND on Windows, the toplevel X11 window id on Linux. Returns a user-facing
+/// error (surfaced in the UI) when embedding isn't possible - most importantly on
+/// a Wayland session with no X11 window to embed into, where we tell the user how
+/// to get an X11 session instead of just showing a black area.
+#[cfg(any(windows, target_os = "linux"))]
+fn main_window_handle(app: &AppHandle) -> Result<isize, String> {
+    let win = app
+        .get_webview_window("main")
+        .ok_or_else(|| "Main window not available.".to_string())?;
+    #[cfg(windows)]
+    {
+        Ok(win.hwnd().map_err(|e| e.to_string())?.0 as isize)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        let handle = win.window_handle().map_err(|e| e.to_string())?;
+        match handle.as_raw() {
+            RawWindowHandle::Xlib(x) => Ok(x.window as isize),
+            RawWindowHandle::Xcb(x) => Ok(x.window.get() as isize),
+            _ => Err(
+                "The demo player needs an X11 session. Your desktop seems to be \
+                 running native Wayland, which can't embed the player. Restart the \
+                 launcher with GDK_BACKEND=x11, or log into an \"Xorg\"/\"X11\" \
+                 session, and try again."
+                    .to_string(),
+            ),
+        }
+    }
+}
+
 /// Spawn one embedded engine pane: create its stage at the aspect-correct
 /// sub-rect of the outer region `(rx,ry,rw,rh)`, launch the engine into it over
 /// a fresh control port, and wire up the control thread. Does NOT install the
 /// key hook - the caller does that once after every pane exists. `homepath`, if
 /// set, isolates this instance's writable config dir so two engines comparing
 /// side by side don't clobber each other's `q3config.cfg`.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 #[allow(clippy::too_many_arguments)]
 fn spawn_pane(
     app: &AppHandle,
@@ -744,6 +892,17 @@ fn spawn_pane(
         .arg("+demo")
         .arg(&demo_arg);
 
+    // Linux: force SDL onto the X11 video driver so the engine window is a real
+    // X11 window we can reparent (under Wayland SDL would otherwise make a
+    // Wayland surface, which can't be embedded - it runs through XWayland this
+    // way). in_nograb keeps the engine from grabbing the pointer so the
+    // launcher's transport UI around the demo stays clickable.
+    #[cfg(target_os = "linux")]
+    {
+        cmd.env("SDL_VIDEODRIVER", "x11");
+        cmd.arg("+set").arg("in_nograb").arg("1");
+    }
+
     let child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -798,7 +957,7 @@ fn pane_focus_key(p: &Pane) -> (isize, u32) {
 // would deadlock if the command itself ran on the main thread (Tauri runs sync
 // commands there). Same reason for set_region / stop below.
 #[tauri::command]
-#[cfg_attr(not(windows), allow(unused_variables))]
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(unused_variables))]
 pub async fn demo_player_start(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -809,11 +968,11 @@ pub async fn demo_player_start(
     h: i32,
     aspect: f32,
 ) -> Result<u16, String> {
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
-        Err("The embedded demo player is only available on Windows.".to_string())
+        Err("The embedded demo player isn't available on this platform.".to_string())
     }
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     {
         if demo.trim().is_empty() {
             return Err("No demo selected.".to_string());
@@ -821,11 +980,8 @@ pub async fn demo_player_start(
 
         let (exe, exe_dir) = resolve_engine(&app)?;
 
-        // Parent the stage to the launcher's main window.
-        let win = app
-            .get_webview_window("main")
-            .ok_or_else(|| "Main window not available.".to_string())?;
-        let parent: isize = win.hwnd().map_err(|e| e.to_string())?.0 as isize;
+        // Parent the stage to the launcher's main window (HWND / X11 toplevel).
+        let parent: isize = main_window_handle(&app)?;
 
         // Replace any existing session before creating the new one.
         {
@@ -834,6 +990,10 @@ pub async fn demo_player_start(
         }
 
         let pane = spawn_pane(&app, &exe, &exe_dir, &demo, 0, parent, x, y, w, h, aspect, None)?;
+        // Windows needs a low-level key hook to catch transport keys regardless
+        // of focus; on Linux the engine forwards them up the control channel
+        // (CL_Control_SendKey) instead, so there's nothing to install.
+        #[cfg(windows)]
         install_key_hook(&app, vec![pane_focus_key(&pane)]);
 
         let mut guard = state.demo_player.inner.lock().unwrap();
@@ -849,7 +1009,7 @@ pub async fn demo_player_start(
 /// lockstep by the shared transport. Per-pane sync offsets (`demo_player_set_offset`)
 /// let the user line runs up.
 #[tauri::command]
-#[cfg_attr(not(windows), allow(unused_variables))]
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(unused_variables))]
 pub async fn demo_player_compare_start(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -860,11 +1020,11 @@ pub async fn demo_player_compare_start(
     h: i32,
     aspect: f32,
 ) -> Result<u16, String> {
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
-        Err("The embedded demo player is only available on Windows.".to_string())
+        Err("The embedded demo player isn't available on this platform.".to_string())
     }
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     {
         let demos: Vec<String> = demos.into_iter().filter(|d| !d.trim().is_empty()).collect();
         if demos.len() < 2 {
@@ -876,10 +1036,7 @@ pub async fn demo_player_compare_start(
         let count = demos.len() as u8;
 
         let (exe, exe_dir) = resolve_engine(&app)?;
-        let win = app
-            .get_webview_window("main")
-            .ok_or_else(|| "Main window not available.".to_string())?;
-        let parent: isize = win.hwnd().map_err(|e| e.to_string())?.0 as isize;
+        let parent: isize = main_window_handle(&app)?;
 
         // Replace whatever is playing.
         {
@@ -910,6 +1067,8 @@ pub async fn demo_player_compare_start(
             }
         }
 
+        // Windows: hook transport keys system-wide. Linux: engine forwards them.
+        #[cfg(windows)]
         install_key_hook(&app, started.iter().map(pane_focus_key).collect());
 
         let mut guard = state.demo_player.inner.lock().unwrap();

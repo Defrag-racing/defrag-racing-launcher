@@ -1,6 +1,6 @@
 [package]
 name = "defrag-launcher"
-version = "0.1.40"
+version = "0.1.41"
 description = "Demo backup + defrag:// launcher for defrag.racing"
 authors = ["defrag.racing"]
 edition = "2021"
@@ -114,3 +114,14 @@ windows = { version = "0.61", features = [
 # go through process re-spawn, so single-instance isn't needed there.
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+
+# Linux-only: embedded demo player. We create a small X11 "stage" child window
+# inside the launcher's main window and hand its window id to the bundled oDFe
+# engine (in_embedParent); the engine reparents its own X11 window into it.
+# `raw-window-handle` gives us the launcher's X11 window id; `x11` makes the raw
+# Xlib calls to create/move/destroy the stage. Works on X11 and, via XWayland,
+# on Wayland too (we force GDK_BACKEND=x11 at startup). Versions pinned to what
+# Tauri already resolves so the handle/types line up.
+[target.'cfg(target_os = "linux")'.dependencies]
+x11 = { version = "2.21", features = ["xlib"] }
+raw-window-handle = "0.6"

@@ -70,7 +70,11 @@
         tauri.demoPlayerPaneCommand(i, `s_volume ${muted.value[i] ? 0 : DEFAULT_VOL}`).catch(() => {});
     };
 
-    const isWindows = navigator.userAgent.includes('Windows');
+    // The embedded player runs on Windows and Linux (X11 / XWayland). On Linux,
+    // if the session is native Wayland the backend returns a clear "use X11"
+    // message; we still let the attempt through so that message can surface.
+    const isEmbedSupported =
+        navigator.userAgent.includes('Windows') || navigator.userAgent.includes('Linux');
 
     const playing = ref(false);
     // True from clicking play until the engine reports its first frame (first
@@ -196,8 +200,8 @@
     };
 
     const start = async (target: PlayTarget) => {
-        if (!isWindows) {
-            playError.value = 'The embedded demo player is only available on Windows.';
+        if (!isEmbedSupported) {
+            playError.value = 'The embedded demo player is only available on Windows and Linux.';
             return;
         }
         playError.value = null;
@@ -226,8 +230,8 @@
 
     // Start a side-by-side comparison of two demos (two engines, lockstep).
     const startCompare = async (c: CompareTarget) => {
-        if (!isWindows) {
-            playError.value = 'The embedded demo player is only available on Windows.';
+        if (!isEmbedSupported) {
+            playError.value = 'The embedded demo player is only available on Windows and Linux.';
             return;
         }
         playError.value = null;
@@ -807,7 +811,7 @@
                 class="absolute inset-0 flex flex-col items-center justify-center text-neutral-500 pointer-events-none"
             >
                 <div class="text-5xl mb-3">▶</div>
-                <div class="text-sm">{{ isWindows ? 'Pick a demo to play' : 'The demo player is only available on Windows.' }}</div>
+                <div class="text-sm">{{ isEmbedSupported ? 'Pick a demo to play' : 'The demo player is only available on Windows and Linux.' }}</div>
             </div>
         </div>
 

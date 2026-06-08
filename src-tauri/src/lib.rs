@@ -49,6 +49,15 @@ pub fn log_startup(msg: &str) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Linux: pin the GDK backend to X11 BEFORE GTK initializes. The embedded
+    // demo player reparents the engine's X11 window into a stage window inside
+    // our own window, which only works if the launcher is itself an X11 client.
+    // On a Wayland session GTK would otherwise pick the Wayland backend; forcing
+    // x11 routes us through XWayland so the embed works. No-op on a real X11
+    // session, and harmless on machines without Wayland.
+    #[cfg(target_os = "linux")]
+    std::env::set_var("GDK_BACKEND", "x11");
+
     // Panic hook BEFORE anything else - catches panics during plugin
     // init, tray construction, etc. and writes them to startup.log so
     // we have something to look at when the process disappears with

@@ -800,7 +800,7 @@ dependencies = [
 
 [[package]]
 name = "defrag-launcher"
-version = "0.1.40"
+version = "0.1.41"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -813,6 +813,7 @@ dependencies = [
  "md-5",
  "notify",
  "notify-debouncer-full",
+ "raw-window-handle",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -836,6 +837,7 @@ dependencies = [
  "walkdir",
  "windows",
  "winreg 0.52.0",
+ "x11",
  "zip 2.4.2",
 ]
 

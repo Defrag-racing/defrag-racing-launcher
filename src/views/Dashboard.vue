@@ -37,7 +37,9 @@
     const router = useRouter();
     const config = useConfigStore();
 
-    const isWindows = navigator.userAgent.includes('Windows');
+    // Embedded demo player / comparison run on Windows and Linux (X11 / XWayland).
+    const isEmbedSupported =
+        navigator.userAgent.includes('Windows') || navigator.userAgent.includes('Linux');
 
     // Embedded player overlay: set to a demo to cover the Demos section with the
     // player; the panel's close button clears it.
@@ -1095,9 +1097,9 @@
 
                     <!-- normal mode actions (hidden while picking a comparison) -->
                     <template v-else>
-                    <!-- play embedded (Windows only) -->
+                    <!-- play embedded (Windows + Linux) -->
                     <button
-                        v-if="isWindows"
+                        v-if="isEmbedSupported"
                         class="px-3 py-1 rounded text-xs font-semibold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 flex-shrink-0 flex items-center gap-1 whitespace-nowrap"
                         title="Plays right here in the launcher - instant, no rendering or upload needed"
                         @click.stop="playDemo(d)"
@@ -1105,7 +1107,7 @@
 
                     <!-- compare two demos side by side (premium, token-gated) -->
                     <button
-                        v-if="isWindows && config.hasToken"
+                        v-if="isEmbedSupported && config.hasToken"
                         class="px-3 py-1 rounded text-xs font-semibold bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 flex-shrink-0 flex items-center gap-1 whitespace-nowrap"
                         title="Compare this run side by side with another demo - two engines, locked together"
                         @click.stop="startComparePick(d)"
