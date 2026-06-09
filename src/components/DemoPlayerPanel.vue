@@ -314,11 +314,18 @@
 
     // ---- fine (millisecond) scrub ------------------------------------------
 
-    // Slider binds in seconds normally, in milliseconds while zoomed.
+    // The scrub bar works in MILLISECONDS the whole time (not seconds), so a
+    // short demo gets hundreds of scrub positions instead of one per second -
+    // dragging a 5 s run is now smooth, not 5 coarse jumps. The step is one
+    // Quake frame (8 ms at 125 fps): finer than that shows the same frame, so 8
+    // ms is the finest *meaningful* resolution. The on-screen pixel width still
+    // limits how precisely you can land on a long demo - that's what hold-to-zoom
+    // is for - but short/medium demos are now frame-accurate by drag alone.
+    const FRAME_MS = 8;
     const sliderMin = computed(() => (fineMode.value ? fineMin.value : 0));
-    const sliderMax = computed(() => (fineMode.value ? fineMax.value : scrubMax.value));
-    const sliderStep = computed(() => (fineMode.value ? 1 : 1)); // 1 ms vs 1 s
-    const sliderValue = computed(() => (fineMode.value ? Math.round(posMs.value) : posSec.value));
+    const sliderMax = computed(() => (fineMode.value ? fineMax.value : (maxLenMs.value || scrubMax.value * 1000)));
+    const sliderStep = computed(() => FRAME_MS);
+    const sliderValue = computed(() => Math.round(posMs.value));
 
     // Filled fraction of the scrub bar (0-100), for the coloured fill + to know
     // where the thumb sits.
@@ -427,46 +434,28 @@
 
     const onScrubInput = (e: Event) => {
         dragging = true;
-        const v = Number((e.target as HTMLInputElement).value);
-        if (fineMode.value) {
-            // value is milliseconds within the FIXED zoom window - the slider's
-            // min/max are the window bounds, so dragging can't leave it (you
-            // release to exit the zoom and scrub the full timeline again).
-            const ms = Math.min(Math.max(v, fineMin.value), fineMax.value);
-            posMs.value = ms;
-            posSec.value = ms / 1000;
-            const t = now();
-            if (t - lastScrubSeekAt >= 60) {
-                lastScrubSeekAt = t;
-                seekTo(ms);
-            }
-            return;
-        }
-        // Coarse (seconds). The dwell timer is reset by real pointer movement
-        // (onScrubPointerMove), not here - a value change is too coarse (no
-        // `input` fires while dragging within the same second).
-        posSec.value = v;
-        posMs.value = v * 1000;
-        // Live preview: seek the engine as the user drags so the picture
-        // follows the handle, not just on release. Throttled so a fast drag
-        // doesn't flood the control channel with seeks the engine can't keep
-        // up with; the final exact seek still lands in onScrubChange.
+        // The slider value is always milliseconds now. While zoomed it's clamped
+        // to the fixed window bounds; otherwise it spans the whole demo.
+        let ms = Number((e.target as HTMLInputElement).value);
+        if (fineMode.value) ms = Math.min(Math.max(ms, fineMin.value), fineMax.value);
+        posMs.value = ms;
+        posSec.value = ms / 1000;
+        // Live preview: seek as the user drags so the picture follows the handle.
+        // Throttled so a fast drag doesn't flood the control channel (tighter
+        // while zoomed, where small moves matter); the exact seek lands on release.
         const t = now();
-        if (t - lastScrubSeekAt >= 90) {
+        const throttle = fineMode.value ? 60 : 90;
+        if (t - lastScrubSeekAt >= throttle) {
             lastScrubSeekAt = t;
-            seekTo(v * 1000);
+            seekTo(ms);
         }
     };
     const onScrubChange = (e: Event) => {
         const v = Number((e.target as HTMLInputElement).value);
-        if (fineMode.value) {
+        {
             posMs.value = v;
             posSec.value = v / 1000;
             seekTo(v);
-        } else {
-            posSec.value = v;
-            posMs.value = v * 1000;
-            seekTo(v * 1000);
         }
         dragging = false;
         lastScrubSeekAt = now();
@@ -532,6 +521,22 @@
         seekHoldUntil = now() + 300;
     };
 
+    // Step exactly one Quake frame (8 ms) at a time, for frame-by-frame study.
+    // Pauses first so you're stepping through a still image, and snaps the target
+    // to the 8 ms frame grid so you always land on a real frame.
+    const stepFrame = (frames: number) => {
+        if (!paused.value) doPause();
+        const base = now() < seekHoldUntil ? seekTarget : posMs.value;
+        let target = Math.round((base + frames * FRAME_MS) / FRAME_MS) * FRAME_MS;
+        if (target < 0) target = 0;
+        if (maxLenMs.value > 0 && target > maxLenMs.value) target = maxLenMs.value;
+        seekTarget = target;
+        seekTo(target);
+        posMs.value = target;
+        posSec.value = Math.min(Math.max(Math.round(target / 1000), 0), scrubMax.value || 0);
+        seekHoldUntil = now() + 300;
+    };
+
     // Run a transport shortcut by normalized name. Shared by real keydowns
     // (when the launcher UI has focus) and by keys the engine forwards over the
     // control channel (when the demo render window has focus instead).
@@ -555,6 +560,14 @@
         const el = e.target as HTMLElement | null;
         const tag = el?.tagName;
         if (tag === 'TEXTAREA' || (tag === 'INPUT' && (el as HTMLInputElement).type !== 'range')) {
+            return;
+        }
+
+        // Shift + Left/Right steps one frame at a time (only works with the
+        // launcher focused; the engine forwards plain arrows without modifiers).
+        if (e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+            e.preventDefault();
+            stepFrame(e.key === 'ArrowRight' ? 1 : -1);
             return;
         }
 
@@ -949,6 +962,10 @@
                 <span class="inline-flex items-center gap-1.5">
                     <kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd>
                     <span>seek 10 s</span>
+                </span>
+                <span class="inline-flex items-center gap-1.5">
+                    <kbd class="kbd">Shift</kbd><kbd class="kbd">←</kbd><kbd class="kbd">→</kbd>
+                    <span>step 1 frame</span>
                 </span>
                 <span class="inline-flex items-center gap-1.5">
                     <kbd class="kbd">Esc</kbd>
