@@ -261,26 +261,29 @@
     const rowFilter = ref<RowFilter>('all');
 
     type StatusKind = 'inprogress' | 'done' | 'duplicate' | 'error' | 'none';
-    interface RowStatus { label: string; color: string; kind: StatusKind }
+    interface RowStatus { label: string; color: string; kind: StatusKind; hint: string }
 
     // Resolve the status shown on a row: the live queue wins (it's
     // happening right now) and otherwise we fall back to the persisted
     // cache status from the disk listing.
     const resolveStatus = (d: DemoLibraryEntry): RowStatus => {
+        const DUP_HINT = 'This exact run is already on defrag.racing - nothing to upload.';
+        const DONE_HINT = 'Safely backed up to your defrag.racing profile.';
         const live = queueByPath.value.get(d.path);
         if (live) {
             switch (live.status) {
-                case 'pending':   return { label: 'Waiting',           color: 'text-neutral-400', kind: 'inprogress' };
-                case 'hashing':   return { label: 'Hashing…',          color: 'text-brand-400',   kind: 'inprogress' };
-                case 'uploading': return { label: 'Uploading…',        color: 'text-brand-400',   kind: 'inprogress' };
-                case 'done':      return { label: 'Uploaded',          color: 'text-emerald-400', kind: 'done' };
-                case 'duplicate': return { label: 'Already backed up', color: 'text-cyan-400',    kind: 'duplicate' };
-                case 'error':     return { label: 'Error',             color: 'text-red-400',     kind: 'error' };
+                case 'pending':   return { label: 'Waiting',           color: 'text-neutral-400', kind: 'inprogress', hint: 'Waiting its turn in the backup queue.' };
+                // "Hashing" is jargon; show "Checking" and explain in the tooltip.
+                case 'hashing':   return { label: 'Checking…',         color: 'text-brand-400',   kind: 'inprogress', hint: 'Making a short fingerprint of the file to check whether this exact run is already on defrag.racing - so the same demo is never uploaded twice.' };
+                case 'uploading': return { label: 'Uploading…',        color: 'text-brand-400',   kind: 'inprogress', hint: 'Sending the demo to your defrag.racing profile.' };
+                case 'done':      return { label: 'Uploaded',          color: 'text-emerald-400', kind: 'done',       hint: DONE_HINT };
+                case 'duplicate': return { label: 'Already backed up', color: 'text-cyan-400',    kind: 'duplicate',  hint: DUP_HINT };
+                case 'error':     return { label: 'Error',             color: 'text-red-400',     kind: 'error',      hint: 'Backup failed - click Retry to try again.' };
             }
         }
-        if (d.upload_status === 'done')      return { label: 'Backed up',         color: 'text-emerald-400/80', kind: 'done' };
-        if (d.upload_status === 'duplicate') return { label: 'Already backed up', color: 'text-cyan-400/80',    kind: 'duplicate' };
-        return { label: 'Not uploaded', color: 'text-neutral-500', kind: 'none' };
+        if (d.upload_status === 'done')      return { label: 'Backed up',         color: 'text-emerald-400/80', kind: 'done',      hint: DONE_HINT };
+        if (d.upload_status === 'duplicate') return { label: 'Already backed up', color: 'text-cyan-400/80',    kind: 'duplicate', hint: DUP_HINT };
+        return { label: 'Not uploaded', color: 'text-neutral-500', kind: 'none', hint: 'Not backed up yet. Turn on auto-backup (top of this tab) and it\'ll be uploaded automatically.' };
     };
 
     // Union of the disk catalog + any live queue item not yet on disk
@@ -415,7 +418,7 @@
     const backupCurrentLabel = computed(() => {
         const c = backupCurrent.value;
         if (!c) return backupCounts.value.pending > 0 ? 'Queued…' : '';
-        const verb = c.status === 'uploading' ? 'Uploading' : 'Hashing';
+        const verb = c.status === 'uploading' ? 'Uploading' : 'Checking';
         const bps = c.status === 'uploading' ? c.upload_throughput_bps : c.hash_throughput_bps;
         const speed = bps && bps > 0 ? ` · ${(bps / 1_000_000).toFixed(1)} MB/s` : '';
         return `${verb} ${c.filename}${speed}`;
@@ -821,13 +824,13 @@
                     </div>
                     <div class="text-xs text-neutral-500 mt-0.5 leading-snug">
                         <template v-if="config.autoUploadRunning && !paused">
-                            Watching your demos folder live - new demos are backed up to defrag.racing within ~30s and show up in the list below. Render any one to YouTube.
+                            Watching your demos folder. Every new run you record is copied to your <strong class="text-neutral-300">defrag.racing</strong> profile within ~30s - so you never lose a demo, even after a game crash. Each one is quickly checked first so the same run is never uploaded twice. New demos show up in the list below; render any to YouTube.
                         </template>
                         <template v-else-if="config.autoUploadRunning && paused">
-                            Watcher is still picking up new demos, but uploads are paused. Click Resume to drain the queue.
+                            Auto-backup is paused. The watcher still notices new demos, but nothing uploads until you click <strong class="text-brand-400">Resume</strong>.
                         </template>
                         <template v-else>
-                            Click <strong class="text-brand-400">Start</strong> to back up new demos automatically. Your existing demos are listed below regardless.
+                            <strong class="text-neutral-300">Auto-backup</strong> keeps a safe online copy of every Defrag run you record: it watches this folder and uploads each new demo to your defrag.racing profile, so a crash or a wiped drive never loses your runs. Click <strong class="text-brand-400">Start</strong> to turn it on - your existing demos are listed below either way.
                         </template>
                     </div>
                     <DemosFolderChip class="mt-1.5" />
@@ -1064,8 +1067,8 @@
                         </div>
                     </div>
 
-                    <!-- live / persisted status -->
-                    <div class="text-xs font-semibold flex-shrink-0" :class="resolveStatus(d).color">
+                    <!-- live / persisted status (hover for a plain-language note) -->
+                    <div class="text-xs font-semibold flex-shrink-0 cursor-help" :class="resolveStatus(d).color" :title="resolveStatus(d).hint">
                         {{ resolveStatus(d).label }}
                     </div>
 

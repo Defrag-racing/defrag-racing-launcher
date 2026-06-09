@@ -118,6 +118,10 @@ export const tauri = {
 
     detectEngines: () => invoke<EngineCandidate[]>('detect_engines'),
     guessDemosPath: (enginePath: string) => invoke<string | null>('guess_demos_path', { enginePath }),
+    // Throws (rejects) with a user-facing message if the demos folder isn't the
+    // engine's demos folder or a subfolder of it.
+    validateDemosPath: (enginePath: string, demosPath: string) =>
+        invoke<void>('validate_demos_path', { enginePath, demosPath }),
 
     startAutoUpload: () => invoke<void>('start_auto_upload'),
     stopAutoUpload: () => invoke<void>('stop_auto_upload'),

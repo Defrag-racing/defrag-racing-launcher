@@ -127,15 +127,30 @@
         return i >= 0 ? s.slice(0, i) : '';
     };
 
+    const demosError = ref('');
     const pickDemosFolder = async () => {
         const picked = await openDialog({
             title: 'Select your Defrag demos folder',
             multiple: false,
             directory: true,
+            // Open at the detected demos folder so the user lands in the right
+            // place and just confirms (or steps into a subfolder).
+            defaultPath: demosPath.value || undefined,
         });
-        if (typeof picked === 'string') {
-            demosPath.value = picked;
+        if (typeof picked !== 'string') return;
+        // Must be the engine's demos folder or a subfolder of it - the demo
+        // player / defrag:// handling derive the install + game from this path,
+        // so a folder outside the engine's demos tree silently breaks them.
+        if (selectedEngine.value) {
+            try {
+                await tauri.validateDemosPath(selectedEngine.value, picked);
+            } catch (e: any) {
+                demosError.value = typeof e === 'string' ? e : (e?.toString?.() ?? 'That folder is not inside your Defrag demos folder.');
+                return;
+            }
         }
+        demosError.value = '';
+        demosPath.value = picked;
     };
 
     const selectEngine = async (path: string) => {
@@ -456,6 +471,8 @@
                             </div>
                             <button class="btn-ghost" @click="pickDemosFolder">Change</button>
                         </div>
+                        <p v-if="demosError" class="text-xs text-red-300">{{ demosError }}</p>
+                        <p class="text-xs text-neutral-500">Must be your engine's <code class="bg-black/40 px-1 rounded">defrag/demos</code> folder (or a subfolder of it).</p>
                     </div>
 
                     <p v-if="!canProceedFromEngine" class="text-xs text-amber-300/80 pt-1">

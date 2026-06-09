@@ -502,6 +502,14 @@ pub fn guess_demos_path(engine_path: PathBuf) -> Option<PathBuf> {
     config::guess_demos_path_from_engine(&engine_path)
 }
 
+/// Validate a manually-picked demos folder against the chosen engine: it must be
+/// the engine's `demos` folder or a subfolder of it. Returns Ok(()) or a
+/// user-facing error the onboarding UI shows.
+#[tauri::command]
+pub fn validate_demos_path(engine_path: PathBuf, demos_path: PathBuf) -> Result<(), String> {
+    config::validate_demos_path(&engine_path, &demos_path)
+}
+
 // ---- Watcher ---------------------------------------------------------------
 
 #[tauri::command]

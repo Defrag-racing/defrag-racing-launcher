@@ -375,11 +375,29 @@
         fineMode.value = false;
         clearDwell();
     };
+    // While the user scrubs, pause the engine so its own advancing playback time
+    // doesn't fight the stream of seeks we issue as the handle moves. Without
+    // this, seeking a *playing* demo desyncs the playhead and (on Linux) can
+    // freeze it outright. We remember whether it was playing and resume on
+    // release. paused.value is deliberately NOT touched so the UI keeps showing
+    // "playing" throughout (no flicker).
+    let scrubWasPlaying = false;
+    const resumeAfterScrub = () => {
+        if (!scrubWasPlaying) return;
+        scrubWasPlaying = false;
+        cmd(`demopause 0; timescale ${speed.value || 1}`);
+    };
     const onScrubPointerDown = (e: PointerEvent) => {
         scrubPressed = true;
         lastMoveX = e.clientX;
         lastMoveY = e.clientY;
         armDwell();
+        if (!paused.value && !atEnd.value) {
+            scrubWasPlaying = true;
+            cmd('demopause 1');
+        } else {
+            scrubWasPlaying = false;
+        }
     };
     // Real mouse movement (not just value changes) cancels/restarts the dwell:
     // with a 1 s step the slider fires no `input` while you drag within the same
@@ -404,6 +422,7 @@
             seekHoldUntil = now() + 700;
             exitFineMode();
         }
+        resumeAfterScrub();
     };
 
     const onScrubInput = (e: Event) => {
@@ -452,6 +471,7 @@
         dragging = false;
         lastScrubSeekAt = now();
         seekHoldUntil = now() + 700;
+        resumeAfterScrub();
     };
 
     // Jump the playhead by a fixed amount (ms). Used by the Up/Down 10 s seek.
@@ -581,7 +601,10 @@
         // Only pane 0 drives measurement + the play/pause state.
         if (s.pane === 0) {
             lenMs.value = s.total > s.start ? s.total - s.start : 0;
-            paused.value = s.paused;
+            // Don't sync the paused state while we've paused the engine purely
+            // for scrubbing - the UI should keep showing "playing" and flip back
+            // only once we've actually resumed on release.
+            if (!scrubWasPlaying) paused.value = s.paused;
 
             if (!measured) {
                 // Length is measured by seeking to a huge time (which transiently

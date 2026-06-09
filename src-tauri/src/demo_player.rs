@@ -826,9 +826,9 @@ fn main_window_handle(app: &AppHandle) -> Result<isize, String> {
 /// Spawn one embedded engine pane: create its stage at the aspect-correct
 /// sub-rect of the outer region `(rx,ry,rw,rh)`, launch the engine into it over
 /// a fresh control port, and wire up the control thread. Does NOT install the
-/// key hook - the caller does that once after every pane exists. `homepath`, if
-/// set, isolates this instance's writable config dir so two engines comparing
-/// side by side don't clobber each other's `q3config.cfg`.
+/// key hook - the caller does that once after every pane exists. Config writes
+/// are isolated to `defrag.launcher.cfg` (see the seeding block below), so the
+/// user's real `q3config.cfg` is never touched.
 #[cfg(any(windows, target_os = "linux"))]
 #[allow(clippy::too_many_arguments)]
 fn spawn_pane(
@@ -843,7 +843,6 @@ fn spawn_pane(
     rw: i32,
     rh: i32,
     aspect: f32,
-    homepath: Option<std::path::PathBuf>,
 ) -> Result<Pane, String> {
     let (basepath, fs_game, demo_arg) = derive_demo_launch(std::path::Path::new(demo_abs))?;
 
@@ -882,11 +881,25 @@ fn spawn_pane(
         .arg("+set")
         .arg("fs_basepath")
         .arg(basepath.to_string_lossy().to_string());
-    if let Some(hp) = &homepath {
-        std::fs::create_dir_all(hp).ok();
-        cmd.arg("+set").arg("fs_homepath").arg(hp.to_string_lossy().to_string());
+
+    // Config isolation: the bundled engine is patched so that in embedded mode
+    // (in_embedParent set) it reads AND writes `defrag.launcher.cfg` instead of
+    // `q3config.cfg`. We seed that file from the user's real q3config.cfg before
+    // each run, so the demo uses their settings while every write the engine
+    // makes on quit (our injected in_nograb / con_notifytime / com_maxfps, ...)
+    // lands in defrag.launcher.cfg and never touches q3config.cfg. fs_homepath
+    // points at the install so the file sits in the real game folder and all the
+    // user's pak files load. Re-seeding each launch keeps it in sync and means a
+    // concurrent-write race between comparison panes is self-healing.
+    let game_dir = basepath.join(&fs_game);
+    let user_cfg = game_dir.join("q3config.cfg");
+    if user_cfg.exists() {
+        let _ = std::fs::copy(&user_cfg, game_dir.join("defrag.launcher.cfg"));
     }
     cmd.arg("+set")
+        .arg("fs_homepath")
+        .arg(basepath.to_string_lossy().to_string())
+        .arg("+set")
         .arg("fs_game")
         .arg(&fs_game)
         .arg("+demo")
@@ -989,7 +1002,7 @@ pub async fn demo_player_start(
             stop_all(&app, panes);
         }
 
-        let pane = spawn_pane(&app, &exe, &exe_dir, &demo, 0, parent, x, y, w, h, aspect, None)?;
+        let pane = spawn_pane(&app, &exe, &exe_dir, &demo, 0, parent, x, y, w, h, aspect)?;
         // Windows needs a low-level key hook to catch transport keys regardless
         // of focus; on Linux the engine forwards them up the control channel
         // (CL_Control_SendKey) instead, so there's nothing to install.
@@ -1044,16 +1057,14 @@ pub async fn demo_player_compare_start(
             stop_all(&app, panes);
         }
 
-        let tmp = std::env::temp_dir();
         let mut started: Vec<Pane> = Vec::with_capacity(demos.len());
         for (i, demo) in demos.iter().enumerate() {
             let idx = i as u8;
             let (cx, cy, cw, ch) = pane_region(idx, count, x, y, w, h);
-            // Isolate each engine's writable config so they don't fight over
-            // q3config.cfg on quit.
-            let homepath = tmp.join(format!("drl-demo-pane{idx}"));
+            // All panes write defrag.launcher.cfg (not q3config.cfg), re-seeded
+            // each launch, so they can share the install's config dir safely.
             match spawn_pane(
-                &app, &exe, &exe_dir, demo, idx, parent, cx, cy, cw, ch, aspect, Some(homepath),
+                &app, &exe, &exe_dir, demo, idx, parent, cx, cy, cw, ch, aspect,
             ) {
                 Ok(p) => started.push(p),
                 Err(e) => {

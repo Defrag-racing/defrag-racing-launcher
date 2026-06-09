@@ -236,6 +236,7 @@ pub fn run() {
             commands::reset_launcher,
             commands::detect_engines,
             commands::guess_demos_path,
+            commands::validate_demos_path,
             commands::start_auto_upload,
             commands::stop_auto_upload,
             commands::pause_auto_upload,

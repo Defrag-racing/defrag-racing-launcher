@@ -4,6 +4,13 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.44
+
+- **The demo player no longer touches your real Quake config.** When you watch or compare demos in the launcher, the bundled engine now reads and writes its own `defrag.launcher.cfg` (seeded from your `q3config.cfg` each time) instead of your real config - so the settings it needs to run embedded never leak into the config your normal game uses.
+- **Scrubbing while a demo plays is smooth now.** Dragging the timeline pauses the engine for the duration of the drag and resumes on release, so the playhead can't desync or freeze (which it did on Linux). The picture still follows the handle as you drag.
+- **Onboarding only accepts a real demos folder.** When you pick your demos folder it now has to be your engine's `demos` folder (or a subfolder of it); picking something outside the Defrag install - which silently broke playback and `defrag://` joins - is rejected with a clear message.
+- **Clearer wording in the Demos tab.** The "Hashing" status is now "Checking" with a plain-language tooltip (it fingerprints the file to skip re-uploading runs already on defrag.racing), and the auto-backup explanation spells out what it does and why.
+
 ## 0.1.43
 
 - **Playback speeds are centered**, with a small gap separating the slow-motion speeds (0.1x-0.75x) from the normal/fast ones (1x-8x) so the two groups read apart at a glance.

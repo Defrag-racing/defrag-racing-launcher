@@ -202,3 +202,42 @@ pub fn guess_demos_path_from_engine(engine: &Path) -> Option<PathBuf> {
     let candidate = engine.parent()?.join("defrag").join("demos");
     if candidate.exists() { Some(candidate) } else { None }
 }
+
+/// Validate that `demos` is the engine's `demos` folder (or a subfolder of it).
+/// The embedded demo player and the `defrag://`-aware bits need the demo to sit
+/// at `<install>/<game>/demos/...` so they can derive fs_basepath/fs_game; if the
+/// user points the watcher at some unrelated folder outside the engine, none of
+/// that works. We require the chosen folder to (1) live inside the engine's
+/// install dir (the engine binary's folder) and (2) be - or be inside - a
+/// `demos` folder. Returns Ok(()) or a user-facing error string.
+pub fn validate_demos_path(engine: &Path, demos: &Path) -> Result<(), String> {
+    let install = engine
+        .parent()
+        .ok_or_else(|| "Could not resolve the engine's folder.".to_string())?;
+    // Canonicalize so `..`, symlinks and casing don't fool the prefix check;
+    // fall back to the raw path if canonicalize fails (e.g. on a path that
+    // doesn't fully exist yet).
+    let install = std::fs::canonicalize(install).unwrap_or_else(|_| install.to_path_buf());
+    let demos_c = std::fs::canonicalize(demos).unwrap_or_else(|_| demos.to_path_buf());
+
+    let rel = match demos_c.strip_prefix(&install) {
+        Ok(r) => r,
+        Err(_) => {
+            return Err(
+                "Pick a folder inside your Defrag install (the folder with the engine you \
+                 selected) - the demos folder or a subfolder of it."
+                    .to_string(),
+            )
+        }
+    };
+
+    let has_demos = rel.components().any(|c| {
+        c.as_os_str()
+            .to_str()
+            .map_or(false, |s| s.eq_ignore_ascii_case("demos"))
+    });
+    if !has_demos {
+        return Err("Pick your Defrag \"demos\" folder (or a subfolder inside it).".to_string());
+    }
+    Ok(())
+}
