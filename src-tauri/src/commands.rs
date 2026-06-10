@@ -997,8 +997,9 @@ pub struct MapProgress {
 /// install it manually / contact an admin" prompt instead of launching into a
 /// broken demo.
 #[tauri::command]
-pub async fn ensure_demo_map(app: AppHandle, map_name: String) -> Result<DemoMapStatus, String> {
+pub async fn ensure_demo_map(app: AppHandle, demo: String, map_name: String) -> Result<DemoMapStatus, String> {
     use std::io::Write;
+    use std::path::PathBuf;
     use tauri::Emitter;
 
     let map_name = map_name.trim().to_string();
@@ -1019,30 +1020,52 @@ pub async fn ensure_demo_map(app: AppHandle, map_name: String) -> Result<DemoMap
         .clone()
         .ok_or_else(|| "No engine configured - pick one in Settings first.".to_string())?;
 
+    // Where does THIS demo's content live? Derive the install base from the demo
+    // path (that's exactly what the player uses for fs_basepath); fall back to
+    // the engine's folder if the demo isn't in a recognisable layout. Then add
+    // the engine home path (~/.q3a on Linux) - the engine searches both, and on
+    // Linux all the pk3s/maps actually live under the home path, not the engine
+    // dir. Dedup so the common case (they coincide) is a single root.
+    let basepath = crate::demo_player::derive_demo_launch(std::path::Path::new(&demo))
+        .map(|(b, _, _)| b)
+        .unwrap_or_else(|_| engine.parent().map(|p| p.to_path_buf()).unwrap_or_default());
+    let mut roots: Vec<PathBuf> = vec![basepath.clone()];
+    if let Some(h) = crate::demo_player::engine_home_dir() {
+        if !roots.contains(&h) {
+            roots.push(h);
+        }
+    }
+
     // Already installed? Reuse the offline-maps scan (cached manifest) so we
-    // don't re-open every pk3; it covers both baseq3 and defrag. Runs on the
-    // blocking pool because a cold scan touches the disk hard - the first ever
-    // scan of a big collection takes a moment, so we flag the "checking" phase.
+    // don't re-open every pk3; it covers both baseq3 and defrag under each root.
+    // Runs on the blocking pool because a cold scan touches the disk hard - the
+    // first ever scan of a big collection takes a moment, so we flag "checking".
     emit("checking", 0, None);
     let installed = {
-        let engine = engine.clone();
+        let roots = roots.clone();
         let want = map_name.clone();
         tokio::task::spawn_blocking(move || {
-            crate::offline_maps::list(&engine)
-                .map(|maps| maps.iter().any(|m| m.name.eq_ignore_ascii_case(&want)))
+            roots.iter().any(|r| {
+                // offline_maps keys off the engine path's PARENT, so hand it a
+                // synthetic path inside the root to scan <root>/baseq3 + /defrag.
+                let synth = r.join("oDFe");
+                crate::offline_maps::list(&synth)
+                    .map(|maps| maps.iter().any(|m| m.name.eq_ignore_ascii_case(&want)))
+                    .unwrap_or(false)
+            })
         })
         .await
-        .map_err(err_to_string)?
         .map_err(err_to_string)?
     };
     if installed {
         return Ok(DemoMapStatus { downloaded: false, map_name });
     }
 
-    let baseq3 = engine
-        .parent()
-        .ok_or_else(|| "Engine path has no parent directory.".to_string())?
-        .join("baseq3");
+    // Download into a baseq3 the engine both searches AND can write to. On Linux
+    // that's the home path (~/.q3a/baseq3) - the engine dir is often read-only
+    // and isn't where content lives; on Windows the home path == install base.
+    let dl_base = crate::demo_player::engine_home_dir().unwrap_or_else(|| basepath.clone());
+    let baseq3 = dl_base.join("baseq3");
 
     // Resolve + fetch by map name. reqwest follows the 302 to the pk3; a map
     // the site doesn't know 404s here and surfaces as an error.

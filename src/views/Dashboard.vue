@@ -64,22 +64,28 @@
     });
     const fmtMB = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 
-    /** Ensure every map in `names` is installed (downloading missing pk3s).
-     *  Resolves true on success; on failure sets `mapError` and resolves
-     *  false so the caller skips opening the player. */
-    const ensureMaps = async (names: string[]): Promise<boolean> => {
-        const wanted = [...new Set(names.filter((n): n is string => !!n))];
-        if (wanted.length === 0) return true; // unknown map name -> let the engine try
+    /** Ensure every demo's map is installed (downloading missing pk3s). Each
+     *  item carries the demo path (so the backend knows where this demo's
+     *  content lives) and its map name. Deduped by map name. Resolves true on
+     *  success; on failure sets `mapError` and resolves false so the caller
+     *  skips opening the player. */
+    const ensureMaps = async (
+        items: { path: string; map: string | null }[],
+    ): Promise<boolean> => {
+        // One download per distinct map (first demo path wins).
+        const byMap = new Map<string, string>();
+        for (const it of items) if (it.map && !byMap.has(it.map)) byMap.set(it.map, it.path);
+        if (byMap.size === 0) return true; // unknown map name -> let the engine try
         try {
-            for (const name of wanted) {
-                preparingMap.value = name;
+            for (const [map, path] of byMap) {
+                preparingMap.value = map;
                 mapProgress.value = { phase: 'checking', received: 0, total: null };
-                await tauri.ensureDemoMap(name);
+                await tauri.ensureDemoMap(path, map);
             }
             return true;
         } catch (e) {
             mapError.value = {
-                map: wanted.join(', '),
+                map: [...byMap.keys()].join(', '),
                 detail: e instanceof Error ? e.message : String(e),
             };
             return false;
@@ -91,8 +97,7 @@
 
     const playDemo = async (d: DemoLibraryEntry) => {
         compareTarget.value = null;
-        const map = mapNameFromFilename(d.filename);
-        if (!(await ensureMaps(map ? [map] : []))) return;
+        if (!(await ensureMaps([{ path: d.path, map: mapNameFromFilename(d.filename) }]))) return;
         playerTarget.value = { path: d.path, name: d.filename };
     };
 
@@ -129,10 +134,11 @@
     // Launch the comparison with the picked demos.
     const launchCompare = async () => {
         if (compareSel.value.length < 2) return;
-        const names = compareSel.value
-            .map((d) => mapNameFromFilename(d.filename))
-            .filter((n): n is string => !!n);
-        if (!(await ensureMaps(names))) return;
+        const items = compareSel.value.map((d) => ({
+            path: d.path,
+            map: mapNameFromFilename(d.filename),
+        }));
+        if (!(await ensureMaps(items))) return;
         playerTarget.value = null;
         compareTarget.value = {
             demos: compareSel.value.map((d) => ({ path: d.path, name: d.filename })),

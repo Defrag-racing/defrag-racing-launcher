@@ -211,33 +211,37 @@ pub fn guess_demos_path_from_engine(engine: &Path) -> Option<PathBuf> {
 /// install dir (the engine binary's folder) and (2) be - or be inside - a
 /// `demos` folder. Returns Ok(()) or a user-facing error string.
 pub fn validate_demos_path(engine: &Path, demos: &Path) -> Result<(), String> {
-    let install = engine
-        .parent()
-        .ok_or_else(|| "Could not resolve the engine's folder.".to_string())?;
-    // Canonicalize so `..`, symlinks and casing don't fool the prefix check;
-    // fall back to the raw path if canonicalize fails (e.g. on a path that
-    // doesn't fully exist yet).
-    let install = std::fs::canonicalize(install).unwrap_or_else(|_| install.to_path_buf());
+    // We deliberately do NOT require the demos folder to sit under the engine
+    // binary's install dir. On Linux the engine lives in one place (often a
+    // read-only system path) while all user content - configs, pk3s and demos -
+    // lives under the home path (~/.q3a/<game>/demos). Tying demos to the engine
+    // dir broke that setup, so instead we validate the folder's *shape*: it must
+    // be (inside) a `demos` folder that itself sits in a <base>/<game>/demos
+    // layout, which is exactly what the player derives fs_basepath / fs_game
+    // from at launch (see demo_player::derive_demo_launch).
+    let _ = engine;
     let demos_c = std::fs::canonicalize(demos).unwrap_or_else(|_| demos.to_path_buf());
 
-    let rel = match demos_c.strip_prefix(&install) {
-        Ok(r) => r,
-        Err(_) => {
-            return Err(
-                "Pick a folder inside your Defrag install (the folder with the engine you \
-                 selected) - the demos folder or a subfolder of it."
-                    .to_string(),
-            )
+    // Nearest ancestor named "demos" (the folder itself counts).
+    let demos_dir = demos_c
+        .ancestors()
+        .find(|a| a.file_name().map_or(false, |n| n.eq_ignore_ascii_case("demos")));
+    let demos_dir = match demos_dir {
+        Some(d) => d,
+        None => {
+            return Err("Pick your Defrag \"demos\" folder (or a subfolder inside it).".to_string())
         }
     };
 
-    let has_demos = rel.components().any(|c| {
-        c.as_os_str()
-            .to_str()
-            .map_or(false, |s| s.eq_ignore_ascii_case("demos"))
-    });
-    if !has_demos {
-        return Err("Pick your Defrag \"demos\" folder (or a subfolder inside it).".to_string());
+    // It must have a parent (the <game> folder) and a grandparent (the install
+    // base), or the engine can't resolve fs_game / fs_basepath from it.
+    let game = demos_dir.parent();
+    if game.and_then(|g| g.parent()).is_none() {
+        return Err(
+            "That \"demos\" folder isn't inside a game folder - it should look like \
+             …/<game>/demos (for example …/defrag/demos)."
+                .to_string(),
+        );
     }
     Ok(())
 }

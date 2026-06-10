@@ -177,7 +177,7 @@ fn pane_region(pane: u8, count: u8, rx: i32, ry: i32, rw: i32, rh: i32) -> (i32,
 /// nearest ancestor named `demos` defines the layout, so demos in subfolders
 /// work too. Errors if the demo isn't inside a `demos` folder (the engine can't
 /// load it then).
-fn derive_demo_launch(demo: &std::path::Path) -> Result<(std::path::PathBuf, String, String), String> {
+pub(crate) fn derive_demo_launch(demo: &std::path::Path) -> Result<(std::path::PathBuf, String, String), String> {
     let demos_dir = demo
         .ancestors()
         .skip(1) // skip the file itself
@@ -203,6 +203,21 @@ fn derive_demo_launch(demo: &std::path::Path) -> Result<(std::path::PathBuf, Str
         .to_string_lossy()
         .replace('\\', "/");
     Ok((base.to_path_buf(), fs_game, demo_arg))
+}
+
+/// The engine's default writable "home path" base - where it reads/writes
+/// q3config.cfg (and our defrag.launcher.cfg) and, crucially on Linux, where ALL
+/// user content (configs, downloaded pk3s, demos) lives by default. Mirrors
+/// oDFe's `Sys_DefaultHomePath`: `$HOME/.q3a` on Linux. On Windows our bundled
+/// build has no profile directory, so the engine's home path IS the base path
+/// (the install) - we return None and callers fall back to the install path.
+#[cfg(target_os = "linux")]
+pub(crate) fn engine_home_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".q3a"))
+}
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn engine_home_dir() -> Option<std::path::PathBuf> {
+    None
 }
 
 // ---- native stage window ---------------------------------------------------
@@ -904,13 +919,35 @@ fn spawn_pane(
     // and cgame. Forcing fs_homepath=basepath used to hide a Linux install whose
     // defrag content lives under the default home path, which made the engine
     // fall back to baseq3's cgame (CLIENT/SERVER GAME MISMATCH BASEQ3/DEFRAG +
-    // the vanilla CD-key screen). The seed copy sits in basepath/<game>/ where
-    // the VFS still finds it at startup; the engine's own writes go to the home
-    // path. (Re-seeding each launch keeps it current.)
-    let game_dir = basepath.join(&fs_game);
-    let user_cfg = game_dir.join("q3config.cfg");
-    if user_cfg.exists() {
-        let _ = std::fs::copy(&user_cfg, game_dir.join("defrag.launcher.cfg"));
+    // the vanilla CD-key screen).
+    //
+    // The user's real q3config.cfg can live under either root: the install
+    // (basepath - Windows keeps everything there) or the engine home path
+    // (~/.q3a on Linux - where Linux keeps everything). So we look for it in the
+    // <game> dir first, then baseq3, across BOTH roots, and copy it to
+    // defrag.launcher.cfg in every <game> dir the engine might read it from.
+    // That way wherever the home path resolves at runtime, the engine finds our
+    // seeded config instead of writing a fresh stock one. (Re-seeding each
+    // launch keeps it current.)
+    {
+        let roots: Vec<std::path::PathBuf> =
+            std::iter::once(basepath.clone()).chain(engine_home_dir()).collect();
+        let src = roots.iter().find_map(|r| {
+            [r.join(&fs_game).join("q3config.cfg"), r.join("baseq3").join("q3config.cfg")]
+                .into_iter()
+                .find(|p| p.exists())
+        });
+        if let Some(src) = src {
+            let mut seen = std::collections::HashSet::new();
+            for r in &roots {
+                let game_dir = r.join(&fs_game);
+                if !seen.insert(game_dir.clone()) {
+                    continue; // basepath and home path can coincide (Windows)
+                }
+                let _ = std::fs::create_dir_all(&game_dir);
+                let _ = std::fs::copy(&src, game_dir.join("defrag.launcher.cfg"));
+            }
+        }
     }
     cmd.arg("+set")
         .arg("fs_game")

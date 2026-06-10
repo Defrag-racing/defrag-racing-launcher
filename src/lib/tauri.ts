@@ -172,8 +172,8 @@ export const tauri = {
      *  loads it: checks the engine's game dirs and downloads the pk3 into
      *  baseq3 if missing. Rejects (with a user-facing message) if the map
      *  can't be found/fetched, so the caller can prompt for a manual install. */
-    ensureDemoMap: (mapName: string) =>
-        invoke<DemoMapStatus>('ensure_demo_map', { mapName }),
+    ensureDemoMap: (demoPath: string, mapName: string) =>
+        invoke<DemoMapStatus>('ensure_demo_map', { demo: demoPath, mapName }),
     /** List maps installed in the engine's baseq3 folder, paginated +
      *  name-filtered. The first call scans every pk3 once (cached to a
      *  manifest); later calls are cheap. Only a page is returned so the UI
