@@ -970,6 +970,19 @@ pub struct DemoMapStatus {
     pub map_name: String,
 }
 
+/// Progress pushed to the frontend while `ensure_demo_map` runs, so the
+/// "Preparing map" overlay can show a real bar instead of a bare spinner.
+/// `phase` is "checking" (scanning installed maps) or "downloading"; for
+/// downloading, `received`/`total` are byte counts (`total` is None when the
+/// server sends no Content-Length).
+#[derive(Clone, serde::Serialize)]
+pub struct MapProgress {
+    pub map: String,
+    pub phase: String,
+    pub received: u64,
+    pub total: Option<u64>,
+}
+
 /// Make sure the map a demo needs is installed before the embedded player
 /// loads it, mirroring what the Maps tab does: check the engine's game dirs
 /// (baseq3 + defrag) and, if the map is missing, download its pk3 into
@@ -984,11 +997,21 @@ pub struct DemoMapStatus {
 /// install it manually / contact an admin" prompt instead of launching into a
 /// broken demo.
 #[tauri::command]
-pub async fn ensure_demo_map(map_name: String) -> Result<DemoMapStatus, String> {
+pub async fn ensure_demo_map(app: AppHandle, map_name: String) -> Result<DemoMapStatus, String> {
+    use std::io::Write;
+    use tauri::Emitter;
+
     let map_name = map_name.trim().to_string();
     if map_name.is_empty() {
         return Err("Could not determine which map this demo needs.".to_string());
     }
+
+    let emit = |phase: &str, received: u64, total: Option<u64>| {
+        let _ = app.emit(
+            "demo-map-progress",
+            MapProgress { map: map_name.clone(), phase: phase.to_string(), received, total },
+        );
+    };
 
     let cfg = Config::load().map_err(err_to_string)?;
     let engine = cfg
@@ -998,7 +1021,9 @@ pub async fn ensure_demo_map(map_name: String) -> Result<DemoMapStatus, String> 
 
     // Already installed? Reuse the offline-maps scan (cached manifest) so we
     // don't re-open every pk3; it covers both baseq3 and defrag. Runs on the
-    // blocking pool because a cold scan touches the disk hard.
+    // blocking pool because a cold scan touches the disk hard - the first ever
+    // scan of a big collection takes a moment, so we flag the "checking" phase.
+    emit("checking", 0, None);
     let installed = {
         let engine = engine.clone();
         let want = map_name.clone();
@@ -1022,7 +1047,7 @@ pub async fn ensure_demo_map(map_name: String) -> Result<DemoMapStatus, String> 
     // Resolve + fetch by map name. reqwest follows the 302 to the pk3; a map
     // the site doesn't know 404s here and surfaces as an error.
     let url = format!("https://defrag.racing/maps/download/{map_name}");
-    let resp = reqwest::Client::new()
+    let mut resp = reqwest::Client::new()
         .get(&url)
         .send()
         .await
@@ -1039,19 +1064,49 @@ pub async fn ensure_demo_map(map_name: String) -> Result<DemoMapStatus, String> 
         .filter(|n| !n.is_empty() && !n.contains("..") && n.ends_with(".pk3"))
         .ok_or_else(|| format!("The server didn't return a valid pk3 for '{map_name}'."))?;
 
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| format!("Map download read failed for '{map_name}': {e}"))?;
-
     std::fs::create_dir_all(&baseq3)
         .map_err(|e| format!("could not create {}: {e}", baseq3.display()))?;
     let target = baseq3.join(&pk3_name);
-    if !target.exists() {
-        // Atomic-ish: write to a temp file then rename so a half-downloaded
-        // pk3 can't be mistaken for a complete one.
-        let tmp = baseq3.join(format!("{pk3_name}.part"));
-        std::fs::write(&tmp, &bytes).map_err(|e| format!("write {}: {e}", tmp.display()))?;
+
+    // Stream the body to a temp file so a huge map shows progress instead of a
+    // frozen spinner, and a half-download can't be mistaken for a complete pk3.
+    // `chunk()` is an inherent reqwest method, so no extra stream crate needed.
+    let total = resp.content_length();
+    let tmp = baseq3.join(format!("{pk3_name}.part"));
+    let mut file = std::fs::File::create(&tmp)
+        .map_err(|e| format!("write {}: {e}", tmp.display()))?;
+    let mut received: u64 = 0;
+    let mut last_emit: u64 = 0;
+    emit("downloading", 0, total);
+    loop {
+        match resp.chunk().await {
+            Ok(Some(chunk)) => {
+                file.write_all(&chunk).map_err(|e| {
+                    let _ = std::fs::remove_file(&tmp);
+                    format!("write {}: {e}", tmp.display())
+                })?;
+                received += chunk.len() as u64;
+                // Throttle events: ~every 256 KB (and always the final byte).
+                if received - last_emit >= 256 * 1024 || Some(received) == total {
+                    last_emit = received;
+                    emit("downloading", received, total);
+                }
+            }
+            Ok(None) => break,
+            Err(e) => {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(format!("Map download read failed for '{map_name}': {e}"));
+            }
+        }
+    }
+    file.flush().map_err(|e| format!("write {}: {e}", tmp.display()))?;
+    drop(file);
+    emit("downloading", received, total.or(Some(received)));
+
+    if target.exists() {
+        // Someone/another pane fetched it meanwhile - drop our copy.
+        let _ = std::fs::remove_file(&tmp);
+    } else {
         std::fs::rename(&tmp, &target)
             .map_err(|e| format!("rename to {}: {e}", target.display()))?;
     }

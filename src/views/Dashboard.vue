@@ -53,6 +53,16 @@
     // user to grab the map manually when the auto-download fails.
     const preparingMap = ref<string | null>(null);
     const mapError = ref<{ map: string; detail: string } | null>(null);
+    // Live download progress for the map being prepared (from the backend's
+    // `demo-map-progress` event): phase "checking" (scanning installed maps) or
+    // "downloading" with byte counts.
+    const mapProgress = ref<{ phase: string; received: number; total: number | null } | null>(null);
+    const mapPercent = computed(() => {
+        const p = mapProgress.value;
+        if (!p || p.phase !== 'downloading' || !p.total) return null;
+        return Math.min(100, Math.round((p.received / p.total) * 100));
+    });
+    const fmtMB = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 
     /** Ensure every map in `names` is installed (downloading missing pk3s).
      *  Resolves true on success; on failure sets `mapError` and resolves
@@ -60,9 +70,10 @@
     const ensureMaps = async (names: string[]): Promise<boolean> => {
         const wanted = [...new Set(names.filter((n): n is string => !!n))];
         if (wanted.length === 0) return true; // unknown map name -> let the engine try
-        preparingMap.value = wanted.join(', ');
         try {
             for (const name of wanted) {
+                preparingMap.value = name;
+                mapProgress.value = { phase: 'checking', received: 0, total: null };
                 await tauri.ensureDemoMap(name);
             }
             return true;
@@ -74,6 +85,7 @@
             return false;
         } finally {
             preparingMap.value = null;
+            mapProgress.value = null;
         }
     };
 
@@ -525,6 +537,7 @@
 
     // -- lifecycle -----------------------------------------------------
     let unlisten: UnlistenFn | null = null;
+    let unlistenMapProgress: UnlistenFn | null = null;
     const refreshPaused = async () => {
         try { paused.value = await tauri.isAutoUploadPaused(); } catch { paused.value = false; }
     };
@@ -574,6 +587,11 @@
             pendingSnapshot = ev.payload;
             if (!applyFrame) applyFrame = requestAnimationFrame(applyPendingSnapshot);
         });
+
+        unlistenMapProgress = await listen<{ phase: string; received: number; total: number | null }>(
+            'demo-map-progress',
+            (ev) => { if (preparingMap.value) mapProgress.value = ev.payload; },
+        );
     });
 
     // KeepAlive caches this view across tab switches, so onMounted runs
@@ -605,6 +623,7 @@
 
     onUnmounted(() => {
         if (unlisten) unlisten();
+        if (unlistenMapProgress) unlistenMapProgress();
         if (applyFrame) cancelAnimationFrame(applyFrame);
         if (rateLimitPollTimer !== undefined) window.clearInterval(rateLimitPollTimer);
         if (nowTickTimer !== undefined) window.clearInterval(nowTickTimer);
@@ -847,10 +866,10 @@
             />
         </div>
 
-        <!-- Preparing the map (download/check) before the player opens. -->
+        <!-- Preparing the map (check / download) before the player opens. -->
         <div
             v-if="preparingMap"
-            class="absolute inset-0 z-40 bg-neutral-950/80 flex flex-col items-center justify-center gap-3"
+            class="absolute inset-0 z-40 bg-neutral-950/80 flex flex-col items-center justify-center gap-3 px-8"
         >
             <svg class="w-7 h-7 animate-spin text-emerald-400" viewBox="0 0 24 24" fill="none">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
@@ -859,7 +878,34 @@
             <div class="text-sm text-neutral-300">
                 Preparing map <span class="font-semibold text-white">{{ preparingMap }}</span>…
             </div>
-            <div class="text-xs text-neutral-500">Downloading it now if you don't have it yet.</div>
+
+            <!-- Checking installed maps (cold scan of a big collection is slow). -->
+            <div v-if="!mapProgress || mapProgress.phase === 'checking'" class="text-xs text-neutral-500">
+                Checking your installed maps…
+            </div>
+
+            <!-- Downloading: real progress bar (percent when the size is known,
+                 otherwise just the downloaded amount). -->
+            <template v-else>
+                <div class="w-72 max-w-full h-2 rounded-full bg-white/10 overflow-hidden">
+                    <div
+                        class="h-full bg-emerald-400 transition-[width] duration-150"
+                        :style="{ width: mapPercent !== null ? mapPercent + '%' : '100%' }"
+                        :class="mapPercent === null ? 'animate-pulse' : ''"
+                    ></div>
+                </div>
+                <div class="text-xs text-neutral-400 tabular-nums">
+                    <template v-if="mapPercent !== null">
+                        Downloading… {{ mapPercent }}%
+                        <span class="text-neutral-600">
+                            ({{ fmtMB(mapProgress.received) }} / {{ fmtMB(mapProgress.total ?? 0) }})
+                        </span>
+                    </template>
+                    <template v-else>
+                        Downloading… {{ fmtMB(mapProgress.received) }}
+                    </template>
+                </div>
+            </template>
         </div>
 
         <!-- Map download failed: tell the user how to recover. -->
