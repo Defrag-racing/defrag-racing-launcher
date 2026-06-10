@@ -878,28 +878,41 @@ fn spawn_pane(
         .arg("+set")
         .arg("com_maxfpsUnfocused")
         .arg("125")
+        // Windows: the engine installs a low-level keyboard hook that, with
+        // in_blockWinKey (default 1), SWALLOWS the Windows key while the game
+        // window is focused - which also kills OS shortcuts that start with it,
+        // e.g. Win+Shift+S (Snip & Sketch screenshot). We're an embedded demo
+        // viewer, not a game that needs to guard against an accidental Start
+        // menu, so turn the block off. Harmless on Linux (no such cvar/hook).
+        .arg("+set")
+        .arg("in_blockWinKey")
+        .arg("0")
         .arg("+set")
         .arg("fs_basepath")
         .arg(basepath.to_string_lossy().to_string());
 
     // Config isolation: the bundled engine is patched so that in embedded mode
     // (in_embedParent set) it reads AND writes `defrag.launcher.cfg` instead of
-    // `q3config.cfg`. We seed that file from the user's real q3config.cfg before
-    // each run, so the demo uses their settings while every write the engine
-    // makes on quit (our injected in_nograb / con_notifytime / com_maxfps, ...)
-    // lands in defrag.launcher.cfg and never touches q3config.cfg. fs_homepath
-    // points at the install so the file sits in the real game folder and all the
-    // user's pak files load. Re-seeding each launch keeps it in sync and means a
-    // concurrent-write race between comparison panes is self-healing.
+    // `q3config.cfg`. We seed that file from the user's real q3config.cfg so the
+    // demo uses their settings, while every write the engine makes on quit (our
+    // injected in_nograb / con_notifytime / com_maxfps, ...) lands in
+    // defrag.launcher.cfg and never touches q3config.cfg.
+    //
+    // We deliberately do NOT override fs_homepath. The engine keeps its default
+    // home path (e.g. ~/.q3a on Linux) and we only point fs_basepath at the
+    // install, so the VFS searches BOTH locations for the defrag mod's pak files
+    // and cgame. Forcing fs_homepath=basepath used to hide a Linux install whose
+    // defrag content lives under the default home path, which made the engine
+    // fall back to baseq3's cgame (CLIENT/SERVER GAME MISMATCH BASEQ3/DEFRAG +
+    // the vanilla CD-key screen). The seed copy sits in basepath/<game>/ where
+    // the VFS still finds it at startup; the engine's own writes go to the home
+    // path. (Re-seeding each launch keeps it current.)
     let game_dir = basepath.join(&fs_game);
     let user_cfg = game_dir.join("q3config.cfg");
     if user_cfg.exists() {
         let _ = std::fs::copy(&user_cfg, game_dir.join("defrag.launcher.cfg"));
     }
     cmd.arg("+set")
-        .arg("fs_homepath")
-        .arg(basepath.to_string_lossy().to_string())
-        .arg("+set")
         .arg("fs_game")
         .arg(&fs_game)
         .arg("+demo")

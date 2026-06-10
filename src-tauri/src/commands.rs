@@ -961,6 +961,104 @@ pub async fn run_map_offline(
     Ok(MapRunResult { downloaded })
 }
 
+#[derive(serde::Serialize)]
+pub struct DemoMapStatus {
+    /// True if we fetched the pk3 this call; false if the map was already
+    /// installed.
+    pub downloaded: bool,
+    /// The map we checked for (echoed back so the UI can name it).
+    pub map_name: String,
+}
+
+/// Make sure the map a demo needs is installed before the embedded player
+/// loads it, mirroring what the Maps tab does: check the engine's game dirs
+/// (baseq3 + defrag) and, if the map is missing, download its pk3 into
+/// baseq3. Unlike `run_map_offline` the caller only has the MAP name (parsed
+/// from the demo filename), not the pk3, so we resolve it through the
+/// website's `/maps/download/<name>` route, which looks the map up by name and
+/// 302s to the canonical pk3 on dl.defrag.racing - following the redirect
+/// hands us the real pk3 filename to save under.
+///
+/// Errors (map not found on the site, network failure, write failure) bubble
+/// up as a `String` so the frontend can show a "couldn't fetch the map -
+/// install it manually / contact an admin" prompt instead of launching into a
+/// broken demo.
+#[tauri::command]
+pub async fn ensure_demo_map(map_name: String) -> Result<DemoMapStatus, String> {
+    let map_name = map_name.trim().to_string();
+    if map_name.is_empty() {
+        return Err("Could not determine which map this demo needs.".to_string());
+    }
+
+    let cfg = Config::load().map_err(err_to_string)?;
+    let engine = cfg
+        .engine_path
+        .clone()
+        .ok_or_else(|| "No engine configured - pick one in Settings first.".to_string())?;
+
+    // Already installed? Reuse the offline-maps scan (cached manifest) so we
+    // don't re-open every pk3; it covers both baseq3 and defrag. Runs on the
+    // blocking pool because a cold scan touches the disk hard.
+    let installed = {
+        let engine = engine.clone();
+        let want = map_name.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::offline_maps::list(&engine)
+                .map(|maps| maps.iter().any(|m| m.name.eq_ignore_ascii_case(&want)))
+        })
+        .await
+        .map_err(err_to_string)?
+        .map_err(err_to_string)?
+    };
+    if installed {
+        return Ok(DemoMapStatus { downloaded: false, map_name });
+    }
+
+    let baseq3 = engine
+        .parent()
+        .ok_or_else(|| "Engine path has no parent directory.".to_string())?
+        .join("baseq3");
+
+    // Resolve + fetch by map name. reqwest follows the 302 to the pk3; a map
+    // the site doesn't know 404s here and surfaces as an error.
+    let url = format!("https://defrag.racing/maps/download/{map_name}");
+    let resp = reqwest::Client::new()
+        .get(&url)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("Could not download the map '{map_name}': {e}"))?;
+
+    // The pk3 filename comes from the final (redirected) URL. Strip any path
+    // and reject traversal so a bad value can't escape baseq3.
+    let pk3_name = resp
+        .url()
+        .path_segments()
+        .and_then(|s| s.last())
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty() && !n.contains("..") && n.ends_with(".pk3"))
+        .ok_or_else(|| format!("The server didn't return a valid pk3 for '{map_name}'."))?;
+
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("Map download read failed for '{map_name}': {e}"))?;
+
+    std::fs::create_dir_all(&baseq3)
+        .map_err(|e| format!("could not create {}: {e}", baseq3.display()))?;
+    let target = baseq3.join(&pk3_name);
+    if !target.exists() {
+        // Atomic-ish: write to a temp file then rename so a half-downloaded
+        // pk3 can't be mistaken for a complete one.
+        let tmp = baseq3.join(format!("{pk3_name}.part"));
+        std::fs::write(&tmp, &bytes).map_err(|e| format!("write {}: {e}", tmp.display()))?;
+        std::fs::rename(&tmp, &target)
+            .map_err(|e| format!("rename to {}: {e}", target.display()))?;
+    }
+
+    Ok(DemoMapStatus { downloaded: true, map_name })
+}
+
 /// List the maps installed in the engine's baseq3 folder (offline Maps
 /// tab), paginated + name-filtered. The first scan opens every pk3 to read
 /// its index (heavy) and caches the result to a manifest; later calls reuse

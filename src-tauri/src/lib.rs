@@ -254,6 +254,7 @@ pub fn run() {
             commands::launch_engine,
             commands::launch_engine_args,
             commands::run_map_offline,
+            commands::ensure_demo_map,
             commands::list_offline_maps,
             commands::offline_map_thumb,
             commands::engine_demo_resolution,

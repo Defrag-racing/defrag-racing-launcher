@@ -44,8 +44,43 @@
     // Embedded player overlay: set to a demo to cover the Demos section with the
     // player; the panel's close button clears it.
     const playerTarget = ref<PlayTarget | null>(null);
-    const playDemo = (d: DemoLibraryEntry) => {
+
+    // Before the embedded player loads a demo we make sure the map it needs is
+    // installed - same idea as the Maps tab: check the engine's game dirs and
+    // download the pk3 if it's missing, otherwise the demo plays into a black
+    // "CLIENT/SERVER GAME MISMATCH" / wrong-map screen. `preparingMap` drives a
+    // small "Preparing map..." overlay; `mapError` opens a popup telling the
+    // user to grab the map manually when the auto-download fails.
+    const preparingMap = ref<string | null>(null);
+    const mapError = ref<{ map: string; detail: string } | null>(null);
+
+    /** Ensure every map in `names` is installed (downloading missing pk3s).
+     *  Resolves true on success; on failure sets `mapError` and resolves
+     *  false so the caller skips opening the player. */
+    const ensureMaps = async (names: string[]): Promise<boolean> => {
+        const wanted = [...new Set(names.filter((n): n is string => !!n))];
+        if (wanted.length === 0) return true; // unknown map name -> let the engine try
+        preparingMap.value = wanted.join(', ');
+        try {
+            for (const name of wanted) {
+                await tauri.ensureDemoMap(name);
+            }
+            return true;
+        } catch (e) {
+            mapError.value = {
+                map: wanted.join(', '),
+                detail: e instanceof Error ? e.message : String(e),
+            };
+            return false;
+        } finally {
+            preparingMap.value = null;
+        }
+    };
+
+    const playDemo = async (d: DemoLibraryEntry) => {
         compareTarget.value = null;
+        const map = mapNameFromFilename(d.filename);
+        if (!(await ensureMaps(map ? [map] : []))) return;
         playerTarget.value = { path: d.path, name: d.filename };
     };
 
@@ -80,8 +115,12 @@
         else if (compareSel.value.length < MAX_COMPARE) compareSel.value.push(d);
     };
     // Launch the comparison with the picked demos.
-    const launchCompare = () => {
+    const launchCompare = async () => {
         if (compareSel.value.length < 2) return;
+        const names = compareSel.value
+            .map((d) => mapNameFromFilename(d.filename))
+            .filter((n): n is string => !!n);
+        if (!(await ensureMaps(names))) return;
         playerTarget.value = null;
         compareTarget.value = {
             demos: compareSel.value.map((d) => ({ path: d.path, name: d.filename })),
@@ -806,6 +845,56 @@
                 :compare="compareTarget"
                 @close="playerTarget = null; compareTarget = null"
             />
+        </div>
+
+        <!-- Preparing the map (download/check) before the player opens. -->
+        <div
+            v-if="preparingMap"
+            class="absolute inset-0 z-40 bg-neutral-950/80 flex flex-col items-center justify-center gap-3"
+        >
+            <svg class="w-7 h-7 animate-spin text-emerald-400" viewBox="0 0 24 24" fill="none">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            <div class="text-sm text-neutral-300">
+                Preparing map <span class="font-semibold text-white">{{ preparingMap }}</span>…
+            </div>
+            <div class="text-xs text-neutral-500">Downloading it now if you don't have it yet.</div>
+        </div>
+
+        <!-- Map download failed: tell the user how to recover. -->
+        <div
+            v-if="mapError"
+            class="absolute inset-0 z-40 bg-neutral-950/80 flex items-center justify-center p-6"
+            @click.self="mapError = null"
+        >
+            <div class="max-w-md w-full rounded-lg border border-red-500/30 bg-neutral-900 p-5 shadow-xl">
+                <div class="flex items-start gap-3">
+                    <svg class="w-6 h-6 text-red-400 flex-shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                    </svg>
+                    <div class="min-w-0">
+                        <h3 class="font-semibold text-white">Couldn't download the map</h3>
+                        <p class="text-sm text-neutral-300 mt-1">
+                            We couldn't fetch
+                            <span class="font-semibold text-white">{{ mapError.map }}</span>
+                            automatically, so the demo can't play yet. Install the map
+                            manually (Maps tab or defrag.racing), then try again. If it
+                            still fails, the map may be missing from the server - please
+                            contact an admin.
+                        </p>
+                        <p class="text-xs text-neutral-500 mt-2 break-words">{{ mapError.detail }}</p>
+                    </div>
+                </div>
+                <div class="mt-4 flex justify-end">
+                    <button
+                        class="px-3 py-1.5 rounded bg-neutral-700 hover:bg-neutral-600 text-sm"
+                        @click="mapError = null"
+                    >
+                        Close
+                    </button>
+                </div>
+            </div>
         </div>
 
         <!-- top bar: auto-backup status + controls + folder chip -->

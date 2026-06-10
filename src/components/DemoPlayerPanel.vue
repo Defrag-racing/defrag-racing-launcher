@@ -43,10 +43,13 @@
     // is the anchor (offset 0); panes 1+ are nudged against it.
     const offsets = ref<number[]>([]);
 
-    // Per-pane audio mute. With several demos playing at once their sound would
-    // overlap into noise, so by default only demo A is audible and the rest
-    // start muted; each can be toggled. Quake's master volume is s_volume.
+    // Per-pane audio: a master volume (0..1) plus a mute toggle. Quake's master
+    // volume is s_volume; we send `s_volume <v>` per pane (0 when muted). The
+    // single viewer has one slider+mute; in a comparison every demo gets its own
+    // so you can balance them. By default only demo A is audible (the extra
+    // demos start muted) so several runs don't pile into noise.
     const DEFAULT_VOL = 0.8;
+    const volume = ref<number[]>([]);
     const muted = ref<boolean[]>([]);
 
     const blankTimer = (): PaneTimer => ({ posMs: 0, lenMs: 0, posSec: 0, lenSec: 0, measured: false, atEnd: false });
@@ -54,20 +57,35 @@
         const n = paneCount.value;
         paneTimers.value = Array.from({ length: n }, blankTimer);
         offsets.value = Array.from({ length: n }, () => 0);
+        volume.value = Array.from({ length: n }, () => DEFAULT_VOL);
         // Default: demo A audible, the rest muted (avoids overlapping audio).
         muted.value = Array.from({ length: n }, (_, i) => isCompare.value && i > 0);
     };
 
-    // Push every pane's current mute state to its engine (after start).
-    const applyMutes = () => {
-        muted.value.forEach((m, i) => {
-            tauri.demoPlayerPaneCommand(i, `s_volume ${m ? 0 : DEFAULT_VOL}`).catch(() => {});
-        });
+    // The effective volume for a pane (0 while muted), clamped to Quake's 0..1.
+    const effVol = (i: number) => (muted.value[i] ? 0 : Math.min(1, Math.max(0, volume.value[i] ?? DEFAULT_VOL)));
+    // Push one pane's current volume to its engine.
+    const applyVol = (i: number) => {
+        tauri.demoPlayerPaneCommand(i, `s_volume ${effVol(i)}`).catch(() => {});
+    };
+    // Push every pane's audio state to its engine (after start).
+    const applyAudio = () => {
+        muted.value.forEach((_, i) => applyVol(i));
     };
     const toggleMute = (i: number) => {
         if (i < 0 || i >= muted.value.length) return;
         muted.value[i] = !muted.value[i];
-        tauri.demoPlayerPaneCommand(i, `s_volume ${muted.value[i] ? 0 : DEFAULT_VOL}`).catch(() => {});
+        applyVol(i);
+    };
+    // Slider moved: set the volume and, since the user is asking for sound,
+    // auto-unmute (dragging a muted slider up should be audible).
+    const onVolInput = (i: number, e: Event) => {
+        if (i < 0 || i >= volume.value.length) return;
+        const v = parseFloat((e.target as HTMLInputElement).value);
+        if (Number.isNaN(v)) return;
+        volume.value[i] = v;
+        if (v > 0) muted.value[i] = false;
+        applyVol(i);
     };
 
     // The embedded player runs on Windows and Linux (X11 / XWayland). On Linux,
@@ -221,6 +239,9 @@
             if (!region) throw new Error('Render area not ready');
             await tauri.demoPlayerStart(target.path, region, lastAspect);
             playing.value = true;
+            // Apply the single pane's volume/mute once the engine is up; the
+            // control channel buffers it until the engine connects.
+            applyAudio();
         } catch (e: any) {
             playError.value = e?.toString?.() ?? 'Failed to start playback';
             playing.value = false;
@@ -248,9 +269,9 @@
             if (!region) throw new Error('Render area not ready');
             await tauri.demoPlayerCompareStart(c.demos.map((d) => d.path), region, lastAspect);
             playing.value = true;
-            // Apply the default mute layout (only A audible) once the engines
+            // Apply the default audio layout (only A audible) once the engines
             // are up; the control channel buffers these until each connects.
-            applyMutes();
+            applyAudio();
         } catch (e: any) {
             playError.value = e?.toString?.() ?? 'Failed to start comparison';
             playing.value = false;
@@ -792,6 +813,13 @@
                             :title="(muted[i] ?? false) ? `Unmute demo ${paneLetter(i)}` : `Mute demo ${paneLetter(i)}`"
                             @click="toggleMute(i)"
                         >{{ (muted[i] ?? false) ? '🔇' : '🔊' }}</button>
+                        <input
+                            type="range" min="0" max="1" step="0.05"
+                            class="vol vol-sm flex-shrink-0"
+                            :value="effVol(i)"
+                            :title="`Volume - demo ${paneLetter(i)}`"
+                            @input="onVolInput(i, $event)"
+                        />
                         <span class="truncate" :class="paneColor(i)" :title="d.name">
                             <span class="opacity-60">{{ paneLetter(i) }}</span> {{ formatDemoName(d.name) }}
                         </span>
@@ -888,6 +916,23 @@
                     title="Pause"
                     @click="doPause"
                 >⏸ Pause</button>
+                <!-- Single viewer audio: mute toggle + volume slider (comparison
+                     panes get their own controls in the header instead). -->
+                <span v-if="!compare" class="flex items-center gap-1 flex-shrink-0">
+                    <button
+                        class="px-1.5 py-1 rounded text-sm bg-white/5 hover:bg-white/10"
+                        :class="(muted[0] ?? false) ? 'opacity-50' : ''"
+                        :title="(muted[0] ?? false) ? 'Unmute' : 'Mute'"
+                        @click="toggleMute(0)"
+                    >{{ (muted[0] ?? false) ? '🔇' : '🔊' }}</button>
+                    <input
+                        type="range" min="0" max="1" step="0.05"
+                        class="vol"
+                        :value="effVol(0)"
+                        title="Volume"
+                        @input="onVolInput(0, $event)"
+                    />
+                </span>
                 <span class="w-px h-5 bg-white/10 mx-0.5"></span>
                 <input
                     type="range"
@@ -1014,6 +1059,40 @@
     }
     .nudge-reset:hover {
         background: rgb(244 63 94 / 0.26);
+    }
+
+    /* Volume slider: a slim version of the scrub bar. Default width suits the
+       single viewer; .vol-sm narrows it for the per-demo controls in the
+       comparison header. */
+    .vol {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 72px;
+        height: 4px;
+        border-radius: 9999px;
+        background: rgb(255 255 255 / 0.18);
+        cursor: pointer;
+        outline: none;
+    }
+    .vol.vol-sm {
+        width: 48px;
+    }
+    .vol::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 12px;
+        height: 12px;
+        border-radius: 9999px;
+        background: rgb(229 229 229);
+        cursor: pointer;
+    }
+    .vol::-moz-range-thumb {
+        width: 12px;
+        height: 12px;
+        border: none;
+        border-radius: 9999px;
+        background: rgb(229 229 229);
+        cursor: pointer;
     }
 
     /* Custom scrub bar: a rounded track (its fill colour is set inline so it can

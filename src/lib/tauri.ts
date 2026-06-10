@@ -168,6 +168,12 @@ export const tauri = {
      *  the original pk3 filename), then launch `+vq3`/`+cpm <map>`. */
     runMapOffline: (mapName: string, physics: 'vq3' | 'cpm', pk3: string | null) =>
         invoke<MapRunResult>('run_map_offline', { mapName, physics, pk3 }),
+    /** Make sure the map a demo needs is installed before the embedded player
+     *  loads it: checks the engine's game dirs and downloads the pk3 into
+     *  baseq3 if missing. Rejects (with a user-facing message) if the map
+     *  can't be found/fetched, so the caller can prompt for a manual install. */
+    ensureDemoMap: (mapName: string) =>
+        invoke<DemoMapStatus>('ensure_demo_map', { mapName }),
     /** List maps installed in the engine's baseq3 folder, paginated +
      *  name-filtered. The first call scans every pk3 once (cached to a
      *  manifest); later calls are cheap. Only a page is returned so the UI
@@ -511,6 +517,14 @@ export interface MapRow {
 export interface MapRunResult {
     /** True if the pk3 was downloaded this run, false if already present. */
     downloaded: boolean;
+}
+
+export interface DemoMapStatus {
+    /** True if the map's pk3 was downloaded this call, false if already
+     *  installed. */
+    downloaded: boolean;
+    /** The map that was checked for. */
+    map_name: string;
 }
 
 /** A map installed locally in the engine's baseq3 folder (offline tab). */
