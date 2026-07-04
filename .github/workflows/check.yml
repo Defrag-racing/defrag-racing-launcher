@@ -49,8 +49,10 @@ jobs:
       - run: cargo check --manifest-path src-tauri/Cargo.toml
 
   windows-nsis-preview:
-    # Main pushes only — PR builds skip the ~12-minute Windows compile.
-    if: github.event_name == 'push'
+    # The workflow is manual-only (workflow_dispatch) - the old push guard
+    # dated from the on-every-push era and silently skipped this job on every
+    # dispatch, so "run check.yml for a Windows preview exe" produced nothing.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

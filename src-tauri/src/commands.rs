@@ -281,31 +281,50 @@ pub fn reset_launcher(state: State<'_, AppState>) -> Result<(), String> {
 ///      trigger the rescan they just asked for. No-op when the
 ///      watcher isn't running - the next Start will rescan anyway.
 #[tauri::command]
-pub fn clear_upload_cache(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn clear_upload_cache(state: State<'_, AppState>) -> Result<(), String> {
     // Blank upload statuses but KEEP the hashes (load + reset + save). The
     // old code deleted uploaded.json outright, which left list_demos with no
     // hash for any file - and the Demos render buttons + YouTube links both
     // key off the hash, so they all went dead after a Force re-check. A
     // blanked status still forces a full re-hash + server re-verify on the
     // next rescan (see UploadCache::get_if_fresh).
-    {
+    //
+    // async + spawn_blocking: this used to be a sync command, which Tauri runs
+    // on the MAIN thread - the cache load/save and Config::load are disk I/O,
+    // and Config::load was even done while holding the `state.watcher` mutex.
+    // A slow disk froze the whole UI (and anything else waiting on that
+    // mutex). Now the I/O runs on the blocking pool and the mutex is held
+    // only around the two channel sends.
+    tokio::task::spawn_blocking(|| {
         let mut cache = UploadCache::load();
         cache.reset_statuses();
         let _ = cache.save();
-    }
-    let _ = watcher::UploadState::clear_persisted();
+        let _ = watcher::UploadState::clear_persisted();
+    })
+    .await
+    .map_err(err_to_string)?;
     state.upload_state.clear_items();
+    let cfg = tokio::task::spawn_blocking(Config::load)
+        .await
+        .map_err(err_to_string)?
+        .map_err(err_to_string)?;
     if let Some(h) = state.watcher.lock().unwrap().as_ref() {
         // The running worker has its own in-memory cache; reset it too (and
         // BEFORE the rescan) so the rescan re-verifies instead of replaying
         // stale hits and saving the old statuses back over our reset.
         let _ = h.tx.send(watcher::Message::ResetCacheStatuses);
-        let cfg = Config::load().map_err(err_to_string)?;
         if let Some(demos) = cfg.demos_path {
-            let _ = h.tx.send(watcher::Message::RescanFolder {
-                folder: demos,
-                recursive: cfg.include_subfolders,
-            });
+            // Coalesced: if a rescan is already queued (periodic pump, or the
+            // user hammering Force re-check), don't stack another full
+            // re-hash pass behind it - that pile-up is what buried the
+            // machine when Force re-check and Check & repair were clicked
+            // in quick succession.
+            if h.state.try_queue_rescan() {
+                let _ = h.tx.send(watcher::Message::RescanFolder {
+                    folder: demos,
+                    recursive: cfg.include_subfolders,
+                });
+            }
         }
     }
     Ok(())
@@ -1020,19 +1039,26 @@ pub async fn ensure_demo_map(app: AppHandle, demo: String, map_name: String) -> 
         .clone()
         .ok_or_else(|| "No engine configured - pick one in Settings first.".to_string())?;
 
-    // Where does THIS demo's content live? Derive the install base from the demo
-    // path (that's exactly what the player uses for fs_basepath); fall back to
-    // the engine's folder if the demo isn't in a recognisable layout. Then add
-    // the engine home path (~/.q3a on Linux) - the engine searches both, and on
-    // Linux all the pk3s/maps actually live under the home path, not the engine
-    // dir. Dedup so the common case (they coincide) is a single root.
+    // Where does THIS demo's content live? Mirror the search roots the player
+    // actually passes to the engine (see demo_player::spawn_pane), otherwise we
+    // can report a map "installed" in a folder the engine never looks at.
+    //   - derived-from-demo root (fs_basepath on Windows, fs_steampath on Linux)
+    //   - Linux: the engine install (fs_basepath) and the launcher's private
+    //     sandbox home (fs_homepath - where we download maps to).
     let basepath = crate::demo_player::derive_demo_launch(std::path::Path::new(&demo))
         .map(|(b, _, _)| b)
         .unwrap_or_else(|_| engine.parent().map(|p| p.to_path_buf()).unwrap_or_default());
     let mut roots: Vec<PathBuf> = vec![basepath.clone()];
-    if let Some(h) = crate::demo_player::engine_home_dir() {
-        if !roots.contains(&h) {
-            roots.push(h);
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(install) = engine.parent().map(|p| p.to_path_buf()) {
+            if !roots.contains(&install) {
+                roots.push(install);
+            }
+        }
+        let sandbox = crate::demo_player::sandbox_home_dir(&app)?;
+        if !roots.contains(&sandbox) {
+            roots.push(sandbox);
         }
     }
 
@@ -1062,8 +1088,12 @@ pub async fn ensure_demo_map(app: AppHandle, demo: String, map_name: String) -> 
     }
 
     // Download into a baseq3 the engine both searches AND can write to. On Linux
-    // that's the home path (~/.q3a/baseq3) - the engine dir is often read-only
-    // and isn't where content lives; on Windows the home path == install base.
+    // that's the launcher's sandbox home (fs_homepath of every embedded run, so
+    // it is always in the engine's search path and never read-only); on Windows
+    // the home path == install base derived from the demo.
+    #[cfg(target_os = "linux")]
+    let dl_base = crate::demo_player::sandbox_home_dir(&app)?;
+    #[cfg(not(target_os = "linux"))]
     let dl_base = crate::demo_player::engine_home_dir().unwrap_or_else(|| basepath.clone());
     let baseq3 = dl_base.join("baseq3");
 

@@ -225,9 +225,34 @@ pub struct UploadState {
     /// queue eviction. Errors are deliberately NOT recorded so a rescan
     /// still retries them. Cleared on watcher::start.
     handled: Mutex<HashSet<PathBuf>>,
+    /// True while a RescanFolder message is sitting in the worker's channel
+    /// waiting to be picked up. Every enqueue site checks this first
+    /// (`try_queue_rescan`), so a Force re-check spammed while a rescan is
+    /// already queued - or racing the periodic rescan pump - can't stack
+    /// multiple full-library re-hash passes behind each other (each pass
+    /// re-hashes every demo; on a laptop several queued passes read as a
+    /// frozen machine). Cleared by the worker the moment it dequeues the
+    /// message, so a rescan requested DURING a running scan still queues
+    /// one follow-up pass (the running scan may have missed the change).
+    rescan_queued: AtomicBool,
 }
 
 impl UploadState {
+    /// Rescan coalescing gate: returns true when the caller should actually
+    /// send a `Message::RescanFolder` (none is queued yet), false when one is
+    /// already waiting in the channel and sending another would only stack
+    /// redundant full-folder re-hash passes.
+    pub fn try_queue_rescan(&self) -> bool {
+        !self.rescan_queued.swap(true, Ordering::AcqRel)
+    }
+
+    /// Counterpart of `try_queue_rescan`, called by the worker as soon as it
+    /// dequeues a RescanFolder - from that point a new request may enqueue
+    /// again (the now-running scan can miss changes that happen mid-walk).
+    fn rescan_dequeued(&self) {
+        self.rescan_queued.store(false, Ordering::Release);
+    }
+
     pub fn snapshot(&self) -> UploadStateSnapshot {
         UploadStateSnapshot {
             items: self.inner.lock().unwrap().clone(),
@@ -666,10 +691,12 @@ pub fn start(
     // Kick off a rescan on start so demos created while the launcher was
     // closed still get uploaded. The Message variant carries the recursive
     // flag so the worker uses the same setting as the watcher.
-    let _ = tx.send(Message::RescanFolder {
-        folder: demos_path.clone(),
-        recursive: include_subfolders,
-    });
+    if state.try_queue_rescan() {
+        let _ = tx.send(Message::RescanFolder {
+            folder: demos_path.clone(),
+            recursive: include_subfolders,
+        });
+    }
     // Then redrive anything restored from queue.json still in Pending. The
     // rescan walks disk paths; a persisted Pending row keyed by a slightly
     // different (e.g. normalised) path can be missed by it and otherwise
@@ -731,6 +758,7 @@ pub fn start(
     // hit early-return), so a redundant rescan is cheap.
     let tx_rescan = tx.clone();
     let demos_for_rescan = demos_path.clone();
+    let state_rescan = state.clone();
     let rescan_pump = tauri::async_runtime::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(PERIODIC_RESCAN_SECS));
         // Skip the immediate-fire of the first tick - watcher::start
@@ -738,6 +766,11 @@ pub fn start(
         tick.tick().await;
         loop {
             tick.tick().await;
+            // Coalesce with any rescan already waiting (e.g. a user Force
+            // re-check) - stacking another full pass helps nobody.
+            if !state_rescan.try_queue_rescan() {
+                continue;
+            }
             if tx_rescan
                 .send(Message::RescanFolder {
                     folder: demos_for_rescan.clone(),
@@ -858,6 +891,10 @@ async fn worker_loop(
                 let _ = cache.save();
             }
             Message::RescanFolder { folder, recursive } => {
+                // Reopen the coalescing gate first: from here on a NEW rescan
+                // request must queue again, because this walk can miss files
+                // that appear while it is already past their directory.
+                state.rescan_dequeued();
                 // Two scan modes by user choice. Recursive uses walkdir
                 // (already a dep) with follow_links off so a stray symlink
                 // can't loop. is_in_temp_subfolder filters out Quake's

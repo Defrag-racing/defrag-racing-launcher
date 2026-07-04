@@ -220,6 +220,23 @@ pub(crate) fn engine_home_dir() -> Option<std::path::PathBuf> {
     None
 }
 
+/// Launcher-private engine home for embedded playback on Linux (passed as
+/// fs_homepath). Everything the engine writes - configs, screenshots - lands
+/// here instead of the user's real ~/.q3a, so demo playback can never corrupt
+/// their game setup. Created on demand; survives between runs so the seeded
+/// config and any downloaded maps persist.
+#[cfg(target_os = "linux")]
+pub(crate) fn sandbox_home_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Could not resolve the app data dir: {e}"))?
+        .join("demo-player-home");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Could not create the demo player home dir: {e}"))?;
+    Ok(dir)
+}
+
 // ---- native stage window ---------------------------------------------------
 //
 // The stage is an OWNED top-level WS_POPUP window (not a child) placed over the
@@ -902,9 +919,7 @@ fn spawn_pane(
         .arg("+set")
         .arg("in_blockWinKey")
         .arg("0")
-        .arg("+set")
-        .arg("fs_basepath")
-        .arg(basepath.to_string_lossy().to_string());
+        ;
 
     // Config isolation: the bundled engine is patched so that in embedded mode
     // (in_embedParent set) it reads AND writes `defrag.launcher.cfg` instead of
@@ -913,23 +928,15 @@ fn spawn_pane(
     // injected in_nograb / con_notifytime / com_maxfps, ...) lands in
     // defrag.launcher.cfg and never touches q3config.cfg.
     //
-    // We deliberately do NOT override fs_homepath. The engine keeps its default
-    // home path (e.g. ~/.q3a on Linux) and we only point fs_basepath at the
-    // install, so the VFS searches BOTH locations for the defrag mod's pak files
-    // and cgame. Forcing fs_homepath=basepath used to hide a Linux install whose
-    // defrag content lives under the default home path, which made the engine
-    // fall back to baseq3's cgame (CLIENT/SERVER GAME MISMATCH BASEQ3/DEFRAG +
-    // the vanilla CD-key screen).
-    //
-    // The user's real q3config.cfg can live under either root: the install
-    // (basepath - Windows keeps everything there) or the engine home path
-    // (~/.q3a on Linux - where Linux keeps everything). So we look for it in the
-    // <game> dir first, then baseq3, across BOTH roots, and copy it to
-    // defrag.launcher.cfg in every <game> dir the engine might read it from.
-    // That way wherever the home path resolves at runtime, the engine finds our
-    // seeded config instead of writing a fresh stock one. (Re-seeding each
-    // launch keeps it current.)
+    // WINDOWS: everything (install, configs, demos) lives under one root, so
+    // fs_basepath=<derived from demo> is the whole story. We deliberately do NOT
+    // override fs_homepath - the bundled Windows build treats the base path as
+    // its home. The engine patch alone is enough isolation there (verified).
+    #[cfg(not(target_os = "linux"))]
     {
+        cmd.arg("+set")
+            .arg("fs_basepath")
+            .arg(basepath.to_string_lossy().to_string());
         let roots: Vec<std::path::PathBuf> =
             std::iter::once(basepath.clone()).chain(engine_home_dir()).collect();
         let src = roots.iter().find_map(|r| {
@@ -947,6 +954,64 @@ fn spawn_pane(
                 let _ = std::fs::create_dir_all(&game_dir);
                 let _ = std::fs::copy(&src, game_dir.join("defrag.launcher.cfg"));
             }
+        }
+    }
+
+    // LINUX: the engine has TWO content roots - the install (pak0-8, often
+    // read-only, e.g. /usr/share/quake3) and the user home path (~/.q3a: configs,
+    // downloaded pk3s, demos). Deriving fs_basepath from the demo path alone
+    // (the old behaviour) broke both roots' assumptions:
+    //   - demo under ~/.q3a  -> basepath=~/.q3a, install invisible, no pak0.pk3,
+    //     engine renders nothing (the "black window" report), and
+    //   - the engine kept ~/.q3a as its writable home, so ANY config write that
+    //     slipped past the defrag.launcher.cfg patch landed in the user's REAL
+    //     q3config.cfg (the "it still saves to my real config" report).
+    // So on Linux we pin all three search roots explicitly:
+    //   fs_basepath  = the engine install (from Settings; assets like pak0-8)
+    //   fs_steampath = the root derived from the demo path (usually ~/.q3a) so
+    //                  the demo file itself and the user's mod pk3s stay visible
+    //   fs_homepath  = a launcher-private sandbox dir. The engine writes ALL its
+    //                  files (configs, screenshots) there, so the user's real
+    //                  ~/.q3a can never be touched - hard isolation that holds
+    //                  even if the engine-side config patch misbehaves.
+    // The user's real q3config.cfg is seeded into the sandbox (as both
+    // defrag.launcher.cfg and q3config.cfg, covering patched and unpatched
+    // engines) so demos still play with their settings. Re-seeded every launch.
+    #[cfg(target_os = "linux")]
+    {
+        let install: Option<std::path::PathBuf> = crate::config::Config::load()
+            .ok()
+            .and_then(|c| c.engine_path)
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()));
+        let fs_base = install.unwrap_or_else(|| basepath.clone());
+        cmd.arg("+set")
+            .arg("fs_basepath")
+            .arg(fs_base.to_string_lossy().to_string());
+        if basepath != fs_base {
+            cmd.arg("+set")
+                .arg("fs_steampath")
+                .arg(basepath.to_string_lossy().to_string());
+        }
+        let sandbox = sandbox_home_dir(app)?;
+        cmd.arg("+set")
+            .arg("fs_homepath")
+            .arg(sandbox.to_string_lossy().to_string());
+
+        // Seed the sandbox config from the user's real one. Search the usual
+        // suspects in priority order: the demo's own root, ~/.q3a, the install.
+        let mut src_roots: Vec<std::path::PathBuf> = vec![basepath.clone()];
+        src_roots.extend(engine_home_dir());
+        src_roots.push(fs_base.clone());
+        let src = src_roots.iter().find_map(|r| {
+            [r.join(&fs_game).join("q3config.cfg"), r.join("baseq3").join("q3config.cfg")]
+                .into_iter()
+                .find(|p| p.exists())
+        });
+        if let Some(src) = src {
+            let game_dir = sandbox.join(&fs_game);
+            let _ = std::fs::create_dir_all(&game_dir);
+            let _ = std::fs::copy(&src, game_dir.join("defrag.launcher.cfg"));
+            let _ = std::fs::copy(&src, game_dir.join("q3config.cfg"));
         }
     }
     cmd.arg("+set")
