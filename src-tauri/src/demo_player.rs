@@ -977,8 +977,17 @@ fn spawn_pane(
     // The user's real q3config.cfg is seeded into the sandbox (as both
     // defrag.launcher.cfg and q3config.cfg, covering patched and unpatched
     // engines) so demos still play with their settings. Re-seeded every launch.
+    // The demo itself is COPIED into the sandbox (see below), so the third
+    // root slot (fs_steampath) is free to always carry ~/.q3a - Krishna's
+    // first re-test hit the vanilla CD-key screen precisely because his
+    // defrag vms live in ~/.q3a/defrag and the demo-derived root didn't
+    // include it. With the copy, demos play from ANY folder on disk and the
+    // search path is always the same complete trio.
     #[cfg(target_os = "linux")]
-    {
+    let demo_arg = {
+        // The derived demo_arg is only meaningful for the path-based layout the
+        // non-Linux branch uses; here it is replaced by the sandbox copy's path.
+        let _ = &demo_arg;
         let install: Option<std::path::PathBuf> = crate::config::Config::load()
             .ok()
             .and_then(|c| c.engine_path)
@@ -987,20 +996,33 @@ fn spawn_pane(
         cmd.arg("+set")
             .arg("fs_basepath")
             .arg(fs_base.to_string_lossy().to_string());
-        if basepath != fs_base {
+        if let Some(q3a) = engine_home_dir().filter(|h| *h != fs_base && h.is_dir()) {
             cmd.arg("+set")
                 .arg("fs_steampath")
-                .arg(basepath.to_string_lossy().to_string());
+                .arg(q3a.to_string_lossy().to_string());
         }
         let sandbox = sandbox_home_dir(app)?;
         cmd.arg("+set")
             .arg("fs_homepath")
             .arg(sandbox.to_string_lossy().to_string());
 
+        // Copy the demo into the sandbox, one subfolder per pane so a compare
+        // of two same-named demos can't collide. Wiped before each copy so old
+        // demos don't accumulate.
+        let pane_demos = sandbox.join(&fs_game).join("demos").join(format!("pane{index}"));
+        let _ = std::fs::remove_dir_all(&pane_demos);
+        std::fs::create_dir_all(&pane_demos)
+            .map_err(|e| format!("Could not create the sandbox demos dir: {e}"))?;
+        let file_name = std::path::Path::new(demo_abs)
+            .file_name()
+            .ok_or_else(|| "Could not resolve the demo file name.".to_string())?;
+        std::fs::copy(demo_abs, pane_demos.join(file_name))
+            .map_err(|e| format!("Could not copy the demo into the sandbox: {e}"))?;
+
         // Seed the sandbox config from the user's real one. Search the usual
-        // suspects in priority order: the demo's own root, ~/.q3a, the install.
-        let mut src_roots: Vec<std::path::PathBuf> = vec![basepath.clone()];
-        src_roots.extend(engine_home_dir());
+        // suspects in priority order: ~/.q3a, the demo's own root, the install.
+        let mut src_roots: Vec<std::path::PathBuf> = engine_home_dir().into_iter().collect();
+        src_roots.push(basepath.clone());
         src_roots.push(fs_base.clone());
         let src = src_roots.iter().find_map(|r| {
             [r.join(&fs_game).join("q3config.cfg"), r.join("baseq3").join("q3config.cfg")]
@@ -1013,7 +1035,9 @@ fn spawn_pane(
             let _ = std::fs::copy(&src, game_dir.join("defrag.launcher.cfg"));
             let _ = std::fs::copy(&src, game_dir.join("q3config.cfg"));
         }
-    }
+
+        format!("pane{index}/{}", file_name.to_string_lossy())
+    };
     cmd.arg("+set")
         .arg("fs_game")
         .arg(&fs_game)

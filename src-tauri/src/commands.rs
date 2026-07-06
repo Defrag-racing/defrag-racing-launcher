@@ -1016,7 +1016,13 @@ pub struct MapProgress {
 /// install it manually / contact an admin" prompt instead of launching into a
 /// broken demo.
 #[tauri::command]
-pub async fn ensure_demo_map(app: AppHandle, demo: String, map_name: String) -> Result<DemoMapStatus, String> {
+pub async fn ensure_demo_map(
+    app: AppHandle,
+    // Used on non-Linux to derive the demo's own install root; the Linux
+    // player copies the demo into the sandbox and uses fixed roots instead.
+    #[cfg_attr(target_os = "linux", allow(unused_variables))] demo: String,
+    map_name: String,
+) -> Result<DemoMapStatus, String> {
     use std::io::Write;
     use std::path::PathBuf;
     use tauri::Emitter;
@@ -1045,22 +1051,30 @@ pub async fn ensure_demo_map(app: AppHandle, demo: String, map_name: String) -> 
     //   - derived-from-demo root (fs_basepath on Windows, fs_steampath on Linux)
     //   - Linux: the engine install (fs_basepath) and the launcher's private
     //     sandbox home (fs_homepath - where we download maps to).
+    #[cfg(not(target_os = "linux"))]
     let basepath = crate::demo_player::derive_demo_launch(std::path::Path::new(&demo))
         .map(|(b, _, _)| b)
         .unwrap_or_else(|_| engine.parent().map(|p| p.to_path_buf()).unwrap_or_default());
-    let mut roots: Vec<PathBuf> = vec![basepath.clone()];
+    #[cfg(not(target_os = "linux"))]
+    let roots: Vec<PathBuf> = vec![basepath.clone()];
+    // Linux: the player pins fs_basepath=<install>, fs_steampath=~/.q3a,
+    // fs_homepath=<sandbox> (the demo itself is copied into the sandbox), so
+    // check exactly those three - a pk3 anywhere else is invisible to it.
     #[cfg(target_os = "linux")]
-    {
-        if let Some(install) = engine.parent().map(|p| p.to_path_buf()) {
-            if !roots.contains(&install) {
-                roots.push(install);
+    let roots: Vec<PathBuf> = {
+        let mut roots: Vec<PathBuf> =
+            engine.parent().map(|p| p.to_path_buf()).into_iter().collect();
+        if let Some(h) = crate::demo_player::engine_home_dir() {
+            if !roots.contains(&h) {
+                roots.push(h);
             }
         }
         let sandbox = crate::demo_player::sandbox_home_dir(&app)?;
         if !roots.contains(&sandbox) {
             roots.push(sandbox);
         }
-    }
+        roots
+    };
 
     // Already installed? Reuse the offline-maps scan (cached manifest) so we
     // don't re-open every pk3; it covers both baseq3 and defrag under each root.
