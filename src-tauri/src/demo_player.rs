@@ -368,6 +368,21 @@ mod stage {
         let mut g = DISPLAY.lock().unwrap();
         if *g == 0 {
             let d = unsafe { xlib::XOpenDisplay(std::ptr::null()) };
+            if !d.is_null() {
+                // Xlib's default error handler EXITS the process. Any window we
+                // touch here can race the engine tearing its window down (e.g.
+                // the debug dump below querying a child that just died), which
+                // must never take the launcher with it.
+                unsafe extern "C" fn ignore(
+                    _: *mut xlib::Display,
+                    _: *mut xlib::XErrorEvent,
+                ) -> std::os::raw::c_int {
+                    0
+                }
+                unsafe {
+                    xlib::XSetErrorHandler(Some(ignore));
+                }
+            }
             *g = d as usize;
         }
         *g as *mut xlib::Display
@@ -431,6 +446,7 @@ mod stage {
             xlib::XRaiseWindow(dpy, win as c_ulong);
             xlib::XSync(dpy, 0);
         }
+        clamp_children(win);
     }
 
     pub fn destroy(win: isize) {
@@ -444,6 +460,139 @@ mod stage {
         unsafe {
             xlib::XDestroyWindow(dpy, win as c_ulong);
             xlib::XSync(dpy, 0);
+        }
+    }
+
+    /// Pin the engine's reparented window to (0,0) at the stage's full size.
+    /// SDL can re-apply the window's pre-reparent SCREEN position as a
+    /// parent-relative offset after the engine embeds itself - observed on a
+    /// multi-monitor KDE Wayland setup, where the engine child sat at
+    /// rel(2400,250) (its old second-monitor coordinates), i.e. entirely
+    /// outside the stage: the demo played audibly while the pane showed only
+    /// the stage's black background. Idempotent and cheap (one query per
+    /// call), so it runs from the pane watcher thread and on reposition.
+    pub fn clamp_children(win: isize) {
+        if win == 0 {
+            return;
+        }
+        let dpy = display();
+        if dpy.is_null() {
+            return;
+        }
+        unsafe {
+            let mut sa: xlib::XWindowAttributes = std::mem::zeroed();
+            if xlib::XGetWindowAttributes(dpy, win as c_ulong, &mut sa) == 0 {
+                return;
+            }
+            let mut r: c_ulong = 0;
+            let mut p: c_ulong = 0;
+            let mut children: *mut c_ulong = std::ptr::null_mut();
+            let mut n: c_uint = 0;
+            if xlib::XQueryTree(dpy, win as c_ulong, &mut r, &mut p, &mut children, &mut n) == 0 {
+                return;
+            }
+            let mut moved = false;
+            for i in 0..n as usize {
+                let c = *children.add(i);
+                let mut ca: xlib::XWindowAttributes = std::mem::zeroed();
+                if xlib::XGetWindowAttributes(dpy, c, &mut ca) == 0 {
+                    continue;
+                }
+                if ca.x != 0 || ca.y != 0 || ca.width != sa.width || ca.height != sa.height {
+                    eprintln!(
+                        "[embed-fix] child 0x{c:x} was {}x{} at ({},{}) - pinning to 0,0 {}x{}",
+                        ca.width, ca.height, ca.x, ca.y, sa.width, sa.height
+                    );
+                    xlib::XMoveResizeWindow(dpy, c, 0, 0, sa.width as c_uint, sa.height as c_uint);
+                    moved = true;
+                }
+            }
+            if !children.is_null() {
+                xlib::XFree(children as *mut std::os::raw::c_void);
+            }
+            if moved {
+                xlib::XSync(dpy, 0);
+            }
+        }
+    }
+
+    /// One-shot stderr diagnostic for "engine plays but no picture" field
+    /// reports: dumps the stage window's subtree (the engine's reparented
+    /// window should appear inside, mapped and correctly sized) plus the
+    /// parent chain up to the X root, with geometry and map state at every
+    /// level. Runs on the main thread like every other stage helper.
+    pub fn debug_dump(win: isize, tag: &str) {
+        if win == 0 {
+            return;
+        }
+        let dpy = display();
+        if dpy.is_null() {
+            return;
+        }
+        unsafe {
+            let root = xlib::XDefaultRootWindow(dpy);
+            eprintln!("[embed-debug {tag}] stage subtree (stage 0x{win:x}):");
+            dump_rec(dpy, root, win as c_ulong, 1);
+            // Walk stage -> ... -> root so we can see the owner geometry too.
+            let mut w = win as c_ulong;
+            let mut depth = 0usize;
+            while w != root && depth < 8 {
+                let mut r: c_ulong = 0;
+                let mut parent: c_ulong = 0;
+                let mut children: *mut c_ulong = std::ptr::null_mut();
+                let mut n: c_uint = 0;
+                if xlib::XQueryTree(dpy, w, &mut r, &mut parent, &mut children, &mut n) == 0 {
+                    break;
+                }
+                if !children.is_null() {
+                    xlib::XFree(children as *mut std::os::raw::c_void);
+                }
+                if parent == 0 {
+                    break;
+                }
+                eprintln!("[embed-debug {tag}] parent of 0x{w:x}:");
+                dump_one(dpy, root, parent, 1);
+                w = parent;
+                depth += 1;
+            }
+        }
+    }
+
+    unsafe fn dump_one(dpy: *mut xlib::Display, root: c_ulong, w: c_ulong, indent: usize) {
+        let pad = "  ".repeat(indent);
+        let mut a: xlib::XWindowAttributes = std::mem::zeroed();
+        if xlib::XGetWindowAttributes(dpy, w, &mut a) == 0 {
+            eprintln!("{pad}0x{w:x} <not queryable>");
+            return;
+        }
+        let map = match a.map_state {
+            2 => "viewable",
+            1 => "mapped-but-unviewable",
+            _ => "unmapped",
+        };
+        let mut ax: c_int = 0;
+        let mut ay: c_int = 0;
+        let mut dummy: c_ulong = 0;
+        xlib::XTranslateCoordinates(dpy, w, root, 0, 0, &mut ax, &mut ay, &mut dummy);
+        eprintln!(
+            "{pad}0x{w:x} {}x{} rel({},{}) abs({},{}) depth{} {}",
+            a.width, a.height, a.x, a.y, ax, ay, a.depth, map
+        );
+    }
+
+    unsafe fn dump_rec(dpy: *mut xlib::Display, root: c_ulong, w: c_ulong, indent: usize) {
+        dump_one(dpy, root, w, indent);
+        let mut r: c_ulong = 0;
+        let mut parent: c_ulong = 0;
+        let mut children: *mut c_ulong = std::ptr::null_mut();
+        let mut n: c_uint = 0;
+        if xlib::XQueryTree(dpy, w, &mut r, &mut parent, &mut children, &mut n) != 0 {
+            for i in 0..n as usize {
+                dump_rec(dpy, root, *children.add(i), indent + 1);
+            }
+            if !children.is_null() {
+                xlib::XFree(children as *mut std::os::raw::c_void);
+            }
         }
     }
 }
@@ -1065,6 +1214,37 @@ fn spawn_pane(
 
     let child = Arc::new(Mutex::new(child));
     let stop = Arc::new(AtomicBool::new(false));
+
+    // Pane watcher: once a second, pin the engine's reparented window to (0,0)
+    // at the stage's size (see stage::clamp_children - fixes the multi-monitor
+    // "black pane, demo audible" bug), and at t+5s/t+20s dump the stage's X11
+    // subtree to stderr as a field diagnostic for embed reports.
+    #[cfg(target_os = "linux")]
+    {
+        let app2 = app.clone();
+        let stop2 = stop.clone();
+        std::thread::spawn(move || {
+            let mut t = 0u64;
+            while !stop2.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_secs(1));
+                t += 1;
+                let a = app2.clone();
+                let dump = t == 5 || t == 20;
+                let tag = format!("pane{index} t+{t}s");
+                if a
+                    .run_on_main_thread(move || {
+                        stage::clamp_children(stage);
+                        if dump {
+                            stage::debug_dump(stage, &tag);
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+    }
     let offset = Arc::new(AtomicI32::new(0));
     let (cmd_tx, cmd_rx) = mpsc::channel::<String>();
 
