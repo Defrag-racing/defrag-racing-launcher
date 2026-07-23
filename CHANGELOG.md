@@ -4,6 +4,10 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.46
+
+- **Fixed: the demo engine could open as a separate window instead of inside the launcher (Linux).** On some desktops (seen on Zorin/GNOME) the engine's own attempt to embed itself into the player pane fails, its window stays floating on the desktop and the pane shows black. The launcher now detects this within a few seconds and adopts the engine window into the pane itself. The bundled Linux engine also prints a clearer diagnostic about why a self-embed failed, to make future reports easier to debug.
+
 ## 0.1.45
 
 - **Fixed: demos played in the launcher loaded as vanilla Quake on Linux.** The embedded player derived all its game folders from the demo's location, which hid Linux installs whose Defrag mod lives under the default home path (`~/.q3a`). The engine then fell back to baseq3's game code and every demo opened on the "CLIENT/SERVER GAME MISMATCH" / CD-key screen instead of playing. The player now always shows the engine all three places that matter - the engine install, `~/.q3a`, and its own private folder (the demo is copied there first, so it plays from ANY folder on disk). (Windows was unaffected.)
