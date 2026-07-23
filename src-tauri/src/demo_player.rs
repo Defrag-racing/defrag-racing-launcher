@@ -516,6 +516,134 @@ mod stage {
         }
     }
 
+    /// Launcher-side embed fallback: normally the engine reparents itself into
+    /// the stage (`in_embedParent`), but that self-embed can fail on the engine
+    /// side - observed on Zorin 18.1/GNOME, where the engine logs "WARNING:
+    /// could not embed into parent window" (SDL_GetWindowWMInfo failed) and its
+    /// window stays a free-floating toplevel while the stage shows black. When
+    /// the stage is still childless, this walks the X tree for a window whose
+    /// `_NET_WM_PID` matches the engine process (SDL sets it on its windows)
+    /// and adopts it into the stage ourselves - same XReparentWindow, just done
+    /// from our side. Returns true when the stage has a child (either it
+    /// already had one, or the adoption just succeeded).
+    pub fn adopt_child_by_pid(win: isize, pid: u32) -> bool {
+        if win == 0 || pid == 0 {
+            return false;
+        }
+        let dpy = display();
+        if dpy.is_null() {
+            return false;
+        }
+        unsafe {
+            // Already embedded? Nothing to do.
+            let mut r: c_ulong = 0;
+            let mut p: c_ulong = 0;
+            let mut children: *mut c_ulong = std::ptr::null_mut();
+            let mut n: c_uint = 0;
+            if xlib::XQueryTree(dpy, win as c_ulong, &mut r, &mut p, &mut children, &mut n) == 0 {
+                return false;
+            }
+            if !children.is_null() {
+                xlib::XFree(children as *mut std::os::raw::c_void);
+            }
+            if n > 0 {
+                return true;
+            }
+
+            let root = xlib::XDefaultRootWindow(dpy);
+            let target = find_window_by_pid(dpy, root, win as c_ulong, pid, 0);
+            let Some(target) = target else {
+                return false;
+            };
+
+            let mut sa: xlib::XWindowAttributes = std::mem::zeroed();
+            if xlib::XGetWindowAttributes(dpy, win as c_ulong, &mut sa) == 0 {
+                return false;
+            }
+            eprintln!(
+                "[embed-fix] engine did not self-embed - adopting window 0x{target:x} \
+                 (pid {pid}) into stage 0x{win:x}"
+            );
+            xlib::XReparentWindow(dpy, target, win as c_ulong, 0, 0);
+            xlib::XMoveResizeWindow(dpy, target, 0, 0, sa.width as c_uint, sa.height as c_uint);
+            xlib::XMapWindow(dpy, target);
+            xlib::XRaiseWindow(dpy, target);
+            xlib::XSync(dpy, 0);
+            true
+        }
+    }
+
+    /// Depth-limited search (root -> WM frames -> clients) for a window with
+    /// `_NET_WM_PID == pid`, skipping the stage's own subtree. Returns the
+    /// CLIENT window carrying the property, which is the one to reparent.
+    unsafe fn find_window_by_pid(
+        dpy: *mut xlib::Display,
+        w: c_ulong,
+        skip: c_ulong,
+        pid: u32,
+        depth: usize,
+    ) -> Option<c_ulong> {
+        if w == skip || depth > 3 {
+            return None;
+        }
+        if depth > 0 && window_pid(dpy, w) == Some(pid) {
+            return Some(w);
+        }
+        let mut r: c_ulong = 0;
+        let mut p: c_ulong = 0;
+        let mut children: *mut c_ulong = std::ptr::null_mut();
+        let mut n: c_uint = 0;
+        if xlib::XQueryTree(dpy, w, &mut r, &mut p, &mut children, &mut n) == 0 {
+            return None;
+        }
+        let mut found = None;
+        for i in 0..n as usize {
+            found = find_window_by_pid(dpy, *children.add(i), skip, pid, depth + 1);
+            if found.is_some() {
+                break;
+            }
+        }
+        if !children.is_null() {
+            xlib::XFree(children as *mut std::os::raw::c_void);
+        }
+        found
+    }
+
+    unsafe fn window_pid(dpy: *mut xlib::Display, w: c_ulong) -> Option<u32> {
+        let atom = xlib::XInternAtom(dpy, c"_NET_WM_PID".as_ptr(), 1);
+        if atom == 0 {
+            return None;
+        }
+        let mut actual_type: c_ulong = 0;
+        let mut actual_format: c_int = 0;
+        let mut nitems: c_ulong = 0;
+        let mut bytes_after: c_ulong = 0;
+        let mut prop: *mut u8 = std::ptr::null_mut();
+        let ok = xlib::XGetWindowProperty(
+            dpy,
+            w,
+            atom,
+            0,
+            1,
+            0,
+            xlib::XA_CARDINAL,
+            &mut actual_type,
+            &mut actual_format,
+            &mut nitems,
+            &mut bytes_after,
+            &mut prop,
+        );
+        let mut result = None;
+        if ok == 0 && actual_type == xlib::XA_CARDINAL && actual_format == 32 && nitems >= 1 {
+            // 32-bit CARDINALs arrive as native c_ulong slots.
+            result = Some(*(prop as *const c_ulong) as u32);
+        }
+        if !prop.is_null() {
+            xlib::XFree(prop as *mut std::os::raw::c_void);
+        }
+        result
+    }
+
     /// One-shot stderr diagnostic for "engine plays but no picture" field
     /// reports: dumps the stage window's subtree (the engine's reparented
     /// window should appear inside, mapped and correctly sized) plus the
@@ -1218,11 +1346,15 @@ fn spawn_pane(
     // Pane watcher: once a second, pin the engine's reparented window to (0,0)
     // at the stage's size (see stage::clamp_children - fixes the multi-monitor
     // "black pane, demo audible" bug), and at t+5s/t+20s dump the stage's X11
-    // subtree to stderr as a field diagnostic for embed reports.
+    // subtree to stderr as a field diagnostic for embed reports. For the first
+    // 30 s it also adopts the engine window into the stage if the engine's own
+    // self-embed failed (stage::adopt_child_by_pid - the Zorin/GNOME "engine
+    // floats outside the launcher" bug).
     #[cfg(target_os = "linux")]
     {
         let app2 = app.clone();
         let stop2 = stop.clone();
+        let engine_pid = child.lock().map(|c| c.id()).unwrap_or(0);
         std::thread::spawn(move || {
             let mut t = 0u64;
             while !stop2.load(Ordering::Relaxed) {
@@ -1230,9 +1362,13 @@ fn spawn_pane(
                 t += 1;
                 let a = app2.clone();
                 let dump = t == 5 || t == 20;
+                let adopt = t <= 30;
                 let tag = format!("pane{index} t+{t}s");
                 if a
                     .run_on_main_thread(move || {
+                        if adopt {
+                            stage::adopt_child_by_pid(stage, engine_pid);
+                        }
                         stage::clamp_children(stage);
                         if dump {
                             stage::debug_dump(stage, &tag);
