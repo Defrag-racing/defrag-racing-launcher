@@ -130,15 +130,30 @@
     /** Effective gametype with the same fallback logic the website uses:
      *  start from the scraper-set `type`, then refine by server name
      *  keywords (some admins set type='run' but name contains 'fastcap'
-     *  / 'freestyle' / 'teamrun'). defrag_gametype === '5' or the
-     *  literal "mixed" in the name = both run AND teamrun servers. */
+     *  / 'freestyle' / 'teamrun').
+     *
+     *  `type` is not a clean vocabulary - it carries 'teamruns' next to
+     *  'team', and physics values where a gametype belongs - so it is
+     *  normalised first. Without that the servers typed 'cpm' or 'vq3'
+     *  matched no tab at all and the 'teamruns' ones were invisible to
+     *  the team tab.
+     *
+     *  `mixed` used to read defrag_gametype === '5', on the basis that 5
+     *  means run and teamrun at once. It is 5 on every server that exists
+     *  - 76 of 76 in production - so it carried no information, and being
+     *  OR'd into both the run and teamrun cases it made those two tabs
+     *  return the whole list. The name keyword and type='mixed' are what
+     *  admins actually set. */
     const classifyServer = (s: DefragServer): { effectiveType: string; mixed: boolean } => {
         const serverType = (s.type ?? 'run').toLowerCase();
         const serverName = stripColors(s.name ?? '').toLowerCase();
-        const mixed = String(s.defrag_gametype) === '5' || serverName.includes('mixed');
+        const mixed = serverType === 'mixed' || serverName.includes('mixed');
 
         let effectiveType = serverType;
-        if (serverType === 'run') {
+        if (effectiveType === 'teamruns') effectiveType = 'team';
+        if (effectiveType === 'cpm' || effectiveType === 'vq3' || effectiveType === 'mixed') effectiveType = 'run';
+
+        if (effectiveType === 'run') {
             if (serverName.includes('fastcap') || serverName.includes('ctf')) effectiveType = 'fastcaps';
             else if (serverName.includes('freestyle')) effectiveType = 'freestyle';
             else if (serverName.includes('teamrun') || serverName.includes('team run')) effectiveType = 'team';
@@ -153,7 +168,9 @@
             case 'run':       return effectiveType === 'run' || mixed;
             case 'ctf':       return effectiveType === 'ctf' || effectiveType === 'fastcaps';
             case 'freestyle': return effectiveType === 'freestyle';
-            case 'teamrun':   return effectiveType === 'teamrun' || effectiveType === 'team' || mixed;
+            // Not `mixed`: a teamrun can be voted on any mixed server, but
+            // someone filtering here wants the servers set up for them.
+            case 'teamrun':   return effectiveType === 'teamrun' || effectiveType === 'team';
         }
     };
 
@@ -162,14 +179,16 @@
      *  glance without having to read the name keywords. */
     const gametypeTag = (s: DefragServer): string => {
         const { effectiveType, mixed } = classifyServer(s);
-        if (mixed) return 'MIXED';
+        // The specific type wins over MIXED. The old order put MIXED first,
+        // and since every server counted as mixed, every server was tagged
+        // MIXED and the tag told you nothing.
         switch (effectiveType) {
             case 'ctf':
             case 'fastcaps':  return 'CTF';
             case 'freestyle': return 'FS';
             case 'teamrun':
             case 'team':      return 'TEAM';
-            default:          return 'RUN';
+            default:          return mixed ? 'MIXED' : 'RUN';
         }
     };
 
