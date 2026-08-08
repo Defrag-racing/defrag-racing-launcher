@@ -15,7 +15,7 @@
 
     type MainTab = 'records' | 'system';
     type RecordTab = 'all' | 'beaten' | 'worldrecords';
-    type SystemTab = 'all' | 'announcements' | 'clan' | 'tournament' | 'profile' | 'render';
+    type SystemTab = 'all' | 'announcements' | 'maps' | 'clan' | 'tournament' | 'profile' | 'render';
     const mainTab = ref<MainTab>('records');
     const recordTab = ref<RecordTab>('all');
     const systemTab = ref<SystemTab>('all');
@@ -213,6 +213,7 @@
         const all = systemList.value;
         switch (systemTab.value) {
             case 'announcements': return all.filter((n) => n.type === 'announcement');
+            case 'maps':          return all.filter((n) => n.type === 'new_map');
             case 'clan':          return all.filter((n) => clanTypes.includes(n.type));
             case 'tournament':    return all.filter((n) => tournamentTypes.includes(n.type));
             case 'profile':       return all.filter((n) => n.type === 'alias_suggestion');
@@ -236,6 +237,7 @@
         return {
             all: unread.length,
             announcements: unread.filter((n) => n.type === 'announcement').length,
+            maps: unread.filter((n) => n.type === 'new_map').length,
             clan: unread.filter((n) => clanTypes.includes(n.type)).length,
             tournament: unread.filter((n) => tournamentTypes.includes(n.type)).length,
             profile: unread.filter((n) => n.type === 'alias_suggestion').length,
@@ -252,6 +254,7 @@
     type TypeInfo = { label: string; icon: string; tone: string };
     const SYSTEM_TYPES: Record<string, TypeInfo> = {
         announcement:          { label: 'Announcement', icon: '📢', tone: 'blue' },
+        new_map:               { label: 'New map',      icon: '🗺️', tone: 'amber' },
         clan_invite:           { label: 'Clan invite',  icon: '🛡️', tone: 'green' },
         clan_kick:             { label: 'Clan kick',    icon: '🛡️', tone: 'red' },
         clan_accept:           { label: 'Clan accept',  icon: '🛡️', tone: 'green' },
@@ -291,7 +294,10 @@
     // -- Click actions ------------------------------------------------
     const openSystemLink = (n: SystemNotificationRow) => {
         if (!n.url) return;
-        openExternal(n.url).catch(() => {});
+        // The site stores site-relative urls ("/maps/foo", "/announcements").
+        // The OS opener needs an absolute one or it silently does nothing.
+        const url = /^https?:\/\//i.test(n.url) ? n.url : `https://defrag.racing${n.url.startsWith('/') ? '' : '/'}${n.url}`;
+        openExternal(url).catch(() => {});
     };
 
     const openMap = (mapname: string | null) => {
@@ -539,6 +545,7 @@
                         v-for="opt in ([
                             { v: 'all',           label: 'All' },
                             { v: 'announcements', label: 'Announcements' },
+                            { v: 'maps',          label: 'Maps' },
                             { v: 'clan',          label: 'Clan' },
                             { v: 'tournament',    label: 'Tournament' },
                             { v: 'profile',       label: 'Profile' },
