@@ -4,6 +4,13 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.47
+
+- **Fixed: the Run and Team tabs in the server list showed every server.** The mixed-server test read a field that reports the same value on every server in existence, so it was always true and counted into both tabs. Mixed is now decided by the server's own type or the word in its name, the type column is read properly (a teamrun server used to fall through the Team tab), and Team no longer lists mixed servers - if you filter there you want a server set up for teamruns, not a run server where one can be voted. The MIXED tag on the cards had the same cause and now loses to the specific type, so a teamrun server reads TEAM.
+- **New maps now appear in your notifications.** A Maps tab sits next to Announcements and collects the notifications the site sends when a map is released.
+- **Fixed: clicking a system notification did nothing.** The site sends its links as site-relative paths and the launcher handed them straight to the system opener, which silently ignores them - so every announcement link was dead, not just the new map ones.
+- **The launcher can be installed and updated with Scoop.** `scoop bucket add defrag https://github.com/Defrag-racing/defrag-racing-launcher` followed by `scoop install defrag-racing-launcher`. It installs the normal per-user build, so server links on the website keep working, and `scoop update` picks up new versions.
+
 ## 0.1.46
 
 - **Fixed: the demo engine could open as a separate window instead of inside the launcher (Linux).** On some desktops (seen on Zorin/GNOME) the engine's own attempt to embed itself into the player pane fails, its window stays floating on the desktop and the pane shows black. The launcher now detects this within a few seconds and adopts the engine window into the pane itself. The bundled Linux engine also prints a clearer diagnostic about why a self-embed failed, to make future reports easier to debug.

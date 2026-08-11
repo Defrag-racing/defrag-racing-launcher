@@ -57,6 +57,17 @@ jobs:
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           VERSION="${TAG#launcher-v}"
+          # Every artifact is named after the version in tauri.conf.json, not
+          # after the tag, and latest.json carries that version too. Tagging
+          # without bumping therefore produces a release full of files from the
+          # PREVIOUS version, an updater manifest that offers nobody anything,
+          # and a scoop job that 404s on a filename that was never built. Fail
+          # here instead - it costs three seconds, the mistake costs a release.
+          MANIFEST_VERSION=$(jq -r .version src-tauri/tauri.conf.json)
+          if [ "$VERSION" != "$MANIFEST_VERSION" ]; then
+            echo "::error::Tag $TAG wants $VERSION but src-tauri/tauri.conf.json says $MANIFEST_VERSION. Bump the version (tauri.conf.json, package.json, src-tauri/Cargo.toml + Cargo.lock), commit, push the COMMIT, then re-tag."
+            exit 1
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           # Slice the matching `## X.Y.Z` section from CHANGELOG.md so the
