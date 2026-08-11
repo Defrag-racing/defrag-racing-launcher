@@ -1,0 +1,51 @@
+{
+    "version": "0.1.46",
+    "description": "Tray companion for defrag.racing: backs up Quake 3 DeFRaG demos and opens defrag:// links in your engine",
+    "homepage": "https://github.com/Defrag-racing/defrag-racing-launcher",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/Defrag-racing/defrag-racing-launcher/releases/download/launcher-v0.1.46/Defrag.Racing.Launcher_0.1.46_x64-setup.exe#/setup.exe",
+            "hash": "0459422e7b25b17aba3815c06390107fc2409448cb628d4335f4af2d9dad3d89"
+        }
+    },
+    "installer": {
+        "script": [
+            "# The NSIS bundle installs per user (currentUser), so this never raises a",
+            "# UAC prompt. It is run rather than unpacked because the installer is what",
+            "# registers the defrag:// protocol handler - a portable extraction would",
+            "# leave every server link on the website dead.",
+            "Start-Process \"$dir\\setup.exe\" -ArgumentList '/S' -Wait",
+            "Remove-Item \"$dir\\setup.exe\" -Force -ErrorAction SilentlyContinue"
+        ]
+    },
+    "uninstaller": {
+        "script": [
+            "# Found by display name rather than by registry key, so a change to the",
+            "# bundle identifier cannot leave the install orphaned. UninstallString is",
+            "# quoted, and Start-Process chokes on the quotes.",
+            "$entry = Get-ChildItem 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall' -ErrorAction SilentlyContinue |",
+            "    ForEach-Object { Get-ItemProperty $_.PSPath } |",
+            "    Where-Object { $_.DisplayName -eq 'Defrag Racing Launcher' } |",
+            "    Select-Object -First 1",
+            "if ($entry -and $entry.UninstallString) {",
+            "    Start-Process $entry.UninstallString.Trim('\"') -ArgumentList '/S' -Wait",
+            "}"
+        ]
+    },
+    "checkver": {
+        "github": "https://github.com/Defrag-racing/defrag-racing-launcher",
+        "regex": "launcher-v([\\d.]+)"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/Defrag-racing/defrag-racing-launcher/releases/download/launcher-v$version/Defrag.Racing.Launcher_$version_x64-setup.exe#/setup.exe"
+            }
+        }
+    },
+    "notes": [
+        "The launcher updates itself on launch, so the version Scoop has on record can trail the one actually installed. Running 'scoop update defrag-racing-launcher' anyway is harmless.",
+        "On first run, paste a token from your defrag.racing profile: Settings -> Security -> Launcher tokens."
+    ]
+}

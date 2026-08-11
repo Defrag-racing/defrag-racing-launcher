@@ -263,3 +263,52 @@ jobs:
           gh api -X PATCH "/repos/${{ github.repository }}/releases/${RELEASE_ID}" \
             -f draft=false \
             -f make_latest=true
+
+  scoop:
+    # Repoint bucket/defrag-racing-launcher.json at the release that was just
+    # published, so `scoop install` from this repo is never behind the latest
+    # tag. Runs after publish because the asset has to be downloadable to be
+    # hashed - Scoop refuses a manifest whose hash does not match.
+    #
+    # This is deliberately part of the tag workflow rather than a scheduled
+    # excavator job: nothing has to run on a timer, and the manifest can never
+    # describe a release that does not exist yet.
+    needs: [create-release, build, publish]
+    if: success()
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The tag is what triggered this, but the commit belongs on the
+          # branch - a commit made on a detached tag would be unreachable.
+          ref: main
+
+      - name: Point the manifest at this release
+        env:
+          VERSION: ${{ needs.create-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          URL="https://github.com/${{ github.repository }}/releases/download/launcher-v${VERSION}/Defrag.Racing.Launcher_${VERSION}_x64-setup.exe"
+          curl -sSLf -o setup.exe "$URL"
+          HASH=$(sha256sum setup.exe | cut -d' ' -f1)
+          rm -f setup.exe
+          jq --indent 4 \
+            --arg v "$VERSION" \
+            --arg u "${URL}#/setup.exe" \
+            --arg h "$HASH" \
+            '.version = $v
+             | .architecture."64bit".url = $u
+             | .architecture."64bit".hash = $h' \
+            bucket/defrag-racing-launcher.json > bucket/.manifest.tmp
+          mv bucket/.manifest.tmp bucket/defrag-racing-launcher.json
+
+      - name: Commit the manifest
+        run: |
+          if git diff --quiet; then
+            echo "manifest already points at this release - nothing to commit"
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git commit -am "Scoop manifest for ${{ needs.create-release.outputs.version }}"
+          git push origin main

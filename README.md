@@ -16,9 +16,27 @@ The auth token is stored in the OS keyring (Windows Credential Manager / macOS K
 
 Grab the installer for your platform from [Releases](https://github.com/Defrag-racing/defrag-racing-launcher/releases):
 
-- **Windows**: `.msi` or `.exe`
+- **Windows**: `.exe` (installs per user, so it never asks for admin rights)
 - **macOS**: `.dmg` (pick Apple Silicon for M1/M2/M3, Intel for older Macs)
 - **Linux**: `.AppImage` (portable) or `.deb`
+
+### Scoop
+
+This repository doubles as a [Scoop](https://scoop.sh) bucket:
+
+```powershell
+scoop bucket add defrag https://github.com/Defrag-racing/defrag-racing-launcher
+scoop install defrag-racing-launcher
+```
+
+It runs the same per-user installer as a manual download, so the `defrag://`
+protocol handler and the Start menu entry are registered exactly as usual. The
+manifest is repointed at each new release by the tag workflow, so
+`scoop update` always finds the latest build.
+
+One thing to expect: the launcher updates itself on launch, so the version
+Scoop has on record can trail the one you are actually running. Nothing breaks,
+and `scoop update` remains harmless.
 
 After installing, open your defrag.racing profile → Settings → Security → Launcher tokens, generate a token, and paste it into the launcher on first run.
 
