@@ -127,9 +127,24 @@ export interface CompsVoting {
     next_category: string | null;
 }
 
+/** A demo of the user's that comps is holding back without having entered it:
+ *  a file the parser could not read, a run older than the round, a run in the
+ *  other physics. `note` arrives as a finished sentence from the server, so
+ *  the launcher explains a hold without knowing a single comps rule. */
+export interface CompsNotice {
+    id: number;
+    filename: string | null;
+    kind: 'unreadable' | 'too_old' | 'other_physics' | 'ballot' | 'held';
+    note: string;
+    /** ISO 8601: when the demo appears on the site. */
+    appears_at: string | null;
+}
+
 export interface CompsPayload {
     playing: CompsPlaying | null;
     voting: CompsVoting | null;
+    /** Optional: a server older than this feature does not send it. */
+    my_notices?: CompsNotice[];
     /** Added by the launcher, not the server: when this copy was fetched and
      *  whether it is the last known good one after a failed refresh. */
     fetched_at_ms: number;

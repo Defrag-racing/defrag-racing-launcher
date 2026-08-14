@@ -13,7 +13,7 @@
 
     import { computed, onActivated, onMounted, onUnmounted, ref } from 'vue';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-    import { tauri, type CompsPayload, type PendingUpload, type UploadStateSnapshot } from '../lib/tauri';
+    import { tauri, type CompsNotice, type CompsPayload, type PendingUpload, type UploadStateSnapshot } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
     import { openExternal } from '../lib/open';
 
@@ -62,6 +62,15 @@
     const entered = computed<PendingUpload[]>(() =>
         (queue.value?.items ?? []).filter((i) => i.status === 'comps_entered'),
     );
+
+    /** Demos the SERVER is holding, as opposed to `held` above, which is this
+     *  machine's queue. The two answer different questions: `held` is "what is
+     *  waiting for me to press a button", this is "what did the site do with
+     *  the ones I already sent". A demo can be here having been uploaded from
+     *  another machine, or months ago. */
+    const notices = computed<CompsNotice[]>(() => data.value?.my_notices ?? []);
+
+    const appearsAt = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : '');
 
     const physicsOrder = ['cpm', 'vq3'];
     const mapRows = computed(() => {
@@ -362,6 +371,37 @@
                     <p class="text-xs text-neutral-500 mt-1">
                         A new weekly starts every Sunday at 20:00 Prague time.
                     </p>
+                </section>
+
+                <!-- What the site did with demos it decided not to enter.
+                     Outside the round panel on purpose: a demo can be on hold
+                     for a map that is still being voted on, which is a week
+                     with no round being played at all. -->
+                <section v-if="notices.length" class="bg-neutral-900/40 border border-white/10 rounded-lg">
+                    <header class="px-3 py-2 border-b border-white/10 text-sm font-semibold text-neutral-200">
+                        Demos of yours on hold
+                    </header>
+                    <ul class="p-3 space-y-2.5">
+                        <li v-for="n in notices" :key="n.id" class="text-xs">
+                            <div class="truncate text-neutral-300" :title="n.filename || ''">
+                                {{ n.filename || '(demo)' }}
+                            </div>
+                            <div :class="n.kind === 'unreadable' ? 'text-red-300' : 'text-neutral-500'">
+                                {{ n.note }}
+                            </div>
+                            <div v-if="n.appears_at" class="text-[11px] text-neutral-600">
+                                Appears {{ appearsAt(n.appears_at) }}
+                            </div>
+                            <!-- The one case the site cannot explain by itself:
+                                 nobody here knows what is wrong with the file,
+                                 so it hands over the person who can look. -->
+                            <button
+                                v-if="n.kind === 'unreadable'"
+                                class="mt-1 text-[11px] text-brand-400 hover:underline"
+                                @click="openComps"
+                            >Tell the admin on defrag.racing →</button>
+                        </li>
+                    </ul>
                 </section>
 
                 <!-- The open ballot: names only. Voting happens on the site,
