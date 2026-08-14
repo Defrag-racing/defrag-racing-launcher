@@ -53,6 +53,15 @@ pub struct AppState {
     /// so the Comps tab works with the watcher stopped, and so a held demo
     /// keeps its round across a Stop+Start.
     pub comps: Arc<CompsState>,
+    /// A demo file the OS handed us - "Play in Defrag Launcher" from the
+    /// context menu, or a double-click when we are the default program.
+    ///
+    /// Held here rather than emitted straight away because a cold start has
+    /// nobody listening yet: the webview mounts seconds after the process
+    /// does, and an event fired into that gap is simply lost. The frontend
+    /// takes it on mount; a warm start emits as well, and whichever arrives
+    /// first wins - `take` empties it, so the second finds nothing.
+    pub pending_open_demo: Mutex<Option<String>>,
 }
 
 impl Default for AppState {
@@ -82,6 +91,7 @@ impl Default for AppState {
             session_tracker,
             demo_player: crate::demo_player::DemoPlayer::default(),
             comps,
+            pending_open_demo: Mutex::new(None),
         }
     }
 }
@@ -1824,4 +1834,46 @@ pub fn delete_demo(state: State<'_, AppState>, path: String) -> Result<(), Strin
     let _ = cache.save();
     state.upload_state.remove_path(&path_buf);
     Ok(())
+}
+
+// ---- opening a demo from the file manager ----------------------------------
+
+/// Take the demo the OS asked us to open, if there is one waiting.
+///
+/// Consuming rather than peeking: this is a one-shot instruction, and a second
+/// caller - a view remounting, a window reopening - must not play it again.
+#[tauri::command]
+pub fn take_pending_open_demo(state: State<'_, AppState>) -> Option<String> {
+    state.pending_open_demo.lock().unwrap().take()
+}
+
+/// Make a demo playable wherever it lives, returning the path to play.
+///
+/// A demo inside a `demos` folder comes back unchanged. Anything else - the
+/// Desktop, Downloads, a file handed over by the file manager - is copied into
+/// the launcher's own staging folder, because the engine cannot load a demo
+/// from outside the layout it expects. The copy is never uploaded.
+#[tauri::command]
+pub fn stage_demo(app: AppHandle, path: String) -> Result<String, String> {
+    crate::demo_player::stage_demo(&app, &PathBuf::from(path))
+        .map(|p| p.to_string_lossy().to_string())
+}
+
+/// What Windows currently thinks about `.dm_68` files: whether our right-click
+/// entry is registered, and who opens a double-clicked demo.
+#[tauri::command]
+pub fn demo_assoc_status() -> crate::file_assoc::AssocStatus {
+    crate::file_assoc::status()
+}
+
+/// Make the launcher the default program for `.dm_68`.
+///
+/// Only ever from an explicit click. Returns the status afterwards rather than
+/// a bare ok, because Windows can refuse quietly: when it already holds a
+/// UserChoice for another program, the association we are allowed to write
+/// does not win, and the honest answer is to say so and point at the Open-with
+/// dialog instead of reporting a success nobody will see.
+#[tauri::command]
+pub fn demo_assoc_make_default() -> Result<crate::file_assoc::AssocStatus, String> {
+    crate::file_assoc::make_default()
 }

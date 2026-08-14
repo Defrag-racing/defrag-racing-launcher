@@ -3,7 +3,7 @@
     import { useRoute, useRouter } from 'vue-router';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
     import { openExternal } from '../lib/open';
-    import { tauri, type CompsMode, type EngineCandidate, type HealthItem, type LaunchProfile } from '../lib/tauri';
+    import { tauri, type CompsMode, type DemoAssocStatus, type EngineCandidate, type HealthItem, type LaunchProfile } from '../lib/tauri';
     import TokenFeatureList from '../components/TokenFeatureList.vue';
     import TokenFreeFeatures from '../components/TokenFreeFeatures.vue';
     import UpdateBanner from '../components/UpdateBanner.vue';
@@ -86,8 +86,45 @@
     let reCheckTimer: number | undefined;
     const autostart = ref(false);
 
+    // ---- .dm_68 files -----------------------------------------------
+    // The right-click entry is put in place by the installer and re-asserted
+    // on every start. Becoming the DEFAULT program is only ever done from this
+    // button, because most people already have DemoCleaner3 on the file type
+    // and taking it silently would be a rude thing to do on their PC.
+    const assoc = ref<DemoAssocStatus | null>(null);
+    const assocBusy = ref(false);
+    const assocNote = ref<string | null>(null);
+
+    const refreshAssoc = async () => {
+        try { assoc.value = await tauri.demoAssocStatus(); } catch { /* section stays hidden */ }
+    };
+
+    const makeDefault = async () => {
+        assocBusy.value = true;
+        assocNote.value = null;
+        try {
+            assoc.value = await tauri.demoAssocMakeDefault();
+
+            // Windows keeps a signed UserChoice once somebody has picked a
+            // program, and an application may not write it - forging it is
+            // what gets installers flagged as malware. So when it does not
+            // take, say what to do instead of leaving a dead button.
+            if (!assoc.value.is_default) {
+                assocNote.value =
+                    'Windows keeps its own choice for this file type. Right-click any .dm_68 file, choose "Open with" → "Choose another app", pick Defrag Launcher and tick "Always use this app".';
+            }
+
+            await config.save({ demo_assoc_asked: true });
+        } catch (e: any) {
+            assocNote.value = e?.toString?.() ?? 'Could not change the file association';
+        } finally {
+            assocBusy.value = false;
+        }
+    };
+
     onMounted(async () => {
         syncDevFromConfig();
+        void refreshAssoc();
         engines.value = await tauri.detectEngines();
         appVersion.value = await tauri.appVersion();
         // Read the OS-level autostart state, not just our config -
@@ -472,6 +509,42 @@
                 </p>
                 <p v-else class="text-xs text-neutral-500">
                     Takes effect immediately, for the next demo the watcher sees.
+                </p>
+            </section>
+
+            <!-- Demo files. Windows only: the section hides itself where the
+                 backend reports the whole idea unsupported. -->
+            <section v-if="assoc?.supported" class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
+                <div>
+                    <div class="font-semibold">Demo files (.dm_68)</div>
+                    <div class="text-xs text-neutral-500 mt-0.5">
+                        Right-clicking a demo in Explorer offers <em>Play in Defrag Launcher</em>. That entry
+                        sits next to whatever you already use and changes nothing else - DemoCleaner3 keeps
+                        the file type unless you say otherwise here.
+                    </div>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-3 text-sm">
+                    <span :class="assoc.context_menu ? 'text-emerald-300' : 'text-amber-300'">
+                        {{ assoc.context_menu ? 'Right-click entry registered' : 'Right-click entry missing' }}
+                    </span>
+                    <span class="text-neutral-600">·</span>
+                    <span :class="assoc.is_default ? 'text-emerald-300' : 'text-neutral-400'">
+                        {{ assoc.is_default
+                            ? 'Double-clicking a demo opens the launcher'
+                            : 'Double-clicking a demo opens something else' }}
+                    </span>
+                    <button
+                        v-if="!assoc.is_default"
+                        class="ml-auto px-3 py-1.5 rounded text-sm font-semibold bg-brand-500/20 hover:bg-brand-500/30 text-brand-300 disabled:opacity-50"
+                        :disabled="assocBusy"
+                        @click="makeDefault"
+                    >{{ assocBusy ? 'Working…' : 'Open .dm_68 in the launcher' }}</button>
+                </div>
+
+                <p v-if="assocNote" class="text-xs text-amber-300">{{ assocNote }}</p>
+                <p v-else-if="assoc.default_owner && !assoc.is_default" class="text-xs text-neutral-600">
+                    Currently owned by <span class="font-mono">{{ assoc.default_owner }}</span>.
                 </p>
             </section>
 

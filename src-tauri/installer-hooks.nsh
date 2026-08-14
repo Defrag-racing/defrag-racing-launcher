@@ -17,6 +17,36 @@
 !macro NSIS_HOOK_PREUNINSTALL
   nsExec::Exec 'taskkill /F /T /IM oDFe.x64.exe'
   Pop $0
+
+  ; Take the right-click entry and our file type back out. Leaving them behind
+  ; would put a menu item and an icon on every demo pointing at an executable
+  ; that is no longer there.
+  DeleteRegKey HKCU "Software\Classes\SystemFileAssociations\.dm_68\shell\PlayInDefragLauncher"
+  DeleteRegKey HKCU "Software\Classes\DefragRacingLauncher.Demo"
+
+  ; Only give the file type back if we are the one holding it. A default the
+  ; user picked for somebody else is not ours to clear.
+  ReadRegStr $0 HKCU "Software\Classes\.dm_68" ""
+  StrCmp $0 "DefragRacingLauncher.Demo" 0 drl_keepassoc
+    DeleteRegValue HKCU "Software\Classes\.dm_68" ""
+  drl_keepassoc:
+!macroend
+
+; Put "Play in Defrag Launcher" into the right-click menu for .dm_68 files.
+;
+; Hung off the file EXTENSION, not off a program, so it sits next to whatever
+; the user already opens demos with. It changes NO default: DemoCleaner3 keeps
+; the file type, keeps its icon and keeps opening on a double-click. Becoming
+; the default is offered once inside the app and is the user's call - see
+; src/file_assoc.rs.
+;
+; Written here as well as at every app start so it works before the launcher
+; has ever been run. HKCU because the installer is per-user (installMode:
+; currentUser) - a machine-wide write would fail on a standard account.
+!macro NSIS_HOOK_POSTINSTALL
+  WriteRegStr HKCU "Software\Classes\SystemFileAssociations\.dm_68\shell\PlayInDefragLauncher" "" "Play in Defrag Launcher"
+  WriteRegStr HKCU "Software\Classes\SystemFileAssociations\.dm_68\shell\PlayInDefragLauncher" "Icon" '"$INSTDIR\${MAINBINARYNAME}.exe",0'
+  WriteRegStr HKCU "Software\Classes\SystemFileAssociations\.dm_68\shell\PlayInDefragLauncher\command" "" '"$INSTDIR\${MAINBINARYNAME}.exe" "%1"'
 !macroend
 
 ; On a real uninstall, offer to also wipe the launcher's stored data. Tauri

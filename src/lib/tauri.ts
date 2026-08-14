@@ -38,6 +38,10 @@ export interface LauncherConfig {
     comps_mode: CompsMode;
     /** Whether the "this demo is being held" explanation has been shown. */
     comps_intro_seen: boolean;
+    /** Whether the "should the launcher open .dm_68 files?" question has been
+     *  asked. Asked once, in the app - never in the installer, which runs on
+     *  every update. */
+    demo_assoc_asked: boolean;
 }
 
 export type CompsMode = 'ask' | 'auto' | 'off';
@@ -156,6 +160,20 @@ export interface CompsEntryGate {
     needs: 'signin' | 'verify' | 'mdd' | null;
     /** Where on the site to go and fix it. */
     settings_url: string;
+}
+
+/** What the OS currently thinks about `.dm_68` files. */
+export interface DemoAssocStatus {
+    /** False where none of this applies - the UI hides the section rather
+     *  than offering a button that cannot work. */
+    supported: boolean;
+    /** Is the right-click entry registered? */
+    context_menu: boolean;
+    /** Are we the program a double-clicked demo opens in? */
+    is_default: boolean;
+    /** Who owns the type when it is not us: a raw ProgID, for a support
+     *  question rather than for display. */
+    default_owner: string | null;
 }
 
 /** The prize pool behind the weeklies: what is in it, how far it reaches, and
@@ -410,6 +428,21 @@ export const tauri = {
     compsUploadNormally: (path: string) => invoke<void>('comps_upload_normally', { path }),
     /** Remember that the "why is this demo being held" note has been read. */
     compsMarkIntroSeen: () => invoke<void>('comps_mark_intro_seen'),
+
+    // ---- opening a demo from the file manager ---------------------------
+    /** The demo the OS asked us to open, if one is waiting. Consumed: a
+     *  second caller gets nothing, so a remount cannot replay it. */
+    takePendingOpenDemo: () => invoke<string | null>('take_pending_open_demo'),
+    /** Make a demo playable wherever it lives. A demo already inside a
+     *  `demos` folder comes back unchanged; anything else is copied into the
+     *  launcher's staging folder, which is never uploaded. */
+    stageDemo: (path: string) => invoke<string>('stage_demo', { path }),
+    /** What Windows thinks about .dm_68 right now. */
+    demoAssocStatus: () => invoke<DemoAssocStatus>('demo_assoc_status'),
+    /** Ask to become the default program for .dm_68. Returns the status
+     *  afterwards - Windows can refuse quietly when it holds a UserChoice for
+     *  another program, and the caller has to be able to see that. */
+    demoAssocMakeDefault: () => invoke<DemoAssocStatus>('demo_assoc_make_default'),
 
     // ---- Embedded demo player (Windows only) ----------------------------
     /** Resolve the render width/height/aspect the engine would use for the

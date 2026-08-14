@@ -205,6 +205,103 @@ pub(crate) fn derive_demo_launch(demo: &std::path::Path) -> Result<(std::path::P
     Ok((base.to_path_buf(), fs_game, demo_arg))
 }
 
+/// Make a demo playable wherever it happens to live.
+///
+/// The engine can only load a demo from `<base>/<game>/demos/…`, which is fine
+/// for the folders the launcher watches and useless for everything else - a
+/// file on the Desktop, in Downloads, or handed to us by the file manager. So
+/// a demo that does not fit the layout is copied into one the launcher keeps
+/// for the purpose, and the copy is played.
+///
+/// A demo already in a `demos` folder is returned untouched: no copy, no
+/// second file, no confusion about which one is real.
+///
+/// The staging folder is not watched and its contents are never uploaded. It
+/// lives under the launcher's own app data, well away from anywhere the
+/// watcher looks.
+pub(crate) fn stage_demo(app: &AppHandle, demo: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    if !demo.is_file() {
+        return Err("That demo file no longer exists.".into());
+    }
+
+    if derive_demo_launch(demo).is_ok() {
+        return Ok(demo.to_path_buf());
+    }
+
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Could not resolve the app data dir: {e}"))?
+        .join("stage")
+        .join("defrag")
+        .join("demos");
+
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Could not create the staging folder: {e}"))?;
+
+    // The source path goes into the name, not just the filename: two demos
+    // called `run[df.cpm]01.234(nick).dm_68` in two different folders are two
+    // different runs, and playing the wrong one is worse than copying twice.
+    let stamp = short_hash(&demo.to_string_lossy());
+    let name = demo
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "demo.dm_68".into());
+
+    let target = dir.join(format!("{stamp}-{name}"));
+
+    if !target.exists() {
+        std::fs::copy(demo, &target)
+            .map_err(|e| format!("Could not copy the demo into the launcher's folder: {e}"))?;
+    }
+
+    prune_stage(&dir);
+
+    Ok(target)
+}
+
+/// Keep the staging folder from growing forever. Twenty files is far more than
+/// anybody has open at once, and the copies are cheap to make again.
+fn prune_stage(dir: &std::path::Path) {
+    const KEEP: usize = 20;
+
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+
+    let mut files: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let modified = e.metadata().ok()?.modified().ok()?;
+            Some((modified, e.path()))
+        })
+        .collect();
+
+    if files.len() <= KEEP {
+        return;
+    }
+
+    files.sort_by(|a, b| b.0.cmp(&a.0));
+
+    for (_, path) in files.into_iter().skip(KEEP) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// FNV-1a, eight hex digits. Only ever used to keep two staged copies apart,
+/// so collision resistance beyond "different folders look different" would be
+/// weight for nothing.
+fn short_hash(s: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+
+    for byte in s.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+
+    format!("{:08x}", (hash >> 32) as u32)
+}
+
 /// The engine's default writable "home path" base - where it reads/writes
 /// q3config.cfg (and our defrag.launcher.cfg) and, crucially on Linux, where ALL
 /// user content (configs, downloaded pk3s, demos) lives by default. Mirrors

@@ -118,6 +118,17 @@ pub struct Config {
     /// the user has not been in yet.
     #[serde(default)]
     pub comps_intro_seen: bool,
+
+    /// Whether the user has been asked, once, whether the launcher should open
+    /// `.dm_68` files.
+    ///
+    /// Asked in the app rather than in the installer, and asked once. The
+    /// installer runs again on every update, so asking there would ask
+    /// forever; and most people already have a program for demos, so the
+    /// question is a nudge, not a setup step. Settings keeps the switch
+    /// afterwards either way.
+    #[serde(default)]
+    pub demo_assoc_asked: bool,
 }
 
 /// A named engine launch configuration the user defined in developer
@@ -150,6 +161,7 @@ impl Default for Config {
             launch_profiles: Vec::new(),
             comps_mode: crate::comps::CompsMode::default(),
             comps_intro_seen: false,
+            demo_assoc_asked: false,
         }
     }
 }

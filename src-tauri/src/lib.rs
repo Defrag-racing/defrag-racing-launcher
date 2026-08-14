@@ -5,6 +5,7 @@ mod comps;
 mod config;
 mod demo_player;
 mod engine;
+mod file_assoc;
 mod engine_video;
 mod hashing;
 mod history;
@@ -98,6 +99,14 @@ pub fn run() {
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
         log_startup(&format!("single_instance callback fired argv={:?}", argv));
+
+        // "Play in Defrag Launcher" on a demo while the launcher is already
+        // running: the OS starts a second process, this plugin hands us its
+        // argv and kills it. The file path is the whole message.
+        if let Some(demo) = file_assoc::demo_path_in_args(&argv) {
+            handle_open_demo(app, &demo);
+        }
+
         // Surface the existing window so the user sees the toast emitted
         // by the deep-link handler.
         show_main_window(app);
@@ -190,6 +199,22 @@ pub fn run() {
                 }
             }
 
+            // The right-click entry for .dm_68, re-asserted on every start.
+            // It costs one registry write, it repairs itself after the app is
+            // moved or reinstalled, and it changes no default - see file_assoc.
+            file_assoc::register_quietly();
+
+            // Cold start from the file manager: the demo is in our own argv.
+            // Stashed rather than emitted, because the webview does not exist
+            // yet; the frontend takes it on mount.
+            if let Some(demo) = file_assoc::demo_path_in_args(std::env::args().collect::<Vec<_>>())
+            {
+                log_startup(&format!("open-demo: cold start {}", demo.display()));
+                let state: tauri::State<AppState> = app.state();
+                *state.pending_open_demo.lock().unwrap() =
+                    Some(demo.to_string_lossy().to_string());
+            }
+
             // Auto-resume the watcher on launch if the user's last
             // explicit action was Start. start_auto_upload() flips
             // auto_upload_enabled=true on click, stop_auto_upload()
@@ -277,6 +302,10 @@ pub fn run() {
             demo_player::demo_player_stop,
             commands::open_url,
             commands::get_servers,
+            commands::take_pending_open_demo,
+            commands::stage_demo,
+            commands::demo_assoc_status,
+            commands::demo_assoc_make_default,
             commands::get_pending_deep_link,
             commands::confirm_pending_deep_link,
             commands::cancel_pending_deep_link,
@@ -430,6 +459,30 @@ fn show_main_window(app: &tauri::AppHandle) {
         let _ = w.unminimize();
         let _ = w.set_focus();
     }
+}
+
+/// A demo file arrived from the file manager while we were already running.
+///
+/// Unlike a defrag:// URL, this needs no confirmation step. A URL can be
+/// clicked by accident in a chat window and would drop somebody into a server;
+/// this is a file the person deliberately right-clicked, and the only sensible
+/// answer to "play this demo" is to play it.
+#[cfg(desktop)]
+fn handle_open_demo(app: &tauri::AppHandle, demo: &std::path::Path) {
+    use tauri::{Emitter, Manager};
+
+    let path = demo.to_string_lossy().to_string();
+    log_startup(&format!("open-demo: {}", path));
+
+    // Stashed as well as emitted: if the window is still starting up, nothing
+    // is listening yet, and the frontend takes it on mount instead.
+    {
+        let state: tauri::State<AppState> = app.state();
+        *state.pending_open_demo.lock().unwrap() = Some(path.clone());
+    }
+
+    let _ = app.emit("open-demo", path);
+    show_main_window(app);
 }
 
 /// Single source of truth for what happens when a defrag:// URL arrives -

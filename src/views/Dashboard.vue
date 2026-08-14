@@ -27,6 +27,7 @@
         type PendingUpload,
         type DemoLibraryEntry,
         type RenderStatusResponse,
+        type DemoAssocStatus,
     } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
     import DemosFolderChip from '../components/DemosFolderChip.vue';
@@ -92,6 +93,27 @@
         } finally {
             preparingMap.value = null;
             mapProgress.value = null;
+        }
+    };
+
+    // ---- a demo handed over by the file manager ---------------------
+    // "Play in Defrag Launcher" on a .dm_68, or a double-click once the user
+    // has made us the default. The file is usually NOT in a demos folder -
+    // Downloads, the Desktop, a Discord attachment - so it is staged into a
+    // folder the engine can load from before it plays.
+    const openExternalDemo = async (path: string) => {
+        try {
+            const staged = await tauri.stageDemo(path);
+            const filename = path.split(/[\\/]/).pop() ?? 'demo.dm_68';
+
+            router.push({ name: 'dashboard' });
+            compareTarget.value = null;
+
+            if (!(await ensureMaps([{ path: staged, map: mapNameFromFilename(filename) }]))) return;
+
+            playerTarget.value = { path: staged, name: filename };
+        } catch (e: any) {
+            toggleError.value = e?.toString?.() ?? 'Could not open that demo';
         }
     };
 
@@ -550,6 +572,49 @@
 
     // -- lifecycle -----------------------------------------------------
     let unlisten: UnlistenFn | null = null;
+    let unlistenOpenDemo: UnlistenFn | null = null;
+
+    // ---- opening .dm_68 files ---------------------------------------
+    // The right-click entry is registered by the installer and re-asserted on
+    // every start; becoming the DEFAULT program is the user's call, asked once
+    // and then only in Settings. Most people already have DemoCleaner3 on this
+    // file type and nothing here takes it away from them.
+    const assoc = ref<DemoAssocStatus | null>(null);
+    const assocBusy = ref(false);
+    const assocNote = ref<string | null>(null);
+
+    const refreshAssoc = async () => {
+        try { assoc.value = await tauri.demoAssocStatus(); } catch { /* the card just stays away */ }
+    };
+
+    const showAssocOffer = computed(() =>
+        !!assoc.value?.supported && !assoc.value.is_default && !config.config.demo_assoc_asked,
+    );
+
+    const answerAssoc = async (makeDefault: boolean) => {
+        assocBusy.value = true;
+        assocNote.value = null;
+        try {
+            if (makeDefault) {
+                assoc.value = await tauri.demoAssocMakeDefault();
+
+                // Windows keeps its own UserChoice once somebody has picked a
+                // program, and an app may not write it. Say so plainly instead
+                // of leaving a button that looks like it did nothing.
+                if (!assoc.value.is_default) {
+                    assocNote.value =
+                        'Windows keeps its own choice for this file type. Right-click a .dm_68, choose "Open with" → "Choose another app", pick Defrag Launcher and tick "Always".';
+                }
+            }
+
+            await config.save({ demo_assoc_asked: true });
+        } catch (e: any) {
+            assocNote.value = e?.toString?.() ?? 'Could not change the file association';
+        } finally {
+            assocBusy.value = false;
+        }
+    };
+
     let unlistenMapProgress: UnlistenFn | null = null;
     const refreshPaused = async () => {
         try { paused.value = await tauri.isAutoUploadPaused(); } catch { paused.value = false; }
@@ -594,6 +659,17 @@
         measureViewport();
         window.addEventListener('resize', measureViewport);
 
+        // Cold start: the OS handed us a demo before the window existed, so
+        // it is waiting in the backend rather than in an event nobody heard.
+        const pendingDemo = await tauri.takePendingOpenDemo();
+        if (pendingDemo) void openExternalDemo(pendingDemo);
+
+        unlistenOpenDemo = await listen<string>('open-demo', (ev) => {
+            void openExternalDemo(ev.payload);
+        });
+
+        void refreshAssoc();
+
         unlisten = await listen<UploadStateSnapshot>('upload_state_changed', (ev) => {
             // Keep only the freshest snapshot; apply on the next frame so a
             // burst collapses into a single rebuild + re-list.
@@ -636,6 +712,7 @@
 
     onUnmounted(() => {
         if (unlisten) unlisten();
+        if (unlistenOpenDemo) unlistenOpenDemo();
         if (unlistenMapProgress) unlistenMapProgress();
         if (applyFrame) cancelAnimationFrame(applyFrame);
         if (rateLimitPollTimer !== undefined) window.clearInterval(rateLimitPollTimer);
@@ -1074,6 +1151,39 @@
                 >Add token →</button>
             </div>
         </div>
+
+        <!-- Asked once: should a double-clicked demo open here?
+             The right-click entry is already in place and took nothing away
+             from anybody - this is only about the default program, which most
+             people have already given to DemoCleaner3. So it is a question,
+             asked one time, and never again from the installer. -->
+        <div
+            v-if="showAssocOffer"
+            class="px-5 py-3 border-b border-white/10 bg-white/[0.03] text-xs text-neutral-300"
+        >
+            <div class="font-semibold text-neutral-200 mb-1">Open .dm_68 demos in the launcher?</div>
+            <p class="text-neutral-400 mb-2">
+                Right-clicking a demo already offers "Play in Defrag Launcher". This is about
+                double-clicking one: it would open here instead of in whatever you use now.
+                You can change it in Settings whenever you like.
+            </p>
+            <div class="flex items-center justify-end gap-2">
+                <button
+                    class="px-3 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300"
+                    :disabled="assocBusy"
+                    @click="answerAssoc(false)"
+                >No thanks</button>
+                <button
+                    class="px-3 py-1 rounded bg-brand-500/20 hover:bg-brand-500/30 text-brand-300 font-semibold"
+                    :disabled="assocBusy"
+                    @click="answerAssoc(true)"
+                >Yes, open them here</button>
+            </div>
+        </div>
+
+        <p v-if="assocNote" class="px-5 py-2 border-b border-white/10 bg-white/[0.03] text-xs text-neutral-400">
+            {{ assocNote }}
+        </p>
 
         <!-- Update banner lives at App level now (shows on every tab),
              so it's no longer duplicated here. -->
