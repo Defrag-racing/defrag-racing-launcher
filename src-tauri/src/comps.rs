@@ -264,7 +264,15 @@ impl CompsState {
         if !round.is_open(now_ms(), snapshot.fetched_at_ms) {
             return None;
         }
-        let (physics, matched) = round.maps.iter().find(|(_, name)| *name == map)?;
+        // Map AND physics. A VQ3 run on the map being played in CPM cannot
+        // enter the round and is not racing anybody in it, so it takes the
+        // ordinary path and is published like any other demo. A filename that
+        // does not say its physics is held anyway - that is the file we know
+        // least about, on the map being competed on.
+        let claimed = physics_from_filename(filename);
+        let (physics, matched) = round.maps.iter().find(|(physics, name)| {
+            *name == map && claimed.as_deref().map_or(true, |claimed| claimed == physics)
+        })?;
         Some(CompsMatch {
             round_id: round.round_id,
             comp_number: round.comp_number,
@@ -317,6 +325,23 @@ pub fn map_name_from_filename(filename: &str) -> Option<String> {
     } else {
         Some(name.to_ascii_lowercase())
     }
+}
+
+/// Physics out of a demo filename: the word after the gametype inside the
+/// brackets, so `map[df.cpm]12.345(nick).dm_68` says cpm. A fastcap adds a
+/// third part (`[fc.cpm.3]`) which is not part of the physics.
+///
+/// A claim, like the map next to it - the server reads the real physics out of
+/// the file afterwards and decides again.
+pub fn physics_from_filename(filename: &str) -> Option<String> {
+    let open = filename.find('[')?;
+    let close = filename[open..].find(']')? + open;
+    let mut parts = filename[open + 1..close].split('.');
+
+    let _gametype = parts.next()?;
+    let physics = parts.next()?.trim().to_ascii_lowercase();
+
+    (physics == "cpm" || physics == "vq3").then_some(physics)
 }
 
 /// ISO 8601 with offset (what Carbon's toIso8601String writes) to epoch ms.
@@ -386,10 +411,28 @@ mod tests {
         assert_eq!(hit.round_id, 7);
         assert_eq!(hit.physics, "cpm");
 
-        // The other physics' map counts too - the guard holds the demo, and
-        // the server reads the real physics out of the file afterwards.
+        // The other physics' own map counts too, in its own physics.
         assert!(state.guard_match("fast-cap-two[df.vq3]09.000(nick).dm_68").is_some());
         assert!(state.guard_match("someothermap[df.cpm]01.234(nick).dm_68").is_none());
+
+        // The right map in the WRONG physics is not this round's business: it
+        // cannot enter and it is racing nobody, so it goes out like any other
+        // demo.
+        assert!(state.guard_match("fast-strafe[df.vq3]01.234(nick).dm_68").is_none());
+        assert!(state.guard_match("fast-cap-two[df.cpm]09.000(nick).dm_68").is_none());
+
+        // A filename that does not say its physics is held anyway.
+        assert!(state.guard_match("fast-strafe[weird]01.234(nick).dm_68").is_some());
+    }
+
+    #[test]
+    fn physics_comes_from_the_bracket() {
+        assert_eq!(physics_from_filename("cpm22[df.cpm]12.345(nick).dm_68").as_deref(), Some("cpm"));
+        assert_eq!(physics_from_filename("cpm22[mdf.vq3]12.345(nick).dm_68").as_deref(), Some("vq3"));
+        // A fastcap's third part is not the physics.
+        assert_eq!(physics_from_filename("cpm22[fc.cpm.3]12.345(nick).dm_68").as_deref(), Some("cpm"));
+        assert_eq!(physics_from_filename("my run.dm_68"), None);
+        assert_eq!(physics_from_filename("cpm22[df]12.345(nick).dm_68"), None);
     }
 
     #[test]
