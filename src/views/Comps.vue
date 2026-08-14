@@ -90,6 +90,13 @@
     const openSettings = () =>
         openExternal(gate.value?.settings_url ?? 'https://defrag.racing/user/settings').catch(() => {});
 
+    /** The pool behind the weeklies. Who donated stays on the site; this is the
+     *  total, how far it reaches, and a way to add to it. */
+    const pool = computed(() => data.value?.pool ?? null);
+
+    const openDonations = () =>
+        openExternal(pool.value?.donate_url ?? 'https://defrag.racing/donations').catch(() => {});
+
     const physicsOrder = ['cpm', 'vq3'];
     const mapRows = computed(() => {
         const maps = playing.value?.maps ?? {};
@@ -441,6 +448,23 @@
                             >Tell the admin on defrag.racing →</button>
                         </li>
                     </ul>
+                </section>
+
+                <!-- Where the money comes from. A competition that never says
+                     so quietly reads as something the site owes everybody.
+                     Who donated stays on the website - this is the total and a
+                     way to add to it. -->
+                <section v-if="pool?.total_eur" class="bg-neutral-900/40 border border-white/10 rounded-lg px-3 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span class="text-xs text-neutral-400">
+                        Prize pool
+                        <span class="text-emerald-300 font-semibold">{{ pool.total_eur.toFixed(2) }} €</span>
+                        <span v-if="pool.weeks"> over {{ pool.weeks }} {{ pool.weeks === 1 ? 'weekly' : 'weeklies' }}</span>
+                        <span v-if="pool.through_comp" class="text-neutral-600">· paid up through weekly {{ pool.through_comp }}</span>
+                    </span>
+                    <button
+                        class="ml-auto px-2.5 py-1 rounded text-xs font-semibold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300"
+                        @click="openDonations"
+                    >Donate →</button>
                 </section>
 
                 <!-- The open ballot: names only. Voting happens on the site,

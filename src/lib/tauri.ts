@@ -158,6 +158,15 @@ export interface CompsEntryGate {
     settings_url: string;
 }
 
+/** The prize pool behind the weeklies: what is in it, how far it reaches, and
+ *  where to add to it. Who donated stays on the website. */
+export interface CompsPool {
+    total_eur: number;
+    weeks: number;
+    through_comp: number | null;
+    donate_url: string;
+}
+
 export interface CompsPayload {
     playing: CompsPlaying | null;
     voting: CompsVoting | null;
@@ -166,6 +175,8 @@ export interface CompsPayload {
     /** Optional for the same reason. Absent means the server is old, and an
      *  old server does not enforce this - so absent is treated as allowed. */
     entry_gate?: CompsEntryGate;
+    /** Optional: older servers omit it. */
+    pool?: CompsPool;
     /** Added by the launcher, not the server: when this copy was fetched and
      *  whether it is the last known good one after a failed refresh. */
     fetched_at_ms: number;
