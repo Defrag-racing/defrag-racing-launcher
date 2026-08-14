@@ -450,6 +450,11 @@
                         <div class="text-sm font-semibold text-neutral-200">
                             Voting for weekly #{{ voting.comp_number }}
                             <span v-if="voting.category" class="text-neutral-500 font-normal">· {{ voting.category }}</span>
+                            <!-- What next week pays. The reason to go and vote
+                                 is usually that the week is worth something. -->
+                            <span v-if="voting.prize_eur" class="text-emerald-300 font-normal">
+                                · {{ voting.prize_eur.toFixed(2) }} € per physics
+                            </span>
                         </div>
                         <div class="text-xs text-neutral-500">
                             <span v-if="voting.is_open" :title="closesAtLocal">closes {{ closesAtLocal }}</span>

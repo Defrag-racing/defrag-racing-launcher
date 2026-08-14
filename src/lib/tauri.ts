@@ -125,6 +125,8 @@ export interface CompsVoting {
     is_open: boolean;
     candidates: string[];
     next_category: string | null;
+    /** What next week pays per physics. Optional: older servers omit it. */
+    prize_eur?: number;
 }
 
 /** A demo of the user's that comps is holding back without having entered it:
