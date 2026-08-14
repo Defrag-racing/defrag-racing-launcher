@@ -17,6 +17,7 @@
 
 use crate::api::{ApiError, Client};
 use crate::cache::UploadCache;
+use crate::comps::{CompsMode, CompsState};
 use crate::hashing;
 use anyhow::{Context, Result};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -47,6 +48,37 @@ pub struct PendingUpload {
     pub hash_throughput_bps: Option<u64>,
     /// Bytes/sec for the upload itself (multipart payload ≈ file size).
     pub upload_throughput_bps: Option<u64>,
+    /// Set when the comps guard recognised this file as a run of a map the
+    /// open round is playing. Carries the round it would be entered into, so
+    /// the row can say WHICH map it matched and the user's answer needs no
+    /// second guess. Persisted with the row, so a launcher restart doesn't
+    /// silently forget that a demo is waiting on an answer.
+    #[serde(default)]
+    pub comps: Option<CompsHold>,
+}
+
+/// The comps round a held / entered demo belongs to.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CompsHold {
+    pub round_id: i64,
+    pub comp_number: i64,
+    /// Which physics' map the filename matched. The server reads the real
+    /// physics out of the demo; this is only here so the row can name the map.
+    pub physics: String,
+    pub map: String,
+    pub submission_id: Option<u64>,
+}
+
+impl From<crate::comps::CompsMatch> for CompsHold {
+    fn from(m: crate::comps::CompsMatch) -> Self {
+        Self {
+            round_id: m.round_id,
+            comp_number: m.comp_number,
+            physics: m.physics,
+            map: m.map,
+            submission_id: None,
+        }
+    }
 }
 
 impl PendingUpload {
@@ -61,6 +93,7 @@ impl PendingUpload {
             size_bytes: None,
             hash_throughput_bps: None,
             upload_throughput_bps: None,
+            comps: None,
         }
     }
 }
@@ -74,13 +107,32 @@ pub enum UploadStatus {
     Done,
     Duplicate,
     Error,
+    /// Recognised as a run of this week's comps map and deliberately NOT sent
+    /// anywhere. Waiting for the user to say whether it is a comps entry or an
+    /// ordinary demo. Not terminal - nothing has happened to the file yet -
+    /// but handle_file returns early on it so a rescan never reopens the
+    /// question every half hour.
+    HeldForComps,
+    /// Entered into the comps round. It is on the server but not public: comps
+    /// demos stay hidden until the round ends.
+    CompsEntered,
 }
 
 /// "We're done with this file" for processed-count purposes. Pending /
 /// Hashing / Uploading mean work-in-flight and don't bump the counter;
 /// any transition INTO Done / Duplicate / Error is one finished demo.
+///
+/// CompsEntered counts as finished too - the file went where it was going.
+/// HeldForComps deliberately does not: it is a question waiting for an answer,
+/// and counting it would report a demo as handled while it sits there.
 fn is_terminal(s: UploadStatus) -> bool {
-    matches!(s, UploadStatus::Done | UploadStatus::Duplicate | UploadStatus::Error)
+    matches!(
+        s,
+        UploadStatus::Done
+            | UploadStatus::Duplicate
+            | UploadStatus::Error
+            | UploadStatus::CompsEntered
+    )
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -168,6 +220,13 @@ const QUEUE_SAVE_INTERVAL_SECS: u64 = 1;
 /// Scan cost is just directory enumeration + cache (size+mtime) check
 /// per file; the disk impact is negligible even on HDDs.
 const PERIODIC_RESCAN_SECS: u64 = 1800;
+
+/// Cache status for a demo that went into a comps round. Kept distinct from
+/// "done" because the two are not the same fact: a comps entry is on the
+/// server but hidden until the round ends, and a rescan that reported it as a
+/// finished backup would be telling the user their run is public when it is
+/// not.
+pub const CACHE_STATUS_COMPS: &str = "comps";
 
 #[derive(Default)]
 pub struct UploadState {
@@ -280,6 +339,28 @@ impl UploadState {
     /// uses this to skip re-confirming demos it already accounted for.
     fn is_handled(&self, path: &Path) -> bool {
         self.handled.lock().unwrap().contains(path)
+    }
+
+    /// Current queue status of a path, if it has a row. handle_file reads it
+    /// to leave a demo held for comps exactly where it is: the periodic rescan
+    /// walks the same folder every half hour and would otherwise re-ask a
+    /// question the user has already been asked.
+    fn status_of(&self, path: &Path) -> Option<UploadStatus> {
+        self.inner.lock().unwrap().iter().find(|i| i.path == path).map(|i| i.status)
+    }
+
+    /// The comps round a held row belongs to, if any. Lets the user's answer
+    /// use the round the demo was held for rather than whatever is open now -
+    /// they are the same round in practice, but not while a week is turning
+    /// over, and entering a demo into the wrong round is not recoverable by
+    /// the user.
+    fn comps_hold_of(&self, path: &Path) -> Option<CompsHold> {
+        self.inner
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|i| i.path == path)
+            .and_then(|i| i.comps.clone())
     }
 
     pub fn is_paused(&self) -> bool {
@@ -590,6 +671,23 @@ pub enum Message {
     /// that follows actually re-verifies with the server instead of hitting
     /// stale in-memory entries. Must be sent BEFORE the RescanFolder.
     ResetCacheStatuses,
+    /// The user answered a held demo: enter it into the comps round.
+    CompsEnter(PathBuf),
+    /// The user answered a held demo: upload it the ordinary way. The guard
+    /// is skipped for this one file only - the answer is about this demo, not
+    /// about the setting.
+    CompsUploadNormally(PathBuf),
+}
+
+/// Who decided what happens to a file, on this pass through handle_file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompsDecision {
+    /// Nobody yet - consult the guard and the configured mode.
+    Guard,
+    /// The user said "enter it", so the guard's opinion no longer matters.
+    Enter,
+    /// The user said "upload it normally", so the guard is skipped.
+    Normal,
 }
 
 pub struct WatcherHandle {
@@ -631,6 +729,7 @@ impl Drop for WatcherHandle {
 pub fn start(
     app: AppHandle,
     state: Arc<UploadState>,
+    comps: Arc<CompsState>,
     demos_path: PathBuf,
     include_subfolders: bool,
     api_base_url: String,
@@ -714,7 +813,14 @@ pub fn start(
     // running". Tauri's wrapper drives an internal runtime that's always
     // available from command context.
     crate::log_startup("watcher::start: about to async_runtime::spawn worker_loop");
-    let worker = tauri::async_runtime::spawn(worker_loop(rx, state_worker, app_worker, api_base_url, token));
+    let worker = tauri::async_runtime::spawn(worker_loop(
+        rx,
+        state_worker,
+        comps,
+        app_worker,
+        api_base_url,
+        token,
+    ));
     crate::log_startup("watcher::start: async_runtime::spawn returned");
 
     // Emit pump: ticks every EMIT_MIN_GAP_MS and forwards the current
@@ -794,6 +900,30 @@ pub fn start(
     })
 }
 
+/// Run a single file through the same pipeline the worker uses, from outside
+/// the worker.
+///
+/// Only for the case where there is no worker: a demo held for comps stays in
+/// the queue after Stop, and the two buttons on that row have to keep working
+/// or the demo is stuck with no way forward. When a worker IS running the
+/// caller must go through its channel instead - two owners of the upload cache
+/// would overwrite each other's entries.
+pub async fn process_one(
+    app: AppHandle,
+    state: Arc<UploadState>,
+    comps: Arc<CompsState>,
+    api_base_url: String,
+    token: String,
+    path: PathBuf,
+    enter: bool,
+) -> Result<()> {
+    let client = Client::new(api_base_url, token)?;
+    let mut cache = UploadCache::load();
+    let decision = if enter { CompsDecision::Enter } else { CompsDecision::Normal };
+    handle_file(&client, &state, &comps, &app, &mut cache, path, decision).await;
+    Ok(())
+}
+
 fn is_demo_file(p: &Path) -> bool {
     match p.extension().and_then(|e| e.to_str()) {
         Some(ext) => ext
@@ -819,6 +949,7 @@ fn is_in_temp_subfolder(p: &Path) -> bool {
 async fn worker_loop(
     mut rx: mpsc::UnboundedReceiver<Message>,
     state: Arc<UploadState>,
+    comps: Arc<CompsState>,
     app: AppHandle,
     api_base_url: String,
     token: String,
@@ -859,7 +990,13 @@ async fn worker_loop(
 
         match msg {
             Message::FileAdded(path) => {
-                handle_file(&client, &state, &app, &mut cache, path).await;
+                handle_file(&client, &state, &comps, &app, &mut cache, path, CompsDecision::Guard).await;
+            }
+            Message::CompsEnter(path) => {
+                handle_file(&client, &state, &comps, &app, &mut cache, path, CompsDecision::Enter).await;
+            }
+            Message::CompsUploadNormally(path) => {
+                handle_file(&client, &state, &comps, &app, &mut cache, path, CompsDecision::Normal).await;
             }
             Message::RedrivePending => {
                 // Walk the queue and re-process anything still Pending.
@@ -883,7 +1020,7 @@ async fn worker_loop(
                         }
                         notified.await;
                     }
-                    handle_file(&client, &state, &app, &mut cache, p).await;
+                    handle_file(&client, &state, &comps, &app, &mut cache, p, CompsDecision::Guard).await;
                 }
             }
             Message::ResetCacheStatuses => {
@@ -927,7 +1064,7 @@ async fn worker_loop(
                                 }
                                 notified.await;
                             }
-                            handle_file(&client, &state, &app, &mut cache, p.to_path_buf()).await;
+                            handle_file(&client, &state, &comps, &app, &mut cache, p.to_path_buf(), CompsDecision::Guard).await;
                         }
                     }
                 } else if let Ok(entries) = std::fs::read_dir(&folder) {
@@ -941,7 +1078,7 @@ async fn worker_loop(
                                 }
                                 notified.await;
                             }
-                            handle_file(&client, &state, &app, &mut cache, p).await;
+                            handle_file(&client, &state, &comps, &app, &mut cache, p, CompsDecision::Guard).await;
                         }
                     }
                 }
@@ -963,9 +1100,11 @@ fn throughput_bps(size: u64, elapsed: Duration) -> Option<u64> {
 async fn handle_file(
     client: &Client,
     state: &Arc<UploadState>,
+    comps: &Arc<CompsState>,
     app: &AppHandle,
     cache: &mut UploadCache,
     path: PathBuf,
+    decision: CompsDecision,
 ) {
     // Normalise FIRST so every downstream key (the already-present short
     // circuit below, state.update's find-by-path, the queue rows we
@@ -982,13 +1121,28 @@ async fn handle_file(
         .unwrap_or("")
         .to_string();
 
-    // Skip files already confirmed backed up earlier THIS session. The
-    // session-wide `handled` set (unlike the QUEUE_CAP-bounded visible
-    // queue) doesn't forget a file once it scrolls out of view, so the
-    // periodic rescan no longer re-confirms - and re-counts - the whole
-    // library every PERIODIC_RESCAN_SECS.
-    if state.is_handled(&path) {
-        return;
+    // The two skips below are about the AUTOMATIC pass only. When the user
+    // answers a held demo, that answer is about this file specifically and has
+    // to reach the server even though the file has been seen before.
+    if decision == CompsDecision::Guard {
+        // Skip files already confirmed backed up earlier THIS session. The
+        // session-wide `handled` set (unlike the QUEUE_CAP-bounded visible
+        // queue) doesn't forget a file once it scrolls out of view, so the
+        // periodic rescan no longer re-confirms - and re-counts - the whole
+        // library every PERIODIC_RESCAN_SECS.
+        if state.is_handled(&path) {
+            return;
+        }
+
+        // A demo waiting on the user's answer stays waiting. Without this the
+        // periodic rescan would walk back over it every half hour and re-ask a
+        // question that is already on screen.
+        if matches!(
+            state.status_of(&path),
+            Some(UploadStatus::HeldForComps) | Some(UploadStatus::CompsEntered)
+        ) {
+            return;
+        }
     }
 
     let size_bytes = std::fs::metadata(&path).ok().map(|m| m.len());
@@ -998,25 +1152,89 @@ async fn handle_file(
     // the server. Surface it as Done/Duplicate with reason="cache" so the
     // user can tell apart "we already uploaded this" from "the server
     // independently confirmed a hash match".
-    if let Some(entry) = cache.get_if_fresh(&path) {
-        let status = match entry.status.as_str() {
-            "done" => UploadStatus::Done,
-            _ => UploadStatus::Duplicate,
-        };
+    //
+    // Skipped when the user is deliberately entering the demo into comps: an
+    // explicit answer has to reach the server, which is the only side that can
+    // say whether the entry is a duplicate of something already there.
+    if decision != CompsDecision::Enter {
+        if let Some(entry) = cache.get_if_fresh(&path) {
+            let status = match entry.status.as_str() {
+                "done" => UploadStatus::Done,
+                // A demo already entered into a round is on the server but not
+                // public, and must not be reported as an ordinary backup.
+                CACHE_STATUS_COMPS => UploadStatus::CompsEntered,
+                _ => UploadStatus::Duplicate,
+            };
+            state.update(app, &path, &filename, |u| {
+                u.status = status;
+                u.demo_id = entry.demo_id;
+                u.size_bytes = size_bytes;
+                u.duplicate_reason = Some("cache".to_string());
+                u.error = None;
+            });
+            return;
+        }
+    }
+
+    // The comps guard. Everything above this point is about files we have seen
+    // before; from here the file is new, and the question is where it may go.
+    let comps_target: Option<CompsHold> = match decision {
+        // The user chose the ordinary path for this one file. The setting is
+        // untouched - the next demo is asked about again.
+        CompsDecision::Normal => None,
+        // The user chose comps. Prefer the round the demo was held for over
+        // whatever is open now: the two differ exactly while a week turns
+        // over, and entering a run into the wrong round is not something the
+        // user can undo.
+        CompsDecision::Enter => state
+            .comps_hold_of(&path)
+            .or_else(|| comps.guard_match(&filename).map(CompsHold::from))
+            .or_else(|| {
+                comps.open_round_id().map(|round_id| CompsHold {
+                    round_id,
+                    comp_number: 0,
+                    physics: String::new(),
+                    map: String::new(),
+                    submission_id: None,
+                })
+            }),
+        CompsDecision::Guard => match comps.mode() {
+            CompsMode::Off => None,
+            _ => comps.guard_match(&filename).map(CompsHold::from),
+        },
+    };
+
+    if decision == CompsDecision::Enter && comps_target.is_none() {
         state.update(app, &path, &filename, |u| {
-            u.status = status;
-            u.demo_id = entry.demo_id;
-            u.size_bytes = size_bytes;
-            u.duplicate_reason = Some("cache".to_string());
-            u.error = None;
+            u.status = UploadStatus::Error;
+            u.error = Some("No comps round is open right now.".to_string());
         });
         return;
+    }
+
+    // `ask` holds the file and shows the two buttons. Nothing is hashed and
+    // nothing is sent - the demo simply stays where it is until answered.
+    if decision == CompsDecision::Guard && comps.mode() == CompsMode::Ask {
+        if let Some(hold) = comps_target.clone() {
+            state.update(app, &path, &filename, |u| {
+                u.status = UploadStatus::HeldForComps;
+                u.size_bytes = size_bytes;
+                u.error = None;
+                u.comps = Some(hold);
+            });
+            return;
+        }
     }
 
     state.update(app, &path, &filename, |u| {
         u.status = UploadStatus::Hashing;
         u.size_bytes = size_bytes;
         u.error = None;
+        // The user sent this one down the ordinary route, so the row should
+        // stop claiming it belongs to a round.
+        if decision == CompsDecision::Normal {
+            u.comps = None;
+        }
     });
 
     let t_hash = Instant::now();
@@ -1079,23 +1297,41 @@ async fn handle_file(
     // status instead of a needless server round-trip, and rewrite the
     // cache so the next rescan gets a clean freshness hit. This is what
     // lets a stuck row recover even with no network / not logged in.
-    if let Some((cstatus, cdemo_id)) = cache
-        .get(&path)
-        .filter(|e| e.hash == md5 && (e.status == "done" || e.status == "duplicate"))
-        .map(|e| (e.status.clone(), e.demo_id))
-    {
-        let status = if cstatus == "done" {
-            UploadStatus::Done
-        } else {
-            UploadStatus::Duplicate
-        };
-        state.update(app, &path, &filename, |u| {
-            u.status = status;
-            u.demo_id = cdemo_id;
-            u.duplicate_reason = Some("cache".to_string());
-        });
-        cache.insert(&path, md5, &cstatus, cdemo_id);
-        let _ = cache.save();
+    if decision != CompsDecision::Enter {
+        if let Some((cstatus, cdemo_id)) = cache
+            .get(&path)
+            .filter(|e| {
+                e.hash == md5
+                    && (e.status == "done"
+                        || e.status == "duplicate"
+                        || e.status == CACHE_STATUS_COMPS)
+            })
+            .map(|e| (e.status.clone(), e.demo_id))
+        {
+            let status = match cstatus.as_str() {
+                "done" => UploadStatus::Done,
+                CACHE_STATUS_COMPS => UploadStatus::CompsEntered,
+                _ => UploadStatus::Duplicate,
+            };
+            state.update(app, &path, &filename, |u| {
+                u.status = status;
+                u.demo_id = cdemo_id;
+                u.duplicate_reason = Some("cache".to_string());
+            });
+            cache.insert(&path, md5, &cstatus, cdemo_id);
+            let _ = cache.save();
+            return;
+        }
+    }
+
+    // The comps path forks here, BEFORE lookup-by-hash. Not for speed: the
+    // ordinary path's early returns all end in a public upload, and a fork
+    // placed after them would be one refactor away from letting a comps demo
+    // through. The comps route does its own duplicate check server-side.
+    if let Some(hold) = comps_target {
+        let auto = decision != CompsDecision::Enter;
+        submit_to_comps(client, state, app, cache, &path, &filename, &md5, hold, auto, size_bytes)
+            .await;
         return;
     }
 
@@ -1153,6 +1389,76 @@ async fn handle_file(
             // succeed or surface the same error again.
             state.update(app, &path, &filename, |u| {
                 u.status = UploadStatus::Error;
+                u.error = Some(format!("{e}"));
+            });
+        }
+    }
+}
+
+/// Send a demo to the comps round instead of to the public library.
+///
+/// `auto` says the launcher decided this from the filename rather than the
+/// user picking it, and it travels to the server, which treats the two
+/// differently: an auto entry that turns out not to be a run of the map is
+/// withdrawn and left as an ordinary upload, while a hand-picked one is
+/// refused where the user can see it.
+///
+/// A failure here does NOT fall back to the ordinary upload. The row goes back
+/// to being held, carrying the reason, and the two buttons stay on screen. The
+/// whole point of the guard is that this file does not travel the public route
+/// by accident, and "the entry failed" is not a reason to publish a run.
+#[allow(clippy::too_many_arguments)]
+async fn submit_to_comps(
+    client: &Client,
+    state: &Arc<UploadState>,
+    app: &AppHandle,
+    cache: &mut UploadCache,
+    path: &Path,
+    filename: &str,
+    md5: &str,
+    hold: CompsHold,
+    auto: bool,
+    size_bytes: Option<u64>,
+) {
+    state.update(app, path, filename, |u| {
+        u.status = UploadStatus::Uploading;
+        u.error = None;
+        u.comps = Some(hold.clone());
+    });
+
+    let t_up = Instant::now();
+    let result = client.upload_comps_demo(path, hold.round_id, auto).await;
+    let up_bps = size_bytes.and_then(|s| throughput_bps(s, t_up.elapsed()));
+
+    match result {
+        Ok(r) => {
+            let entered = CompsHold { submission_id: Some(r.submission_id), ..hold };
+            state.update(app, path, filename, |u| {
+                u.status = UploadStatus::CompsEntered;
+                u.demo_id = Some(r.demo_id);
+                u.upload_throughput_bps = up_bps;
+                u.comps = Some(entered.clone());
+                u.error = None;
+            });
+            cache.insert(path, md5.to_string(), CACHE_STATUS_COMPS, Some(r.demo_id));
+            let _ = cache.save();
+        }
+        // Already on the server - as an ordinary upload made before the round
+        // opened, or as an earlier entry. Either way there is nothing to
+        // retry, and no id comes back: comps does not answer whose demo it
+        // collided with while the round is still running.
+        Err(ApiError::AlreadyUploaded) => {
+            state.update(app, path, filename, |u| {
+                u.status = UploadStatus::Duplicate;
+                u.duplicate_reason = Some("server".to_string());
+                u.error = None;
+            });
+            cache.insert(path, md5.to_string(), "duplicate", None);
+            let _ = cache.save();
+        }
+        Err(e) => {
+            state.update(app, path, filename, |u| {
+                u.status = UploadStatus::HeldForComps;
                 u.error = Some(format!("{e}"));
             });
         }

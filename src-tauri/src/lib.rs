@@ -1,6 +1,7 @@
 mod api;
 mod cache;
 mod commands;
+mod comps;
 mod config;
 mod demo_player;
 mod engine;
@@ -200,6 +201,12 @@ pub fn run() {
             // they would on a regular Start click.
             autostart_watcher_if_enabled(app.handle());
 
+            // Keep the comps round current in the background. The guard needs
+            // it whether or not the user ever opens the Comps tab - a round
+            // that starts while the launcher is running is exactly when a run
+            // would otherwise be published mid-round.
+            commands::spawn_comps_refresh(app.handle().clone());
+
             log_startup("setup() complete");
             Ok(())
         })
@@ -294,6 +301,11 @@ pub fn run() {
             commands::notification_system_mark_unread,
             commands::set_autostart_enabled,
             commands::is_autostart_enabled,
+            commands::get_comps,
+            commands::refresh_comps,
+            commands::comps_enter,
+            commands::comps_upload_normally,
+            commands::comps_mark_intro_seen,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -392,6 +404,7 @@ fn autostart_watcher_if_enabled(app: &tauri::AppHandle) {
     let handle = match watcher::start(
         app.clone(),
         state.upload_state.clone(),
+        state.comps.clone(),
         demos,
         cfg.include_subfolders,
         config::api_base_url(),

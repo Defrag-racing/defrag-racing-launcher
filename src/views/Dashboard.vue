@@ -317,7 +317,7 @@
     type RowFilter = 'all' | 'in_progress' | 'uploaded' | 'not_uploaded' | 'error' | 'rendered';
     const rowFilter = ref<RowFilter>('all');
 
-    type StatusKind = 'inprogress' | 'done' | 'duplicate' | 'error' | 'none';
+    type StatusKind = 'inprogress' | 'done' | 'duplicate' | 'error' | 'none' | 'held' | 'comps';
     interface RowStatus { label: string; color: string; kind: StatusKind; hint: string }
 
     // Resolve the status shown on a row: the live queue wins (it's
@@ -326,6 +326,9 @@
     const resolveStatus = (d: DemoLibraryEntry): RowStatus => {
         const DUP_HINT = 'This exact run is already on defrag.racing - nothing to upload.';
         const DONE_HINT = 'Safely backed up to your defrag.racing profile.';
+        const HELD_HINT = 'This looks like a run of a map being played in comps this week, so it was NOT backed up - '
+            + 'a comps run published mid-round cannot be taken back. Choose what happens to it below.';
+        const COMPS_HINT = 'Entered into this week\'s comps round. It is on defrag.racing but stays private until the round ends.';
         const live = queueByPath.value.get(d.path);
         if (live) {
             switch (live.status) {
@@ -336,10 +339,14 @@
                 case 'done':      return { label: 'Uploaded',          color: 'text-emerald-400', kind: 'done',       hint: DONE_HINT };
                 case 'duplicate': return { label: 'Already backed up', color: 'text-cyan-400',    kind: 'duplicate',  hint: DUP_HINT };
                 case 'error':     return { label: 'Error',             color: 'text-red-400',     kind: 'error',      hint: 'Backup failed - click Retry to try again.' };
+                case 'held_for_comps': return { label: 'Held for comps', color: 'text-amber-300', kind: 'held',  hint: HELD_HINT };
+                case 'comps_entered':  return { label: 'Entered in comps', color: 'text-amber-300/80', kind: 'comps', hint: COMPS_HINT };
             }
         }
         if (d.upload_status === 'done')      return { label: 'Backed up',         color: 'text-emerald-400/80', kind: 'done',      hint: DONE_HINT };
         if (d.upload_status === 'duplicate') return { label: 'Already backed up', color: 'text-cyan-400/80',    kind: 'duplicate', hint: DUP_HINT };
+        if (d.upload_status === 'comps')     return { label: 'Entered in comps',  color: 'text-amber-300/80',   kind: 'comps',     hint: COMPS_HINT };
+        if (d.upload_status === 'held_for_comps') return { label: 'Held for comps', color: 'text-amber-300',    kind: 'held',      hint: HELD_HINT };
         return { label: 'Not uploaded', color: 'text-neutral-500', kind: 'none', hint: 'Not backed up yet. Turn on auto-backup (top of this tab) and it\'ll be uploaded automatically.' };
     };
 
@@ -803,6 +810,26 @@
         }
     };
 
+    // Answering a demo the comps guard is holding. Both answers go through
+    // the same worker the watcher uses, so the row's status updates through
+    // the normal upload_state_changed stream rather than being faked here.
+    const compsBusy = ref<Set<string>>(new Set());
+    const answerComps = async (path: string, enter: boolean) => {
+        if (compsBusy.value.has(path)) return;
+        compsBusy.value = new Set(compsBusy.value).add(path);
+        try {
+            if (enter) await tauri.compsEnter(path);
+            else await tauri.compsUploadNormally(path);
+            void tauri.compsMarkIntroSeen();
+        } catch (e: any) {
+            toggleError.value = e?.toString?.() ?? 'Could not send the demo';
+        } finally {
+            const next = new Set(compsBusy.value);
+            next.delete(path);
+            compsBusy.value = next;
+        }
+    };
+
     type CtxMenu = { x: number; y: number; demo: DemoLibraryEntry };
     const ctxMenu = ref<CtxMenu | null>(null);
     const openContextMenu = (e: MouseEvent, d: DemoLibraryEntry) => {
@@ -1212,6 +1239,25 @@
                     <div class="text-xs font-semibold flex-shrink-0 cursor-help" :class="resolveStatus(d).color" :title="resolveStatus(d).hint">
                         {{ resolveStatus(d).label }}
                     </div>
+
+                    <!-- A demo the comps guard is holding. The two buttons sit
+                         on the row itself because that is where the user is
+                         looking after a run; the Comps tab repeats them for
+                         anyone who gets there first. -->
+                    <template v-if="resolveStatus(d).kind === 'held'">
+                        <button
+                            class="text-[11px] px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-semibold disabled:opacity-50 flex-shrink-0 whitespace-nowrap"
+                            :disabled="compsBusy.has(d.path)"
+                            :title="`Enter ${d.filename} into this week's comps round`"
+                            @click.stop="answerComps(d.path, true)"
+                        >Enter into comps</button>
+                        <button
+                            class="text-[11px] px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-50 flex-shrink-0 whitespace-nowrap"
+                            :disabled="compsBusy.has(d.path)"
+                            title="Back it up like any other demo. Decides this file only - the next run on a comps map is asked about again."
+                            @click.stop="answerComps(d.path, false)"
+                        >Upload normally</button>
+                    </template>
 
                     <!-- retry when the live upload errored -->
                     <button

@@ -36,6 +36,15 @@ pub struct UploadResponse {
     pub status: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CompsUploadResponse {
+    pub demo_id: u64,
+    pub submission_id: u64,
+    /// Always "pending" today: the round's validator parses the demo out of
+    /// band and decides afterwards whether the entry counts.
+    pub status: String,
+}
+
 /// Errors we care about differentiating in the UI. Anything unexpected
 /// collapses into `Other`.
 #[derive(Debug, thiserror::Error)]
@@ -52,6 +61,18 @@ pub enum ApiError {
     RateLimited,
     #[error("duplicate (demo_id = {demo_id})")]
     Duplicate { demo_id: u64 },
+    // The comps upload route answers a duplicate without an id - the demo it
+    // collided with may be somebody else's, and comps hides entries until the
+    // round is over, so handing back an id would answer a question the round
+    // is deliberately not answering yet.
+    #[error("this demo is already on defrag.racing")]
+    AlreadyUploaded,
+    // A refusal the server phrased itself (round closed, wrong file type,
+    // account restricted). Passed through verbatim rather than re-worded here,
+    // so a rule the site changes doesn't need a launcher release to be
+    // explained correctly.
+    #[error("{0}")]
+    Rejected(String),
     #[error("server error ({status}): {body}")]
     ServerError { status: u16, body: String },
     #[error("network error: {0}")]
@@ -212,9 +233,12 @@ impl Client {
                     // don't panic from the retry closure.
                     Err(_) => return self.http.get("about:blank").send().await,
                 };
-                let form = Form::new()
+                let mut form = Form::new()
                     .text("hash", md5_hex.to_string())
                     .part("demo", part);
+                if let Some(mtime) = file_mtime_secs(path) {
+                    form = form.text("file_mtime", mtime.to_string());
+                }
                 self.http
                     .post(self.url("/api/launcher/upload-demo"))
                     .bearer_auth(&self.token)
@@ -238,6 +262,99 @@ impl Client {
         self.check_status(&resp).await?;
         let body = resp.json::<UploadResponse>().await?;
         Ok(body)
+    }
+
+    /// GET /api/launcher/comps - the round being played, the open ballot, and
+    /// the caller's own entries. Forwarded to the frontend unchanged (same
+    /// reasoning as fetch_servers: the shape belongs to the Laravel side).
+    ///
+    /// Note what is NOT in it: anybody else's time. Times stay hidden while a
+    /// round is running, and the launcher must not become the way around that.
+    pub async fn fetch_comps(&self) -> ApiResult<serde_json::Value> {
+        let resp = self
+            .with_429_retry(|| async {
+                self.http
+                    .get(self.url("/api/launcher/comps"))
+                    .bearer_auth(&self.token)
+                    .header("Accept", "application/json")
+                    .send()
+                    .await
+            })
+            .await?;
+        self.check_status(&resp).await?;
+        Ok(resp.json::<serde_json::Value>().await?)
+    }
+
+    /// POST /api/launcher/comps/upload - enter a demo into the round.
+    ///
+    /// `auto` says the launcher decided this by reading the filename rather
+    /// than the user choosing it. The server treats the two differently: an
+    /// auto entry that turns out not to be a run of the map is withdrawn and
+    /// left as an ordinary upload, while a hand-picked one is refused visibly,
+    /// because there the user made a choice and a silent publish would be a
+    /// worse answer than a rejection they can see.
+    ///
+    /// Goes through the same 429 wrapper as upload_demo - a rescan that finds
+    /// several runs of this week's map would otherwise fail on the rate limit
+    /// exactly where an ordinary upload survives it.
+    pub async fn upload_comps_demo(
+        &self,
+        path: &Path,
+        round_id: i64,
+        auto: bool,
+    ) -> ApiResult<CompsUploadResponse> {
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| anyhow!("invalid filename"))?
+            .to_string();
+
+        let bytes = tokio::fs::read(path).await.context("read demo file")?;
+
+        let resp = self
+            .with_429_retry(|| async {
+                let part = match Part::bytes(bytes.clone())
+                    .file_name(file_name.clone())
+                    .mime_str("application/octet-stream")
+                {
+                    Ok(p) => p,
+                    Err(_) => return self.http.get("about:blank").send().await,
+                };
+                let mut form = Form::new()
+                    .text("round_id", round_id.to_string())
+                    .text("auto", if auto { "1" } else { "0" })
+                    .part("demo", part);
+                if let Some(mtime) = file_mtime_secs(path) {
+                    form = form.text("file_mtime", mtime.to_string());
+                }
+                self.http
+                    .post(self.url("/api/launcher/comps/upload"))
+                    .bearer_auth(&self.token)
+                    .header("Accept", "application/json")
+                    .multipart(form)
+                    .send()
+                    .await
+            })
+            .await?;
+
+        match resp.status().as_u16() {
+            200..=299 => Ok(resp.json::<CompsUploadResponse>().await?),
+            401 => Err(ApiError::Unauthorized),
+            409 => Err(ApiError::AlreadyUploaded),
+            429 => Err(ApiError::RateLimited),
+            // 403 / 404 / 422 all carry a finished sentence in `error`; show
+            // the user what the server actually said instead of a status code.
+            403 | 404 | 422 => {
+                let body = resp.json::<serde_json::Value>().await.unwrap_or_default();
+                let msg = body
+                    .get("error")
+                    .and_then(|e| e.as_str())
+                    .unwrap_or("the server refused this entry")
+                    .to_string();
+                Err(ApiError::Rejected(msg))
+            }
+            status => Err(ApiError::ServerError { status, body: format!("http {}", status) }),
+        }
     }
 
     /// POST /api/launcher/render-video - queue a YouTube render for
@@ -463,6 +580,26 @@ impl Client {
             }
         }
     }
+}
+
+/// When the file was last written, as unix seconds.
+///
+/// Sent with every upload because an HTTP upload carries bytes and a filename
+/// and nothing else - the date the demo has on the player's own disk never
+/// reaches the server otherwise. Comps needs it: a run has to have been made
+/// after the round's ballot opened, and most demos carry no date inside them.
+///
+/// It is evidence in one direction only. A file dated before the ballot is an
+/// old run; a file dated today proves nothing, because copying, unzipping or
+/// downloading rewrites the date.
+fn file_mtime_secs(path: &Path) -> Option<u64> {
+    std::fs::metadata(path)
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs())
 }
 
 fn now_ms() -> u64 {

@@ -50,6 +50,12 @@ tauri-plugin-autostart = "2"
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Round deadlines arrive from the API as ISO 8601 with an offset and are
+# compared as instants (never re-parsed as local time - that is how a comps
+# round once shifted by two hours on the site). Only the parser is needed,
+# so the clock feature stays off; `now` comes from std::time.
+chrono = { version = "0.4", default-features = false, features = ["std", "alloc"] }
 thiserror = "1"
 anyhow = "1"
 

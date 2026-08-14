@@ -32,7 +32,15 @@ export interface LauncherConfig {
     custom_launch_args: string;
     /** User-defined named launch profiles (developer mode). */
     launch_profiles: LaunchProfile[];
+    /** What happens to a demo that looks like a run of this week's comps
+     *  map. 'ask' holds it and lets the user pick, 'auto' enters it, 'off'
+     *  disables the guard entirely. */
+    comps_mode: CompsMode;
+    /** Whether the "this demo is being held" explanation has been shown. */
+    comps_intro_seen: boolean;
 }
+
+export type CompsMode = 'ask' | 'auto' | 'off';
 
 export interface EngineCandidate {
     kind: 'odfe' | 'idfe' | 'other';
@@ -46,7 +54,13 @@ export type UploadStatus =
     | 'uploading'
     | 'done'
     | 'duplicate'
-    | 'error';
+    | 'error'
+    /** Recognised as a run of this week's comps map and deliberately not
+     *  sent anywhere yet - waiting for the user to say which route it takes. */
+    | 'held_for_comps'
+    /** Entered into a comps round: on the server, but not public until the
+     *  round ends. */
+    | 'comps_entered';
 
 export interface PendingUpload {
     path: string;
@@ -60,6 +74,66 @@ export interface PendingUpload {
     size_bytes: number | null;
     hash_throughput_bps: number | null;
     upload_throughput_bps: number | null;
+    /** Set on held / entered rows: which round the demo belongs to and which
+     *  map it matched, so the row can say so without a second lookup. */
+    comps: CompsHold | null;
+}
+
+export interface CompsHold {
+    round_id: number;
+    comp_number: number;
+    physics: string;
+    map: string;
+    submission_id: number | null;
+}
+
+/** One of the caller's own entries in the round being played. Times here are
+ *  the user's own - nobody else's appear in this payload at all, because a
+ *  live leaderboard would hand every later entrant the answer. */
+export interface CompsEntry {
+    id: number;
+    status: 'pending' | 'valid' | 'invalid';
+    physics: string | null;
+    time: string | null;
+    invalid_reason: string | null;
+    is_highlight: boolean;
+    auto_entered: boolean;
+    filename: string | null;
+    file_hash: string | null;
+}
+
+export interface CompsPlaying {
+    round_id: number;
+    comp_number: number;
+    category: string | null;
+    weapon: string | null;
+    /** ISO 8601 with offset. Compare as an instant, format as local. */
+    ends_at: string | null;
+    prize_eur: number;
+    /** physics -> map name. */
+    maps: Record<string, string | null>;
+    /** How many people are in, per physics. A count, never a list. */
+    entrants: Record<string, number>;
+    my_entries: CompsEntry[];
+}
+
+export interface CompsVoting {
+    round_id: number;
+    comp_number: number;
+    category: string | null;
+    closes_at: string | null;
+    is_open: boolean;
+    candidates: string[];
+    next_category: string | null;
+}
+
+export interface CompsPayload {
+    playing: CompsPlaying | null;
+    voting: CompsVoting | null;
+    /** Added by the launcher, not the server: when this copy was fetched and
+     *  whether it is the last known good one after a failed refresh. */
+    fetched_at_ms: number;
+    stale: boolean;
 }
 
 export interface TokenCheck {
@@ -272,6 +346,23 @@ export const tauri = {
     // uses a minimal interface (DefragServer below) for the columns it
     // actually renders.
     getServers: () => invoke<{ servers: DefragServer[] }>('get_servers'),
+
+    // ---- Comps ----------------------------------------------------------
+    /** The round being played, the open ballot, and the user's own entries.
+     *  Served from the launcher's cached copy while it is fresh (5 min), so
+     *  opening the tab is instant and repeated visits cost nothing. */
+    getComps: () => invoke<CompsPayload>('get_comps'),
+    /** Force a fetch. Falls back to the cached copy with `stale: true` when
+     *  the request fails, because that copy is what the guard is deciding
+     *  from - showing it is showing the truth about the launcher's state. */
+    refreshComps: () => invoke<CompsPayload>('refresh_comps'),
+    /** Answer a held demo: enter it into the round it was held for. */
+    compsEnter: (path: string) => invoke<void>('comps_enter', { path }),
+    /** Answer a held demo: upload it the ordinary way. Decides this one file
+     *  only - the next demo of the same map is held again. */
+    compsUploadNormally: (path: string) => invoke<void>('comps_upload_normally', { path }),
+    /** Remember that the "why is this demo being held" note has been read. */
+    compsMarkIntroSeen: () => invoke<void>('comps_mark_intro_seen'),
 
     // ---- Embedded demo player (Windows only) ----------------------------
     /** Resolve the render width/height/aspect the engine would use for the
@@ -568,7 +659,8 @@ export interface DemoLibraryEntry {
     mtime: number;
     hash: string | null;
     demo_id: number | null;
-    /** "done" | "duplicate" | null, mirrors cache.status. */
+    /** "done" | "duplicate" | "comps" | "held_for_comps" | null, mirrors
+     *  cache.status plus the two comps states the queue can be in. */
     upload_status: string | null;
 }
 

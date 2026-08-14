@@ -8,6 +8,7 @@ const router = createRouter({
         { path: '/', redirect: '/dashboard' },
         { path: '/onboarding', name: 'onboarding', component: () => import('./views/Onboarding.vue') },
         { path: '/dashboard', name: 'dashboard', component: () => import('./views/Dashboard.vue') },
+        { path: '/comps', name: 'comps', component: () => import('./views/Comps.vue') },
         { path: '/servers', name: 'servers', component: () => import('./views/Servers.vue') },
         { path: '/records', name: 'records', component: () => import('./views/Records.vue') },
         { path: '/maps', name: 'maps', component: () => import('./views/Maps.vue') },

@@ -21,6 +21,8 @@ export const useConfigStore = defineStore('config', () => {
         developer_mode: false,
         custom_launch_args: '',
         launch_profiles: [],
+        comps_mode: 'ask',
+        comps_intro_seen: false,
     });
     const hasToken = ref(false);
     const autoUploadRunning = ref(false);

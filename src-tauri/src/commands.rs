@@ -6,6 +6,7 @@
 //! toast.
 
 use crate::cache::UploadCache;
+use crate::comps::CompsState;
 use crate::config::{self, Config};
 use crate::engine::{self, EngineCandidate};
 use crate::history::{ConnectionEntry, ConnectionHistory};
@@ -48,6 +49,10 @@ pub struct AppState {
     pub session_tracker: Arc<crate::session_tracker::SessionTracker>,
     /// The (at most one) active embedded demo-player session.
     pub demo_player: crate::demo_player::DemoPlayer,
+    /// Comps: the cached round plus the guard mode. Lives outside the watcher
+    /// so the Comps tab works with the watcher stopped, and so a held demo
+    /// keeps its round across a Stop+Start.
+    pub comps: Arc<CompsState>,
 }
 
 impl Default for AppState {
@@ -59,6 +64,15 @@ impl Default for AppState {
         upload_state.load_persisted();
         let history = Arc::new(ConnectionHistory::default());
         let session_tracker = crate::session_tracker::SessionTracker::new(history.clone());
+        // Read the last comps payload off disk before the webview mounts. The
+        // guard has to be able to decide from the first demo of the session,
+        // including on a machine that is offline right now - a round it cannot
+        // see is a round it cannot protect.
+        let comps = Arc::new(CompsState::default());
+        comps.load_persisted();
+        if let Ok(cfg) = Config::load() {
+            comps.set_mode(cfg.comps_mode);
+        }
         Self {
             watcher: Mutex::new(None),
             upload_state,
@@ -67,6 +81,7 @@ impl Default for AppState {
             history,
             session_tracker,
             demo_player: crate::demo_player::DemoPlayer::default(),
+            comps,
         }
     }
 }
@@ -82,8 +97,18 @@ pub fn get_config() -> Result<Config, String> {
     Config::load().map_err(err_to_string)
 }
 
+/// Persist the config, and push the one field the hot path reads from memory.
+///
+/// The comps guard is consulted once per demo, so it cannot re-read
+/// config.json each time; the copy in AppState is what the watcher looks at.
+/// Setting it here rather than in a separate command means the mode can never
+/// be saved without taking effect - a Settings toggle that needed a restart to
+/// mean anything would be a toggle that lies.
 #[tauri::command]
-pub fn save_config(cfg: Config) -> Result<(), String> {
+pub fn save_config(app: AppHandle, cfg: Config) -> Result<(), String> {
+    use tauri::Manager;
+    let state: State<AppState> = app.state();
+    state.comps.set_mode(cfg.comps_mode);
     cfg.save().map_err(err_to_string)
 }
 
@@ -253,6 +278,10 @@ pub fn reset_launcher(state: State<'_, AppState>) -> Result<(), String> {
     // Persisted queue history - blank the Dashboard so a re-onboarded
     // user doesn't see stale rows from the previous account.
     let _ = UploadState::clear_persisted();
+    // The cached comps round belongs to the account that fetched it, and it
+    // decides whether demos get held - a stale copy after a reset would hold
+    // the next account's demos for a round it never entered.
+    let _ = CompsState::clear_persisted();
     // Wipe the in-memory queue too so the UI updates immediately
     // without waiting for a restart.
     state.upload_state.clear_items();
@@ -560,6 +589,7 @@ pub fn start_auto_upload(
     let handle = watcher::start(
         app,
         state.upload_state.clone(),
+        state.comps.clone(),
         demos,
         cfg.include_subfolders,
         config::api_base_url(),
@@ -805,6 +835,11 @@ pub fn list_demos(state: State<'_, AppState>) -> Result<Vec<DemoLibraryEntry>, S
             queue_hit.and_then(|(s, _)| match s {
                 UploadStatus::Done => Some("done".to_string()),
                 UploadStatus::Duplicate => Some("duplicate".to_string()),
+                // The library row has to say what is true of the file: entered
+                // into a round is not backed up, and held is not "nothing
+                // happened" - it is waiting on the user.
+                UploadStatus::CompsEntered => Some(watcher::CACHE_STATUS_COMPS.to_string()),
+                UploadStatus::HeldForComps => Some("held_for_comps".to_string()),
                 _ => None,
             })
         });
@@ -1478,6 +1513,178 @@ pub async fn get_maps(page: u32, search: Option<String>) -> Result<serde_json::V
         .ok_or_else(|| "No token saved - maps browser requires a launcher token from defrag.racing/user/settings".to_string())?;
     let client = crate::api::Client::new(config::api_base_url(), token).map_err(err_to_string)?;
     client.fetch_maps(page, search.as_deref()).await.map_err(err_to_string)
+}
+
+// ---- Comps -----------------------------------------------------------------
+
+/// The comps payload for the Comps tab.
+///
+/// Served from the cached copy while it is fresh, so switching to the tab is
+/// instant and does not cost a request per visit. Two fields are added on the
+/// way out that the server does not send: `fetched_at_ms` and `stale`, so the
+/// tab can say how old what it shows is instead of presenting a week-old round
+/// as current.
+#[tauri::command]
+pub async fn get_comps(app: AppHandle) -> Result<serde_json::Value, String> {
+    use tauri::Manager;
+    let (comps, fresh) = {
+        let state: State<AppState> = app.state();
+        (state.comps.clone(), state.comps.is_fresh())
+    };
+    if fresh {
+        if let Some(snapshot) = comps.snapshot() {
+            return Ok(decorate_comps(snapshot.raw, snapshot.fetched_at_ms, false));
+        }
+    }
+    fetch_comps(&comps).await
+}
+
+/// Force a fetch - the Refresh button, and anything that needs the round to be
+/// current right now rather than within five minutes.
+#[tauri::command]
+pub async fn refresh_comps(app: AppHandle) -> Result<serde_json::Value, String> {
+    use tauri::Manager;
+    let comps = {
+        let state: State<AppState> = app.state();
+        state.comps.clone()
+    };
+    fetch_comps(&comps).await
+}
+
+/// Fetch, store, and hand back the decorated payload.
+///
+/// A failed fetch falls back to the cached copy marked `stale` rather than
+/// erroring out: the guard is already deciding from that same copy, so the tab
+/// showing it is the tab telling the truth about what the launcher believes.
+/// With nothing cached there is nothing to show and the error goes through.
+async fn fetch_comps(comps: &Arc<CompsState>) -> Result<serde_json::Value, String> {
+    let token = token::load()
+        .map_err(err_to_string)?
+        .ok_or_else(|| "No token saved - comps needs a launcher token from defrag.racing/user/settings".to_string())?;
+    let client = crate::api::Client::new(config::api_base_url(), token).map_err(err_to_string)?;
+    match client.fetch_comps().await {
+        Ok(raw) => {
+            let snapshot = comps.store(raw);
+            Ok(decorate_comps(snapshot.raw, snapshot.fetched_at_ms, false))
+        }
+        Err(e) => match comps.snapshot() {
+            Some(snapshot) => Ok(decorate_comps(snapshot.raw, snapshot.fetched_at_ms, true)),
+            None => Err(e.to_string()),
+        },
+    }
+}
+
+fn decorate_comps(mut raw: serde_json::Value, fetched_at_ms: u64, stale: bool) -> serde_json::Value {
+    if let Some(obj) = raw.as_object_mut() {
+        obj.insert("fetched_at_ms".into(), serde_json::json!(fetched_at_ms));
+        obj.insert("stale".into(), serde_json::json!(stale));
+    }
+    raw
+}
+
+/// Keep the cached round current in the background.
+///
+/// Not only for the tab. A round that STARTS while the launcher is open would
+/// otherwise be invisible to the guard until the user happened to open Comps,
+/// and every run recorded in the meantime would take the public route. The
+/// first tick fires immediately, so a launcher that has just started knows
+/// what is being played before the first demo of the session lands.
+pub fn spawn_comps_refresh(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        use tauri::Manager;
+        let comps = {
+            let state: State<AppState> = app.state();
+            state.comps.clone()
+        };
+        let mut tick =
+            tokio::time::interval(std::time::Duration::from_secs(crate::comps::REFRESH_SECS));
+        loop {
+            tick.tick().await;
+            // No token means no comps data and no guard - the same position a
+            // launcher is in before onboarding. Nothing to log every 5 minutes.
+            if matches!(token::load(), Ok(None) | Err(_)) {
+                continue;
+            }
+            if let Err(e) = fetch_comps(&comps).await {
+                log::debug!("comps refresh failed: {e}");
+            }
+        }
+    });
+}
+
+/// The user answered a held demo: enter it into the round.
+#[tauri::command]
+pub async fn comps_enter(app: AppHandle, path: String) -> Result<(), String> {
+    comps_answer(app, path, true).await
+}
+
+/// The user answered a held demo: upload it the ordinary way.
+///
+/// This decides one file, not the setting. The next demo of the same map is
+/// held again - the user answering "this one is not a comps run" is not the
+/// same as them saying they want the guard off.
+#[tauri::command]
+pub async fn comps_upload_normally(app: AppHandle, path: String) -> Result<(), String> {
+    comps_answer(app, path, false).await
+}
+
+async fn comps_answer(app: AppHandle, path: String, enter: bool) -> Result<(), String> {
+    use tauri::Manager;
+    let path = PathBuf::from(path);
+
+    // Hand the work to the running worker when there is one. It owns the
+    // in-memory upload cache, and a second writer would clobber its entries on
+    // the next save - the file would be re-hashed and re-checked forever.
+    let queued = {
+        let state: State<AppState> = app.state();
+        let watcher = state.watcher.lock().unwrap();
+        match watcher.as_ref() {
+            Some(handle) => handle
+                .tx
+                .send(if enter {
+                    Message::CompsEnter(path.clone())
+                } else {
+                    Message::CompsUploadNormally(path.clone())
+                })
+                .is_ok(),
+            None => false,
+        }
+    };
+    if queued {
+        return Ok(());
+    }
+
+    // No watcher running - a held row survives a Stop, and its buttons have to
+    // keep working. Same pipeline, run here instead.
+    let token = token::load()
+        .map_err(err_to_string)?
+        .ok_or_else(|| "No token saved - uploading needs a launcher token from defrag.racing/user/settings".to_string())?;
+    let (upload_state, comps) = {
+        let state: State<AppState> = app.state();
+        (state.upload_state.clone(), state.comps.clone())
+    };
+    watcher::process_one(
+        app.clone(),
+        upload_state,
+        comps,
+        config::api_base_url(),
+        token,
+        path,
+        enter,
+    )
+    .await
+    .map_err(err_to_string)
+}
+
+/// Remember that the "this demo is being held" explanation has been shown.
+#[tauri::command]
+pub fn comps_mark_intro_seen() -> Result<(), String> {
+    let mut cfg = Config::load().map_err(err_to_string)?;
+    if cfg.comps_intro_seen {
+        return Ok(());
+    }
+    cfg.comps_intro_seen = true;
+    cfg.save().map_err(err_to_string)
 }
 
 /// Read (without consuming) the URL waiting for user confirmation. Called

@@ -3,7 +3,7 @@
     import { useRoute, useRouter } from 'vue-router';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
     import { openExternal } from '../lib/open';
-    import { tauri, type EngineCandidate, type HealthItem, type LaunchProfile } from '../lib/tauri';
+    import { tauri, type CompsMode, type EngineCandidate, type HealthItem, type LaunchProfile } from '../lib/tauri';
     import TokenFeatureList from '../components/TokenFeatureList.vue';
     import TokenFreeFeatures from '../components/TokenFreeFeatures.vue';
     import UpdateBanner from '../components/UpdateBanner.vue';
@@ -430,6 +430,49 @@
                         Takes effect immediately for the running watcher.
                     </p>
                 </div>
+            </section>
+
+            <!-- Comps guard. Lives next to the demos folder because it is a
+                 rule about what happens to demos found in it. -->
+            <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
+                <div>
+                    <div class="font-semibold">Runs on comps maps</div>
+                    <div class="text-xs text-neutral-500 mt-0.5">
+                        Backed-up demos are public straight away. A run on a map being played in
+                        <a href="#" class="text-brand-400 hover:underline"
+                           @click.prevent="openExternal('https://defrag.racing/comps')">comps</a>
+                        would therefore publish your time and your route in the middle of the round,
+                        and that cannot be taken back - so the launcher treats those demos separately.
+                        The map is read from the filename, and the site checks it again after parsing
+                        the demo: if it was not a run of that map, the entry is withdrawn and it
+                        becomes an ordinary upload.
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button
+                        v-for="opt in [
+                            { value: 'ask',  label: 'Ask me',           sub: 'hold it and let me choose' },
+                            { value: 'auto', label: 'Enter it',         sub: 'send it to comps for me' },
+                            { value: 'off',  label: 'Treat as normal',  sub: 'back it up publicly' },
+                        ]"
+                        :key="opt.value"
+                        class="px-3 py-2 rounded text-sm border transition-colors text-left"
+                        :class="(config.config.comps_mode ?? 'ask') === opt.value
+                            ? 'bg-brand-500/20 border-brand-500/60 text-brand-200'
+                            : 'bg-white/5 border-white/10 hover:bg-white/10 text-neutral-300'"
+                        @click="config.save({ comps_mode: opt.value as CompsMode })"
+                    >
+                        <div class="font-semibold">{{ opt.label }}</div>
+                        <div class="text-xs text-neutral-500">{{ opt.sub }}</div>
+                    </button>
+                </div>
+                <p v-if="(config.config.comps_mode ?? 'ask') === 'off'" class="text-xs text-amber-300">
+                    With this off, a run you record on this week's map is published as soon as it is
+                    backed up, while the round is still being played.
+                </p>
+                <p v-else class="text-xs text-neutral-500">
+                    Takes effect immediately, for the next demo the watcher sees.
+                </p>
             </section>
 
             <!-- Token -->

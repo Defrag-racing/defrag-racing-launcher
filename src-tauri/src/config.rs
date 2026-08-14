@@ -104,6 +104,20 @@ pub struct Config {
     /// one. Only honoured in developer mode.
     #[serde(default)]
     pub launch_profiles: Vec<LaunchProfile>,
+
+    /// What happens to a demo that looks like a run of this week's comps map.
+    /// `ask` by default: the demo is held and the user picks. See
+    /// comps::CompsMode for why holding is the safe default rather than a
+    /// cautious one.
+    #[serde(default)]
+    pub comps_mode: crate::comps::CompsMode,
+
+    /// Whether the user has already been shown what holding a demo means.
+    /// The explanation appears once, the first time the guard actually holds
+    /// something - explaining it during onboarding would describe a situation
+    /// the user has not been in yet.
+    #[serde(default)]
+    pub comps_intro_seen: bool,
 }
 
 /// A named engine launch configuration the user defined in developer
@@ -134,6 +148,8 @@ impl Default for Config {
             developer_mode: false,
             custom_launch_args: String::new(),
             launch_profiles: Vec::new(),
+            comps_mode: crate::comps::CompsMode::default(),
+            comps_intro_seen: false,
         }
     }
 }

@@ -23,6 +23,7 @@
     const showNav = computed(() => {
         const r = route.name;
         return r === 'dashboard'
+            || r === 'comps'
             || r === 'servers'
             || r === 'records'
             || r === 'maps'
@@ -217,6 +218,15 @@
 
     let unlistenPending: UnlistenFn | null = null;
     let unlistenResult: UnlistenFn | null = null;
+    let unlistenQueue: UnlistenFn | null = null;
+
+    // Demos the comps guard is holding. Badged on the Comps tab because a
+    // held demo is doing nothing until someone answers it, and the user has
+    // no other reason to look - they recorded a run and expect the launcher
+    // to have dealt with it.
+    const heldForComps = ref(0);
+    const countHeld = (items: { status: string }[]) =>
+        items.filter((i) => i.status === 'held_for_comps').length;
 
     onMounted(async () => {
         await config.refresh();
@@ -261,6 +271,15 @@
                 }
             },
         );
+        unlistenQueue = await listen<{ items: { status: string }[] }>(
+            'upload_state_changed',
+            (ev) => { heldForComps.value = countHeld(ev.payload.items); },
+        );
+        try {
+            const snapshot = await tauri.getUploadState();
+            heldForComps.value = countHeld(snapshot.items);
+        } catch { /* no queue yet */ }
+
         try {
             const url = await tauri.getPendingDeepLink();
             if (url && !pendingDeepLink.value) {
@@ -294,6 +313,7 @@
         if (notifPollTimer !== undefined) window.clearInterval(notifPollTimer);
         if (unlistenPending) unlistenPending();
         if (unlistenResult) unlistenResult();
+        if (unlistenQueue) unlistenQueue();
         window.clearTimeout(deepLinkErrorTimer);
         updaterStore.stop();
     });
@@ -316,6 +336,24 @@
                         ? 'bg-white/10 text-neutral-100 font-semibold'
                         : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
                 >Demos</RouterLink>
+                <!-- Comps sits next to Demos on purpose: a held demo is a
+                     demo, and the answer to "where did my run go" has to be
+                     one tab away from where the user looked first. The dot
+                     appears while something is waiting on an answer. -->
+                <RouterLink
+                    :to="{ name: 'comps' }"
+                    class="relative px-3 py-1.5 text-sm rounded transition-colors"
+                    :class="route.name === 'comps'
+                        ? 'bg-white/10 text-neutral-100 font-semibold'
+                        : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
+                >
+                    Comps
+                    <span
+                        v-if="heldForComps > 0"
+                        class="absolute -top-0.5 -right-0.5 text-[10px] font-bold px-1 min-w-[16px] h-[16px] flex items-center justify-center rounded-full bg-amber-500 text-black"
+                        :title="`${heldForComps} demo(s) waiting for you to choose`"
+                    >{{ heldForComps }}</span>
+                </RouterLink>
                 <RouterLink
                     :to="{ name: 'servers' }"
                     class="px-3 py-1.5 text-sm rounded transition-colors"
