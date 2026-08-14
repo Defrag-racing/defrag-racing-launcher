@@ -107,6 +107,17 @@ pub struct GuardRound {
 
 impl GuardRound {
     fn from_payload(raw: &serde_json::Value) -> Option<Self> {
+        // Somebody who cannot enter a run has nothing to hold a demo for. No
+        // linked Q3DF.org profile means the round is not theirs to be in, so
+        // their demos take the ordinary path and the tab says why. The site
+        // still keeps a run on the map being played out of public view - that
+        // was never the launcher's job to guarantee.
+        if raw.get("entry_gate").and_then(|gate| gate.get("may")).and_then(|may| may.as_bool())
+            == Some(false)
+        {
+            return None;
+        }
+
         let playing = raw.get("playing")?;
         if playing.is_null() {
             return None;
@@ -433,6 +444,22 @@ mod tests {
         assert_eq!(physics_from_filename("cpm22[fc.cpm.3]12.345(nick).dm_68").as_deref(), Some("cpm"));
         assert_eq!(physics_from_filename("my run.dm_68"), None);
         assert_eq!(physics_from_filename("cpm22[df]12.345(nick).dm_68"), None);
+    }
+
+    #[test]
+    fn an_account_that_cannot_enter_holds_nothing() {
+        let state = CompsState::default();
+        let mut raw = payload("Fast-Strafe", &far_future());
+        raw["entry_gate"] = json!({
+            "may": false,
+            "reason": "Link your Q3DF.org account to enter a run.",
+            "needs": "mdd",
+            "settings_url": "https://defrag.racing/user/settings"
+        });
+        state.adopt(raw);
+
+        assert!(state.guard_match("fast-strafe[df.cpm]01.234(nick).dm_68").is_none());
+        assert!(state.open_round_id().is_none());
     }
 
     #[test]

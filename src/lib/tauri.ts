@@ -140,11 +140,30 @@ export interface CompsNotice {
     appears_at: string | null;
 }
 
+/** Whether this account may enter a run at all.
+ *
+ *  A launcher token is handed to any signed-in account, linked profile or not,
+ *  because backing demos up and browsing servers have nothing to do with
+ *  comps. Entering does, so the Comps tab asks the server rather than finding
+ *  out one rejected upload at a time. */
+export interface CompsEntryGate {
+    may: boolean;
+    /** Finished sentence from the server, or null when they may enter. */
+    reason: string | null;
+    /** 'signin' | 'verify' | 'mdd' | null - what is missing. */
+    needs: 'signin' | 'verify' | 'mdd' | null;
+    /** Where on the site to go and fix it. */
+    settings_url: string;
+}
+
 export interface CompsPayload {
     playing: CompsPlaying | null;
     voting: CompsVoting | null;
     /** Optional: a server older than this feature does not send it. */
     my_notices?: CompsNotice[];
+    /** Optional for the same reason. Absent means the server is old, and an
+     *  old server does not enforce this - so absent is treated as allowed. */
+    entry_gate?: CompsEntryGate;
     /** Added by the launcher, not the server: when this copy was fetched and
      *  whether it is the last known good one after a failed refresh. */
     fetched_at_ms: number;

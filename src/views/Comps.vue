@@ -72,6 +72,24 @@
 
     const appearsAt = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : '');
 
+    /** Whether this account may enter at all. A server without the field does
+     *  not enforce the rule, so silence means allowed. */
+    const gate = computed(() => data.value?.entry_gate ?? null);
+
+    const gateTitle = computed(() => {
+        switch (gate.value?.needs) {
+            case 'signin':
+                return 'Sign in on defrag.racing';
+            case 'verify':
+                return 'Confirm your email address';
+            default:
+                return 'Link your Q3DF.org account';
+        }
+    });
+
+    const openSettings = () =>
+        openExternal(gate.value?.settings_url ?? 'https://defrag.racing/user/settings').catch(() => {});
+
     const physicsOrder = ['cpm', 'vq3'];
     const mapRows = computed(() => {
         const maps = playing.value?.maps ?? {};
@@ -221,6 +239,27 @@
                     :to="{ name: 'settings', query: { highlight: 'token' } }"
                     class="inline-flex items-center gap-1 mt-1 px-3 py-1.5 rounded bg-brand-500/20 hover:bg-brand-500/30 text-brand-300 text-sm font-semibold"
                 >Open Settings to paste a token →</RouterLink>
+            </div>
+        </div>
+
+        <!-- Signed in, but not allowed to enter a run. The whole tab is that
+             one sentence: a round they cannot be in is not worth a map list, a
+             countdown or an entry table, and every button in here would lead
+             to a refusal. Everything else in the launcher works as usual - a
+             token is handed to any account, because backing demos up has
+             nothing to do with comps. -->
+        <div v-else-if="gate && !gate.may" class="flex-1 flex items-center justify-center p-8">
+            <div class="text-center max-w-sm space-y-2">
+                <div class="text-5xl">🔗</div>
+                <div class="text-neutral-300 font-semibold">{{ gateTitle }}</div>
+                <p class="text-sm text-neutral-500">{{ gate.reason }}</p>
+                <p class="text-xs text-neutral-600">
+                    Everything else in the launcher keeps working - this is only about entering comps.
+                </p>
+                <button
+                    class="inline-flex items-center gap-1 mt-1 px-3 py-1.5 rounded bg-brand-500/20 hover:bg-brand-500/30 text-brand-300 text-sm font-semibold"
+                    @click="openSettings"
+                >Open defrag.racing settings →</button>
             </div>
         </div>
 
