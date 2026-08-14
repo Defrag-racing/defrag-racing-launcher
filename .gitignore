@@ -30,3 +30,6 @@ dist-ssr
 *.key
 *.key.pub
 .tauri/
+
+# Working plan / roadmap notes. Local only, not part of the app.
+/LAUNCHER_PLAN.md
