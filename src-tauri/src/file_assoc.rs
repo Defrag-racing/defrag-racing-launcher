@@ -38,6 +38,9 @@ pub struct AssocStatus {
 }
 
 impl AssocStatus {
+    /// Only the non-Windows stub calls this, so a Windows build sees it as
+    /// dead - it is not, it is the other half of the same file.
+    #[cfg_attr(windows, allow(dead_code))]
     fn unsupported() -> Self {
         Self { supported: false, context_menu: false, is_default: false, default_owner: None }
     }
@@ -103,7 +106,24 @@ mod imp {
             .map_err(write)?;
         open_with.set_value(PROGID, &"").map_err(write)?;
 
+        notify_shell();
+
         Ok(())
+    }
+
+    /// Tell Explorer the associations changed.
+    ///
+    /// Without this the registry is right and the screen is wrong: Explorer
+    /// caches the icon for a file type and has no reason to look again, so
+    /// freshly associated demos keep the blank generic page icon until the
+    /// user logs out. Nothing else in the shell notices either - the
+    /// Open-with list, the type description, the lot.
+    fn notify_shell() {
+        use windows::Win32::UI::Shell::{SHChangeNotify, SHCNE_ASSOCCHANGED, SHCNF_IDLIST};
+
+        unsafe {
+            SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None);
+        }
     }
 
     pub fn status() -> AssocStatus {
@@ -160,6 +180,8 @@ mod imp {
         ext.set_value("", &PROGID)
             .map_err(|e| format!("Could not write to the registry: {e}"))?;
 
+        notify_shell();
+
         Ok(status())
     }
 
@@ -173,6 +195,8 @@ mod imp {
 
         let _ = classes.delete_subkey_all(format!("SystemFileAssociations\\{EXT}\\shell\\{VERB}"));
         let _ = classes.delete_subkey_all(PROGID);
+
+        notify_shell();
 
         Ok(())
     }

@@ -113,6 +113,9 @@ windows = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_Graphics_Gdi",
     "Win32_System_LibraryLoader",
+    # SHChangeNotify, so Explorer picks up a file association we just wrote
+    # instead of serving its cached icon until the next logon.
+    "Win32_UI_Shell",
 ] }
 
 # single-instance with deep-link forwarding — Windows + Linux only. macOS
