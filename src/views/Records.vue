@@ -11,6 +11,7 @@
     import { q3ToHtml } from '../lib/q3color';
     import { useConfigStore } from '../stores/config';
     import { openExternal } from '../lib/open';
+    import { t } from '../lib/i18n';
 
     const config = useConfigStore();
 
@@ -32,7 +33,7 @@
             dataRef.value = await tauri.getRecords(physics, page);
             lastFetchedAt.value = new Date();
         } catch (e: any) {
-            error.value = e?.toString?.() ?? 'Failed to load records';
+            error.value = e?.toString?.() ?? t('Failed to load records');
         } finally {
             loadingRef.value = false;
         }
@@ -145,33 +146,32 @@
     <div class="flex-1 flex flex-col min-h-0">
         <header class="px-5 py-3 border-b border-white/10 flex items-center justify-between gap-3">
             <div class="min-w-0">
-                <div class="font-semibold">Records</div>
+                <div class="font-semibold">{{ $t('Records') }}</div>
                 <div class="text-xs text-neutral-500 mt-0.5 truncate">
-                    Recent records from defrag.racing, newest first. Click a name or
-                    map to open the full page on the web.
+                    {{ $t('Recent records from defrag.racing, newest first. Click a name or map to open the full page on the web.') }}
                 </div>
             </div>
             <div class="flex items-center gap-2 text-xs text-neutral-500 flex-shrink-0">
-                <span v-if="lastFetchedAt">Updated {{ lastFetchedLabel }}</span>
+                <span v-if="lastFetchedAt">{{ $t('Updated') }} {{ lastFetchedLabel }}</span>
                 <button
                     class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-50"
                     :disabled="vq3Loading || cpmLoading || !config.hasToken"
                     @click="refreshBoth"
-                >{{ (vq3Loading || cpmLoading) ? 'Loading…' : 'Refresh' }}</button>
+                >{{ (vq3Loading || cpmLoading) ? $t('Loading…') : $t('Refresh') }}</button>
             </div>
         </header>
 
         <div v-if="!config.hasToken" class="flex-1 flex items-center justify-center p-8">
             <div class="text-center max-w-sm space-y-2">
                 <div class="text-5xl">🔑</div>
-                <div class="text-neutral-300 font-semibold">Token required</div>
+                <div class="text-neutral-300 font-semibold">{{ $t('Token required') }}</div>
                 <p class="text-sm text-neutral-500">
-                    Records browser needs a token from your defrag.racing account.
+                    {{ $t('The records browser needs a token from your defrag.racing account.') }}
                 </p>
                 <RouterLink
                     :to="{ name: 'settings', query: { highlight: 'token' } }"
                     class="inline-flex items-center gap-1 mt-1 px-3 py-1.5 rounded bg-brand-500/20 hover:bg-brand-500/30 text-brand-300 text-sm font-semibold"
-                >Open Settings to paste a token →</RouterLink>
+                >{{ $t('Open Settings to paste a token →') }}</RouterLink>
             </div>
         </div>
 
@@ -186,21 +186,21 @@
                     <header class="px-3 py-2 border-b border-white/10 flex items-center justify-between">
                         <div class="text-sm font-semibold text-neutral-200">VQ3</div>
                         <div class="text-xs text-neutral-500" v-if="vq3">
-                            page {{ vq3.current_page }}
+                            {{ $t('page :n', { n: vq3.current_page }) }}
                         </div>
                     </header>
                     <div class="flex-1 overflow-auto">
                         <div v-if="vq3Loading && !vq3" class="p-6 text-center text-xs text-neutral-500">
-                            Loading…
+                            {{ $t('Loading…') }}
                         </div>
                         <table v-else-if="vq3" class="w-full text-xs">
                             <thead class="text-[10px] uppercase text-neutral-500 sticky top-0 bg-neutral-900/95 backdrop-blur">
                                 <tr>
-                                    <th class="text-left px-2 py-1.5 font-normal">Date</th>
-                                    <th class="text-left px-2 py-1.5 font-normal">Player</th>
-                                    <th class="text-right px-2 py-1.5 font-normal">Time</th>
-                                    <th class="text-right px-2 py-1.5 font-normal">Rank</th>
-                                    <th class="text-left px-2 py-1.5 font-normal">Map</th>
+                                    <th class="text-left px-2 py-1.5 font-normal">{{ $t('Date') }}</th>
+                                    <th class="text-left px-2 py-1.5 font-normal">{{ $t('Player') }}</th>
+                                    <th class="text-right px-2 py-1.5 font-normal">{{ $t('Time') }}</th>
+                                    <th class="text-right px-2 py-1.5 font-normal">{{ $t('Rank') }}</th>
+                                    <th class="text-left px-2 py-1.5 font-normal">{{ $t('Map') }}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -250,13 +250,13 @@
                             class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-30"
                             :disabled="vq3.current_page <= 1 || vq3Loading"
                             @click="setVq3Page(vq3!.current_page - 1)"
-                        >← Prev</button>
-                        <span class="text-neutral-500">page {{ vq3.current_page }}</span>
+                        >{{ $t('← Prev') }}</button>
+                        <span class="text-neutral-500">{{ $t('page :n', { n: vq3.current_page }) }}</span>
                         <button
                             class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-30"
                             :disabled="!vq3.next_page_url || vq3Loading"
                             @click="setVq3Page(vq3!.current_page + 1)"
-                        >Next →</button>
+                        >{{ $t('Next →') }}</button>
                     </footer>
                 </section>
 
@@ -265,21 +265,21 @@
                     <header class="px-3 py-2 border-b border-white/10 flex items-center justify-between">
                         <div class="text-sm font-semibold text-neutral-200">CPM</div>
                         <div class="text-xs text-neutral-500" v-if="cpm">
-                            page {{ cpm.current_page }}
+                            {{ $t('page :n', { n: cpm.current_page }) }}
                         </div>
                     </header>
                     <div class="flex-1 overflow-auto">
                         <div v-if="cpmLoading && !cpm" class="p-6 text-center text-xs text-neutral-500">
-                            Loading…
+                            {{ $t('Loading…') }}
                         </div>
                         <table v-else-if="cpm" class="w-full text-xs">
                             <thead class="text-[10px] uppercase text-neutral-500 sticky top-0 bg-neutral-900/95 backdrop-blur">
                                 <tr>
-                                    <th class="text-left px-2 py-1.5 font-normal">Date</th>
-                                    <th class="text-left px-2 py-1.5 font-normal">Player</th>
-                                    <th class="text-right px-2 py-1.5 font-normal">Time</th>
-                                    <th class="text-right px-2 py-1.5 font-normal">Rank</th>
-                                    <th class="text-left px-2 py-1.5 font-normal">Map</th>
+                                    <th class="text-left px-2 py-1.5 font-normal">{{ $t('Date') }}</th>
+                                    <th class="text-left px-2 py-1.5 font-normal">{{ $t('Player') }}</th>
+                                    <th class="text-right px-2 py-1.5 font-normal">{{ $t('Time') }}</th>
+                                    <th class="text-right px-2 py-1.5 font-normal">{{ $t('Rank') }}</th>
+                                    <th class="text-left px-2 py-1.5 font-normal">{{ $t('Map') }}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -329,13 +329,13 @@
                             class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-30"
                             :disabled="cpm.current_page <= 1 || cpmLoading"
                             @click="setCpmPage(cpm!.current_page - 1)"
-                        >← Prev</button>
-                        <span class="text-neutral-500">page {{ cpm.current_page }}</span>
+                        >{{ $t('← Prev') }}</button>
+                        <span class="text-neutral-500">{{ $t('page :n', { n: cpm.current_page }) }}</span>
                         <button
                             class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-30"
                             :disabled="!cpm.next_page_url || cpmLoading"
                             @click="setCpmPage(cpm!.current_page + 1)"
-                        >Next →</button>
+                        >{{ $t('Next →') }}</button>
                     </footer>
                 </section>
             </div>

@@ -15,6 +15,7 @@
     import { q3ToHtml } from '../lib/q3color';
     import { useConfigStore } from '../stores/config';
     import { openExternal } from '../lib/open';
+    import { t } from '../lib/i18n';
 
     const config = useConfigStore();
 
@@ -76,7 +77,7 @@
             servers.value = resp.servers ?? [];
             lastFetchedAt.value = new Date();
         } catch (e: any) {
-            error.value = e?.toString?.() ?? 'Failed to load servers';
+            error.value = e?.toString?.() ?? t('Failed to load servers');
         } finally {
             loading.value = false;
         }
@@ -227,12 +228,12 @@
         switch (cheatsState(s)) {
             case 'on':
                 return cheatsExpected(s)
-                    ? 'This server runs with sv_cheats enabled. It is a freestyle server, so nothing here is a timed result anyway.'
-                    : 'This server runs with sv_cheats enabled - times set here do not count.';
+                    ? t('This server runs with sv_cheats enabled. It is a freestyle server, so nothing here is a timed result anyway.')
+                    : t('This server runs with sv_cheats enabled - times set here do not count.');
             case 'unknown':
-                return 'This server does not report sv_cheats, so nobody can say whether it is on. Only newer engines send it.';
+                return t('This server does not report sv_cheats, so nobody can say whether it is on. Only newer engines send it.');
             default:
-                return 'This server reports sv_cheats off.';
+                return t('This server reports sv_cheats off.');
         }
     };
 
@@ -311,7 +312,7 @@
                 'servers',
             );
         } catch (e: any) {
-            error.value = e?.toString?.() ?? 'Connect failed';
+            error.value = e?.toString?.() ?? t('Connect failed');
         }
     };
 
@@ -364,10 +365,10 @@
         void _now.value; // re-evaluate every tick
         if (!lastFetchedAt.value) return '';
         const sec = Math.round((Date.now() - lastFetchedAt.value.getTime()) / 1000);
-        if (sec < 5) return 'just now';
-        if (sec < 60) return `${sec}s ago`;
+        if (sec < 5) return t('just now');
+        if (sec < 60) return t(':count seconds ago', { count: sec });
         const m = Math.floor(sec / 60);
-        return `${m}m ago`;
+        return t(':count minutes ago', { count: m });
     });
 
     const summary = computed(() => {
@@ -381,21 +382,22 @@
     <div class="flex-1 flex flex-col min-h-0">
         <header class="px-5 py-3 border-b border-white/10 flex items-center justify-between gap-3">
             <div class="min-w-0">
-                <div class="font-semibold">Servers</div>
+                <div class="font-semibold">{{ $t('Servers') }}</div>
                 <div class="text-xs text-neutral-500 mt-0.5 truncate">
-                    Live list from defrag.racing.
+                    {{ $t('Live list from defrag.racing.') }}
                     <span v-if="summary.total">
-                        {{ summary.shown }} of {{ summary.total }} shown · {{ summary.totalPlayers }} player{{ summary.totalPlayers === 1 ? '' : 's' }} online
+                        {{ $t(':shown of :total shown', { shown: summary.shown, total: summary.total }) }} ·
+                        {{ $t(':count players online', { count: summary.totalPlayers }) }}
                     </span>
                 </div>
             </div>
             <div class="flex items-center gap-2 text-xs text-neutral-500 flex-shrink-0">
-                <span v-if="lastFetchedAt">Updated {{ lastFetchedLabel }}</span>
+                <span v-if="lastFetchedAt">{{ $t('Updated') }} {{ lastFetchedLabel }}</span>
                 <button
                     class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-50"
                     :disabled="loading || !config.hasToken"
                     @click="fetchServers"
-                >{{ loading ? 'Loading…' : 'Refresh' }}</button>
+                >{{ loading ? $t('Loading…') : $t('Refresh') }}</button>
             </div>
         </header>
 
@@ -404,14 +406,14 @@
         <div v-if="!config.hasToken" class="flex-1 flex items-center justify-center p-8">
             <div class="text-center max-w-sm space-y-2">
                 <div class="text-5xl">🔑</div>
-                <div class="text-neutral-300 font-semibold">Token required</div>
+                <div class="text-neutral-300 font-semibold">{{ $t('Token required') }}</div>
                 <p class="text-sm text-neutral-500">
-                    The server browser needs a token from your defrag.racing account.
+                    {{ $t('The server browser needs a token from your defrag.racing account.') }}
                 </p>
                 <RouterLink
                     :to="{ name: 'settings', query: { highlight: 'token' } }"
                     class="inline-flex items-center gap-1 mt-1 px-3 py-1.5 rounded bg-brand-500/20 hover:bg-brand-500/30 text-brand-300 text-sm font-semibold"
-                >Open Settings to paste a token →</RouterLink>
+                >{{ $t('Open Settings to paste a token →') }}</RouterLink>
             </div>
         </div>
 
@@ -424,30 +426,30 @@
                     <input
                         v-model="search"
                         type="text"
-                        placeholder="Search by name, map, IP…"
+                        :placeholder="$t('Search by name, map, IP…')"
                         class="flex-1 min-w-[180px] bg-black/60 border border-white/10 rounded px-2 py-1.5 text-neutral-200 placeholder:text-neutral-600 focus:border-brand-500/60 focus:outline-none"
                     />
                     <label class="flex items-center gap-1.5 text-neutral-400 cursor-pointer select-none px-2">
                         <input type="checkbox" v-model="hideEmpty" class="accent-brand-500" />
-                        Hide empty
+                        {{ $t('Hide empty') }}
                     </label>
                     <button
                         class="px-2 py-1 rounded text-neutral-500 hover:text-neutral-200"
                         @click="resetFilters"
-                        title="Clear all filters"
-                    >Reset</button>
+                        :title="$t('Clear all filters')"
+                    >{{ $t('Reset') }}</button>
                 </div>
 
                 <div class="flex items-center gap-2 flex-wrap">
-                    <span class="text-neutral-500 mr-1">Gametype:</span>
+                    <span class="text-neutral-500 mr-1">{{ $t('Gametype:') }}</span>
                     <div class="flex bg-white/5 rounded overflow-hidden">
                         <button
                             v-for="opt in [
-                                { v: 'all', label: 'All' },
-                                { v: 'run', label: 'Run' },
+                                { v: 'all', label: $t('All') },
+                                { v: 'run', label: $t('Run') },
                                 { v: 'ctf', label: 'CTF' },
-                                { v: 'freestyle', label: 'Freestyle' },
-                                { v: 'teamrun', label: 'Team' },
+                                { v: 'freestyle', label: $t('Freestyle') },
+                                { v: 'teamrun', label: $t('Team') },
                             ] as const"
                             :key="opt.v"
                             class="px-2.5 py-1 transition-colors"
@@ -456,7 +458,7 @@
                         >{{ opt.label }}</button>
                     </div>
 
-                    <span class="text-neutral-500 ml-2 mr-1">Physics:</span>
+                    <span class="text-neutral-500 ml-2 mr-1">{{ $t('Physics:') }}</span>
                     <div class="flex bg-white/5 rounded overflow-hidden">
                         <button
                             v-for="opt in ['all', 'vq3', 'cpm'] as const"
@@ -467,12 +469,12 @@
                         >{{ opt.toUpperCase() }}</button>
                     </div>
 
-                    <span class="text-neutral-500 ml-2 mr-1">Sort:</span>
+                    <span class="text-neutral-500 ml-2 mr-1">{{ $t('Sort:') }}</span>
                     <div class="flex bg-white/5 rounded overflow-hidden">
                         <button
                             v-for="opt in [
-                                { v: 'popularity', label: 'Players' },
-                                { v: 'alphabetical', label: 'Name' },
+                                { v: 'popularity', label: $t('Players') },
+                                { v: 'alphabetical', label: $t('Name') },
                             ] as const"
                             :key="opt.v"
                             class="px-2.5 py-1 transition-colors flex items-center gap-1"
@@ -486,12 +488,12 @@
                         </button>
                     </div>
 
-                    <span class="text-neutral-500 ml-2 mr-1">View:</span>
+                    <span class="text-neutral-500 ml-2 mr-1">{{ $t('View:') }}</span>
                     <div class="flex bg-white/5 rounded overflow-hidden">
                         <button
                             v-for="opt in [
-                                { v: 'rows', label: 'List' },
-                                { v: 'cards', label: 'Cards' },
+                                { v: 'rows', label: $t('List') },
+                                { v: 'cards', label: $t('Cards') },
                             ] as const"
                             :key="opt.v"
                             class="px-2.5 py-1 transition-colors"
@@ -509,10 +511,10 @@
             <!-- Server list -->
             <div class="flex-1 overflow-auto">
                 <div v-if="loading && !servers.length" class="p-8 text-center text-sm text-neutral-500">
-                    Loading servers…
+                    {{ $t('Loading servers…') }}
                 </div>
                 <div v-else-if="!filteredServers.length" class="p-8 text-center text-sm text-neutral-500">
-                    No servers match the current filter.
+                    {{ $t('No servers match the current filter.') }}
                 </div>
                 <ul v-else-if="layout === 'rows'" class="divide-y divide-white/[0.04]">
                     <li
@@ -525,7 +527,7 @@
                                  defrag.racing in the system browser. -->
                             <button
                                 class="w-20 h-14 rounded bg-black/40 border border-white/10 overflow-hidden flex-shrink-0 hover:border-brand-500/40"
-                                :title="`Open ${s.map} on defrag.racing`"
+                                :title="$t('Open :map on defrag.racing', { map: s.map })"
                                 @click="openMap(s.map)"
                             >
                                 <img
@@ -536,7 +538,7 @@
                                     loading="lazy"
                                 />
                                 <div v-else class="w-full h-full flex items-center justify-center text-[10px] text-neutral-600 uppercase">
-                                    no map
+                                    {{ $t('no map') }}
                                 </div>
                             </button>
 
@@ -566,7 +568,7 @@
                                                 : 'bg-red-600/80 text-white font-bold')
                                             : 'text-neutral-600 border border-white/[0.07]'"
                                         :title="cheatsTitle(s)"
-                                    >{{ cheatsState(s) === 'on' ? 'cheats' : 'cheats ?' }}</span>
+                                    >{{ cheatsState(s) === 'on' ? $t('cheats') : $t('cheats ?') }}</span>
                                 </div>
                                 <div class="text-xs text-neutral-500 truncate flex items-center gap-2 mt-0.5">
                                     <button
@@ -581,9 +583,9 @@
                                      this server's current map. Hidden when the
                                      user has no time on it. -->
                                 <div v-if="s.mytime_time" class="text-xs text-emerald-300/80 mt-0.5">
-                                    Your PB: <strong>{{ formatTime(s.mytime_time) }}</strong>
+                                    {{ $t('Your PB:') }} <strong>{{ formatTime(s.mytime_time) }}</strong>
                                     <span v-if="s.myrank_position && s.myrank_total" class="text-emerald-300/60 ml-1">
-                                        (rank {{ s.myrank_position }} / {{ s.myrank_total }})
+                                        {{ $t('(rank :position of :total)', { position: s.myrank_position, total: s.myrank_total }) }}
                                     </span>
                                     <!-- When it was set. A time from last week and
                                          a time from 2013 are different facts about
@@ -598,7 +600,7 @@
                                 <div v-if="s.besttime_time && s.besttime_name" class="text-xs text-yellow-300/70 mt-0.5 flex items-center gap-1">
                                     <span class="text-yellow-500">★</span>
                                     <span>{{ formatTime(s.besttime_time) }}</span>
-                                    <span class="text-neutral-500">by</span>
+                                    <span class="text-neutral-500">{{ $t('by') }}</span>
                                     <img
                                         v-if="flagUrl(s.besttime_country)"
                                         :src="flagUrl(s.besttime_country)!"
@@ -617,12 +619,12 @@
                             <div class="flex flex-col items-end gap-1 flex-shrink-0">
                                 <div class="text-xs text-neutral-400 whitespace-nowrap">
                                     <span class="text-neutral-100 font-semibold text-sm">{{ playerCount(s) }}</span>
-                                    player{{ playerCount(s) === 1 ? '' : 's' }}
+                                    {{ playerCount(s) === 1 ? $t('player') : $t('players') }}
                                 </div>
                                 <button
                                     class="px-3 py-1 rounded bg-brand-500/20 hover:bg-brand-500/30 text-brand-300 text-xs font-semibold"
                                     @click="connect(s)"
-                                >Connect</button>
+                                >{{ $t('Connect') }}</button>
                             </div>
                         </div>
 
@@ -682,11 +684,11 @@
                                 ? 'bg-neutral-800/90 text-neutral-400 border-b border-white/10'
                                 : 'bg-red-600/90 text-white border-b border-red-300/40'"
                             :title="cheatsTitle(s)"
-                        >Cheats enabled</div>
+                        >{{ $t('Cheats enabled') }}</div>
 
                         <button
                             class="relative block w-full aspect-[16/7] bg-black/50 overflow-hidden group"
-                            :title="`Open ${s.map} on defrag.racing`"
+                            :title="$t('Open :map on defrag.racing', { map: s.map })"
                             @click="openMap(s.map)"
                         >
                             <img
@@ -697,7 +699,7 @@
                                 loading="lazy"
                             />
                             <div v-else class="w-full h-full flex items-center justify-center text-[10px] text-neutral-600 uppercase">
-                                no map
+                                {{ $t('no map') }}
                             </div>
                             <span class="absolute bottom-1 left-2 right-2 flex items-center gap-1.5 text-xs">
                                 <span class="px-1.5 py-0.5 rounded bg-black/75 text-brand-300 truncate">{{ s.map }}</span>
@@ -726,13 +728,13 @@
                                     v-if="cheatsState(s) === 'unknown'"
                                     class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded flex-shrink-0 cursor-help text-neutral-600 border border-white/[0.07]"
                                     :title="cheatsTitle(s)"
-                                >cheats ?</span>
+                                >{{ $t('cheats ?') }}</span>
                             </div>
 
                             <div v-if="s.mytime_time" class="text-xs text-emerald-300/80">
-                                Your PB: <strong>{{ formatTime(s.mytime_time) }}</strong>
+                                {{ $t('Your PB:') }} <strong>{{ formatTime(s.mytime_time) }}</strong>
                                 <span v-if="s.myrank_position && s.myrank_total" class="text-emerald-300/60 ml-1">
-                                    (rank {{ s.myrank_position }} / {{ s.myrank_total }})
+                                    {{ $t('(rank :position of :total)', { position: s.myrank_position, total: s.myrank_total }) }}
                                 </span>
                                 <span v-if="formatDate(s.mytime_date)" class="text-neutral-500 ml-1">
                                     · {{ formatDate(s.mytime_date) }}
@@ -742,7 +744,7 @@
                             <div v-if="s.besttime_time && s.besttime_name" class="text-xs text-yellow-300/70 flex items-center gap-1 min-w-0">
                                 <span class="text-yellow-500 flex-shrink-0">★</span>
                                 <span class="flex-shrink-0">{{ formatTime(s.besttime_time) }}</span>
-                                <span class="text-neutral-500 flex-shrink-0">by</span>
+                                <span class="text-neutral-500 flex-shrink-0">{{ $t('by') }}</span>
                                 <img
                                     v-if="flagUrl(s.besttime_country)"
                                     :src="flagUrl(s.besttime_country)!"
@@ -791,12 +793,12 @@
                                 <div class="flex items-center gap-2 flex-shrink-0">
                                     <span class="text-xs text-neutral-400">
                                         <span class="text-neutral-100 font-semibold">{{ playerCount(s) }}</span>
-                                        player{{ playerCount(s) === 1 ? '' : 's' }}
+                                        {{ playerCount(s) === 1 ? $t('player') : $t('players') }}
                                     </span>
                                     <button
                                         class="px-3 py-1 rounded bg-brand-500/20 hover:bg-brand-500/30 text-brand-300 text-xs font-semibold"
                                         @click="connect(s)"
-                                    >Connect</button>
+                                    >{{ $t('Connect') }}</button>
                                 </div>
                             </div>
                         </div>

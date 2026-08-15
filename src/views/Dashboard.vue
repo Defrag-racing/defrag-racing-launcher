@@ -20,6 +20,7 @@
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { revealItemInDir } from '@tauri-apps/plugin-opener';
     import { openExternal } from '../lib/open';
+    import { t } from '../lib/i18n';
     import { LazyStore } from '@tauri-apps/plugin-store';
     import {
         tauri,
@@ -131,7 +132,7 @@
             if (staged.length > 1) compareTarget.value = { demos: staged };
             else playerTarget.value = staged[0];
         } catch (e: any) {
-            toggleError.value = e?.toString?.() ?? 'Could not open that demo';
+            toggleError.value = e?.toString?.() ?? t('Could not open that demo');
         }
     };
 
@@ -231,7 +232,7 @@
         try {
             demos.value = await tauri.listDemos();
         } catch (e: any) {
-            listError.value = e?.toString?.() ?? 'Failed to list demos';
+            listError.value = e?.toString?.() ?? t('Failed to list demos');
         } finally {
             listLoading.value = false;
         }
@@ -372,30 +373,29 @@
     // happening right now) and otherwise we fall back to the persisted
     // cache status from the disk listing.
     const resolveStatus = (d: DemoLibraryEntry): RowStatus => {
-        const DUP_HINT = 'This exact run is already on defrag.racing - nothing to upload.';
-        const DONE_HINT = 'Safely backed up to your defrag.racing profile.';
-        const HELD_HINT = 'This looks like a run of a map being played in comps this week, so it was NOT backed up - '
-            + 'a comps run published mid-round cannot be taken back. Choose what happens to it below.';
-        const COMPS_HINT = 'Entered into this week\'s comps round. It is on defrag.racing but stays private until the round ends.';
+        const DUP_HINT = t('This exact run is already on defrag.racing - nothing to upload.');
+        const DONE_HINT = t('Safely backed up to your defrag.racing profile.');
+        const HELD_HINT = t('This looks like a run of a map being played in comps this week, so it was NOT backed up - a comps run published mid-round cannot be taken back. Choose what happens to it below.');
+        const COMPS_HINT = t('Entered into this week\'s comps round. It is on defrag.racing but stays private until the round ends.');
         const live = queueByPath.value.get(d.path);
         if (live) {
             switch (live.status) {
-                case 'pending':   return { label: 'Waiting',           color: 'text-neutral-400', kind: 'inprogress', hint: 'Waiting its turn in the backup queue.' };
+                case 'pending':   return { label: t('Waiting'),           color: 'text-neutral-400', kind: 'inprogress', hint: t('Waiting its turn in the backup queue.') };
                 // "Hashing" is jargon; show "Checking" and explain in the tooltip.
-                case 'hashing':   return { label: 'Checking…',         color: 'text-brand-400',   kind: 'inprogress', hint: 'Making a short fingerprint of the file to check whether this exact run is already on defrag.racing - so the same demo is never uploaded twice.' };
-                case 'uploading': return { label: 'Uploading…',        color: 'text-brand-400',   kind: 'inprogress', hint: 'Sending the demo to your defrag.racing profile.' };
-                case 'done':      return { label: 'Uploaded',          color: 'text-emerald-400', kind: 'done',       hint: DONE_HINT };
-                case 'duplicate': return { label: 'Already backed up', color: 'text-cyan-400',    kind: 'duplicate',  hint: DUP_HINT };
-                case 'error':     return { label: 'Error',             color: 'text-red-400',     kind: 'error',      hint: 'Backup failed - click Retry to try again.' };
-                case 'held_for_comps': return { label: 'Held for comps', color: 'text-amber-300', kind: 'held',  hint: HELD_HINT };
-                case 'comps_entered':  return { label: 'Entered in comps', color: 'text-amber-300/80', kind: 'comps', hint: COMPS_HINT };
+                case 'hashing':   return { label: t('Checking…'),         color: 'text-brand-400',   kind: 'inprogress', hint: t('Making a short fingerprint of the file to check whether this exact run is already on defrag.racing - so the same demo is never uploaded twice.') };
+                case 'uploading': return { label: t('Uploading…'),        color: 'text-brand-400',   kind: 'inprogress', hint: t('Sending the demo to your defrag.racing profile.') };
+                case 'done':      return { label: t('Uploaded'),          color: 'text-emerald-400', kind: 'done',       hint: DONE_HINT };
+                case 'duplicate': return { label: t('Already backed up'), color: 'text-cyan-400',    kind: 'duplicate',  hint: DUP_HINT };
+                case 'error':     return { label: t('Error'),             color: 'text-red-400',     kind: 'error',      hint: t('Backup failed - click Retry to try again.') };
+                case 'held_for_comps': return { label: t('Held for comps'), color: 'text-amber-300', kind: 'held',  hint: HELD_HINT };
+                case 'comps_entered':  return { label: t('Entered in comps'), color: 'text-amber-300/80', kind: 'comps', hint: COMPS_HINT };
             }
         }
-        if (d.upload_status === 'done')      return { label: 'Backed up',         color: 'text-emerald-400/80', kind: 'done',      hint: DONE_HINT };
-        if (d.upload_status === 'duplicate') return { label: 'Already backed up', color: 'text-cyan-400/80',    kind: 'duplicate', hint: DUP_HINT };
-        if (d.upload_status === 'comps')     return { label: 'Entered in comps',  color: 'text-amber-300/80',   kind: 'comps',     hint: COMPS_HINT };
-        if (d.upload_status === 'held_for_comps') return { label: 'Held for comps', color: 'text-amber-300',    kind: 'held',      hint: HELD_HINT };
-        return { label: 'Not uploaded', color: 'text-neutral-500', kind: 'none', hint: 'Not backed up yet. Turn on auto-backup (top of this tab) and it\'ll be uploaded automatically.' };
+        if (d.upload_status === 'done')      return { label: t('Backed up'),         color: 'text-emerald-400/80', kind: 'done',      hint: DONE_HINT };
+        if (d.upload_status === 'duplicate') return { label: t('Already backed up'), color: 'text-cyan-400/80',    kind: 'duplicate', hint: DUP_HINT };
+        if (d.upload_status === 'comps')     return { label: t('Entered in comps'),  color: 'text-amber-300/80',   kind: 'comps',     hint: COMPS_HINT };
+        if (d.upload_status === 'held_for_comps') return { label: t('Held for comps'), color: 'text-amber-300',    kind: 'held',      hint: HELD_HINT };
+        return { label: t('Not uploaded'), color: 'text-neutral-500', kind: 'none', hint: t('Not backed up yet. Turn on auto-backup at the top of this tab and it will be uploaded automatically.') };
     };
 
     // Union of the disk catalog + any live queue item not yet on disk
@@ -561,16 +561,15 @@
     });
     const speedButtonText = computed(() => {
         const next = nextSpeedTier.value;
-        if (willWrapToSaved.value) return `Slow down (${next}%)`;
-        if (next === 0) return 'Faster (no limit)';
-        if (next === 50) return 'Faster (50%)';
-        return `Faster (${next}%)`;
+        if (willWrapToSaved.value) return t('Slow down (:percent%)', { percent: next });
+        if (next === 0) return t('Faster (no limit)');
+        return t('Faster (:percent%)', { percent: next });
     });
     const speedButtonEmoji = computed(() => willWrapToSaved.value ? '🐌' : '🚀');
     const speedButtonTooltip = computed(() => {
         const saved = config.config.cpu_throttle_pct ?? 15;
-        const curLabel = currentThrottlePct.value === 0 ? 'no limit' : `${currentThrottlePct.value}% CPU`;
-        return `Currently ${curLabel}. Click cycles to the next tier; the cycle wraps back to your saved ${saved}% preference.`;
+        const curLabel = currentThrottlePct.value === 0 ? t('no limit') : t(':percent% CPU', { percent: currentThrottlePct.value });
+        return t('Currently :current. Each click moves to the next step, and the cycle comes back to your saved :saved%.', { current: curLabel, saved });
     });
     const cycleSpeed = async () => {
         const target = nextSpeedTier.value;
@@ -578,7 +577,7 @@
             await tauri.setCpuThrottlePctRuntime(target);
             currentThrottlePct.value = target;
         } catch (e: any) {
-            toggleError.value = e?.toString?.() ?? 'Speed change failed';
+            toggleError.value = e?.toString?.() ?? t('Could not change the speed');
         }
     };
 
@@ -635,7 +634,7 @@
 
             await config.save({ demo_assoc_asked: true });
         } catch (e: any) {
-            assocNote.value = e?.toString?.() ?? 'Could not change the file association';
+            assocNote.value = e?.toString?.() ?? t('Could not change the file association');
         } finally {
             assocBusy.value = false;
         }
@@ -836,22 +835,22 @@
                     };
                     break;
                 case 401:
-                    toggleError.value = 'Render rejected - your launcher token is invalid, expired, or was revoked. Open Settings, remove the token and paste a freshly generated one.';
+                    toggleError.value = t('Render rejected - your launcher token is invalid, expired, or was revoked. Open Settings, remove the token and paste a freshly generated one.');
                     break;
                 case 404:
-                    toggleError.value = 'Demo not yet uploaded to the server. The watcher will pick it up shortly - try again in a moment.';
+                    toggleError.value = t('The demo is not on the server yet. The watcher will pick it up shortly - try again in a moment.');
                     break;
                 case 429:
-                    toggleError.value = `Daily render quota reached (${r.error ?? '20/day'}).`;
+                    toggleError.value = t('Daily render quota reached (:detail).', { detail: r.error ?? '20/day' });
                     break;
                 case 403:
-                    toggleError.value = r.error ?? 'Your account is restricted from rendering.';
+                    toggleError.value = r.error ?? t('Your account is restricted from rendering.');
                     break;
                 default:
                     toggleError.value = r.error ?? `Unexpected response (HTTP ${r._http_status}).`;
             }
         } catch (e: any) {
-            toggleError.value = e?.toString?.() ?? 'Render request failed';
+            toggleError.value = e?.toString?.() ?? t('The render request failed');
         } finally {
             rendering.value.delete(d.hash);
             rendering.value = new Set(rendering.value);
@@ -859,17 +858,16 @@
     };
 
     const renderLabelFor = (d: DemoLibraryEntry): string => {
-        if (!d.hash) return 'Render to YouTube';
-        if (rendering.value.has(d.hash)) return 'Working…';
+        if (!d.hash) return t('Render to YouTube');
+        if (rendering.value.has(d.hash)) return t('Working…');
         const st = renderState.value[d.hash];
-        if (!st || !st.has_render) return 'Render to YouTube';
+        if (!st || !st.has_render) return t('Render to YouTube');
         switch (st.status) {
-            case 'completed': return 'Watch on YouTube';
-            case 'pending':   return 'Queued';
-            case 'rendering': return 'Rendering…';
-            case 'uploading': return 'Uploading…';
-            case 'failed':    return 'Retry render';
-            default:          return 'Queued';
+            case 'completed': return t('Watch on YouTube');
+            case 'rendering': return t('Rendering…');
+            case 'uploading': return t('Uploading…');
+            case 'failed':    return t('Retry render');
+            default:          return t('Queued');
         }
     };
     const renderIsCompleted = (d: DemoLibraryEntry): boolean =>
@@ -918,7 +916,7 @@
         try {
             await tauri.retryUpload(path);
         } catch (e: any) {
-            toggleError.value = e?.toString?.() ?? 'Retry failed';
+            toggleError.value = e?.toString?.() ?? t('Retry failed');
         } finally {
             retrying.value.delete(path);
             retrying.value = new Set(retrying.value);
@@ -937,7 +935,7 @@
             else await tauri.compsUploadNormally(path);
             void tauri.compsMarkIntroSeen();
         } catch (e: any) {
-            toggleError.value = e?.toString?.() ?? 'Could not send the demo';
+            toggleError.value = e?.toString?.() ?? t('Could not send the demo');
         } finally {
             const next = new Set(compsBusy.value);
             next.delete(path);
@@ -974,7 +972,7 @@
         const p = ctxMenu.value.demo.path;
         closeContextMenu();
         try { await revealItemInDir(p); } catch (e: any) {
-            toggleError.value = e?.toString?.() ?? 'Failed to open in explorer';
+            toggleError.value = e?.toString?.() ?? t('Could not open the file manager');
         }
     };
     const ctxCopyPath = async () => {
@@ -1024,12 +1022,12 @@
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
             <div class="text-sm text-neutral-300">
-                Preparing map <span class="font-semibold text-white">{{ preparingMap }}</span>…
+                {{ $t('Preparing map') }} <span class="font-semibold text-white">{{ preparingMap }}</span>…
             </div>
 
             <!-- Checking installed maps (cold scan of a big collection is slow). -->
             <div v-if="!mapProgress || mapProgress.phase === 'checking'" class="text-xs text-neutral-500">
-                Checking your installed maps…
+                {{ $t('Checking your installed maps…') }}
             </div>
 
             <!-- Downloading: real progress bar (percent when the size is known,
@@ -1044,13 +1042,13 @@
                 </div>
                 <div class="text-xs text-neutral-400 tabular-nums">
                     <template v-if="mapPercent !== null">
-                        Downloading… {{ mapPercent }}%
+                        {{ $t('Downloading…') }} {{ mapPercent }}%
                         <span class="text-neutral-600">
                             ({{ fmtMB(mapProgress.received) }} / {{ fmtMB(mapProgress.total ?? 0) }})
                         </span>
                     </template>
                     <template v-else>
-                        Downloading… {{ fmtMB(mapProgress.received) }}
+                        {{ $t('Downloading…') }} {{ fmtMB(mapProgress.received) }}
                     </template>
                 </div>
             </template>
@@ -1068,14 +1066,9 @@
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
                     </svg>
                     <div class="min-w-0">
-                        <h3 class="font-semibold text-white">Couldn't download the map</h3>
+                        <h3 class="font-semibold text-white">{{ $t('Could not download the map') }}</h3>
                         <p class="text-sm text-neutral-300 mt-1">
-                            We couldn't fetch
-                            <span class="font-semibold text-white">{{ mapError.map }}</span>
-                            automatically, so the demo can't play yet. Install the map
-                            manually (Maps tab or defrag.racing), then try again. If it
-                            still fails, the map may be missing from the server - please
-                            contact an admin.
+                            {{ $t('We could not fetch :map automatically, so the demo cannot play yet. Install the map by hand, from the Maps tab or from defrag.racing, and try again. If it still fails, the map may be missing from the server - please tell an admin.', { map: mapError.map }) }}
                         </p>
                         <p class="text-xs text-neutral-500 mt-2 break-words">{{ mapError.detail }}</p>
                     </div>
@@ -1085,7 +1078,7 @@
                         class="px-3 py-1.5 rounded bg-neutral-700 hover:bg-neutral-600 text-sm"
                         @click="mapError = null"
                     >
-                        Close
+                        {{ $t('Close') }}
                     </button>
                 </div>
             </div>
@@ -1100,20 +1093,20 @@
                 ></div>
                 <div class="text-sm min-w-0">
                     <div>
-                        <span class="font-semibold">Auto-backup</span>
+                        <span class="font-semibold">{{ $t('Auto-backup') }}</span>
                         <span class="text-neutral-500 ml-1">
-                            {{ !config.autoUploadRunning ? 'off' : (paused ? 'paused' : 'running') }}
+                            {{ !config.autoUploadRunning ? $t('off') : (paused ? $t('paused') : $t('running')) }}
                         </span>
                     </div>
                     <div class="text-xs text-neutral-500 mt-0.5 leading-snug">
                         <template v-if="config.autoUploadRunning && !paused">
-                            Watching your demos folder. Every new run you record is copied to your <strong class="text-neutral-300">defrag.racing</strong> profile within ~30s - so you never lose a demo, even after a game crash. Each one is quickly checked first so the same run is never uploaded twice. New demos show up in the list below; render any to YouTube.
+                            {{ $t('Watching your demos folder. Every new run you record is copied to your defrag.racing profile within about 30 seconds, so you never lose a demo, even after a game crash. Each one is checked first so the same run is never uploaded twice. New demos show up in the list below, and any of them can be rendered to YouTube.') }}
                         </template>
                         <template v-else-if="config.autoUploadRunning && paused">
-                            Auto-backup is paused. The watcher still notices new demos, but nothing uploads until you click <strong class="text-brand-400">Resume</strong>.
+                            {{ $t('Auto-backup is paused. New demos are still noticed, but nothing uploads until you click Resume.') }}
                         </template>
                         <template v-else>
-                            <strong class="text-neutral-300">Auto-backup</strong> keeps a safe online copy of every Defrag run you record: it watches this folder and uploads each new demo to your defrag.racing profile, so a crash or a wiped drive never loses your runs. Click <strong class="text-brand-400">Start</strong> to turn it on - your existing demos are listed below either way.
+                            {{ $t('Auto-backup keeps a safe online copy of every Defrag run you record: it watches this folder and uploads each new demo to your defrag.racing profile, so a crash or a wiped drive never loses your runs. Click Start to turn it on - your existing demos are listed below either way.') }}
                         </template>
                     </div>
                     <DemosFolderChip class="mt-1.5" />
@@ -1136,7 +1129,7 @@
                     v-if="config.autoUploadRunning"
                     class="px-3 py-1.5 rounded text-sm font-semibold bg-white/5 hover:bg-white/10 text-neutral-200"
                     @click="togglePause"
-                >{{ paused ? 'Resume' : 'Pause' }}</button>
+                >{{ paused ? $t('Resume') : $t('Pause') }}</button>
                 <button
                     class="px-3 py-1.5 rounded text-sm font-semibold"
                     :class="config.autoUploadRunning
@@ -1144,7 +1137,7 @@
                         : 'bg-brand-500/20 hover:bg-brand-500/30 text-brand-400'"
                     :disabled="toggling"
                     @click="toggle"
-                >{{ config.autoUploadRunning ? 'Stop' : 'Start' }}</button>
+                >{{ config.autoUploadRunning ? $t('Stop') : $t('Start') }}</button>
             </div>
         </header>
 
@@ -1162,8 +1155,7 @@
         >
             <span class="text-amber-400">⏳</span>
             <span>
-                Rate-limited by defrag.racing - resuming in
-                <strong>{{ rateLimitSecondsLeft }}s</strong>. The launcher will retry automatically.
+                {{ $t('Rate-limited by defrag.racing - resuming in :seconds s. The launcher will retry on its own.', { seconds: rateLimitSecondsLeft }) }}
             </span>
         </div>
 
@@ -1173,12 +1165,12 @@
             class="px-5 py-3 border-b border-amber-500/30 bg-amber-500/10 text-xs text-amber-100"
         >
             <div class="font-semibold text-amber-200 mb-1">
-                No token saved - most launcher features are disabled
+                {{ $t('No token saved - most launcher features are disabled') }}
             </div>
             <ul class="space-y-0.5 pl-1 mb-2">
                 <TokenFeatureList />
             </ul>
-            <div class="font-semibold text-emerald-300 mb-1">Works without a token:</div>
+            <div class="font-semibold text-emerald-300 mb-1">{{ $t('Works without a token:') }}</div>
             <ul class="space-y-0.5 pl-1 mb-2 text-emerald-200/90">
                 <TokenFreeFeatures />
             </ul>
@@ -1186,7 +1178,7 @@
                 <button
                     class="px-3 py-1 rounded bg-amber-500/30 hover:bg-amber-500/40 text-amber-100 font-semibold flex-shrink-0"
                     @click="router.push({ name: 'settings' })"
-                >Add token →</button>
+                >{{ $t('Add token →') }}</button>
             </div>
         </div>
 
@@ -1199,23 +1191,21 @@
             v-if="showAssocOffer"
             class="px-5 py-3 border-b border-white/10 bg-white/[0.03] text-xs text-neutral-300"
         >
-            <div class="font-semibold text-neutral-200 mb-1">Open .dm_68 demos in the launcher?</div>
+            <div class="font-semibold text-neutral-200 mb-1">{{ $t('Open .dm_68 demos in the launcher?') }}</div>
             <p class="text-neutral-400 mb-2">
-                Right-clicking a demo already offers "Play in Defrag Launcher". This is about
-                double-clicking one: it would open here instead of in whatever you use now.
-                You can change it in Settings whenever you like.
+                {{ $t('Right-clicking a demo already offers to play it here. This is about double-clicking one: it would open here instead of in whatever you use now. You can change it in Settings whenever you like.') }}
             </p>
             <div class="flex items-center justify-end gap-2">
                 <button
                     class="px-3 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300"
                     :disabled="assocBusy"
                     @click="answerAssoc(false)"
-                >No thanks</button>
+                >{{ $t('No thanks') }}</button>
                 <button
                     class="px-3 py-1 rounded bg-brand-500/20 hover:bg-brand-500/30 text-brand-300 font-semibold"
                     :disabled="assocBusy"
                     @click="answerAssoc(true)"
-                >Yes, open them here</button>
+                >{{ $t('Yes, open them here') }}</button>
             </div>
         </div>
 
@@ -1237,10 +1227,10 @@
                     <path class="opacity-90" d="M22 12a10 10 0 0 1-10 10" stroke="currentColor" stroke-width="4" stroke-linecap="round" />
                 </svg>
                 <span class="text-brand-200 font-semibold flex-shrink-0">
-                    Backing up {{ queue.processed_count }}/{{ backupTotal }}
+                    {{ $t('Backing up :done of :total', { done: queue.processed_count, total: backupTotal }) }}
                 </span>
                 <span class="text-neutral-400 truncate min-w-0">{{ backupCurrentLabel }}</span>
-                <span class="text-neutral-500 ml-auto flex-shrink-0 whitespace-nowrap">{{ backupCounts.remaining }} left</span>
+                <span class="text-neutral-500 ml-auto flex-shrink-0 whitespace-nowrap">{{ $t(':count left', { count: backupCounts.remaining }) }}</span>
             </div>
             <div class="mt-1.5 h-1 rounded-full bg-white/10 overflow-hidden">
                 <div class="h-full bg-brand-500 transition-all duration-300" :style="{ width: backupPct + '%' }"></div>
@@ -1252,10 +1242,10 @@
             v-if="queue.processed_count"
             class="px-5 py-2 border-b border-white/[0.04] text-xs text-neutral-400 flex items-center gap-3 flex-wrap"
         >
-            <span class="text-neutral-200 font-semibold">{{ queue.processed_count }} processed this session</span>
-            <span v-if="queue.done_count" class="text-emerald-400">✓ {{ queue.done_count }} uploaded</span>
-            <span v-if="queue.duplicate_count" class="text-cyan-400">∾ {{ queue.duplicate_count }} already backed up</span>
-            <span v-if="queue.error_count" class="text-red-400">! {{ queue.error_count }} error</span>
+            <span class="text-neutral-200 font-semibold">{{ $t(':count processed this session', { count: queue.processed_count }) }}</span>
+            <span v-if="queue.done_count" class="text-emerald-400">✓ {{ $t(':count uploaded', { count: queue.done_count }) }}</span>
+            <span v-if="queue.duplicate_count" class="text-cyan-400">∾ {{ $t(':count already backed up', { count: queue.duplicate_count }) }}</span>
+            <span v-if="queue.error_count" class="text-red-400">! {{ $t(':count with errors', { count: queue.error_count }) }}</span>
         </div>
 
         <!-- search + sort + filter -->
@@ -1263,18 +1253,18 @@
             <input
                 v-model="search"
                 type="text"
-                placeholder="Search filename…"
+                :placeholder="$t('Search filename…')"
                 class="flex-1 min-w-[180px] bg-black/60 border border-white/10 rounded px-2 py-1.5 text-neutral-200 placeholder:text-neutral-600 focus:border-brand-500/60 focus:outline-none"
             />
             <div class="flex bg-white/5 rounded overflow-hidden">
                 <button
                     v-for="opt in ([
-                        { v: 'all',          label: 'All' },
-                        { v: 'in_progress',  label: 'In progress' },
-                        { v: 'uploaded',     label: 'Backed up' },
-                        { v: 'not_uploaded', label: 'Not uploaded' },
-                        { v: 'error',        label: 'Errors' },
-                        { v: 'rendered',     label: 'Rendered' },
+                        { v: 'all',          label: $t('All') },
+                        { v: 'in_progress',  label: $t('In progress') },
+                        { v: 'uploaded',     label: $t('Backed up') },
+                        { v: 'not_uploaded', label: $t('Not uploaded') },
+                        { v: 'error',        label: $t('Errors') },
+                        { v: 'rendered',     label: $t('Rendered') },
                     ] as const)"
                     :key="opt.v"
                     class="px-2.5 py-1 transition-colors whitespace-nowrap"
@@ -1282,15 +1272,15 @@
                     @click="rowFilter = opt.v"
                 >{{ opt.label }}</button>
             </div>
-            <span class="text-neutral-500 mx-1">Sort:</span>
+            <span class="text-neutral-500 mx-1">{{ $t('Sort:') }}</span>
             <div class="flex bg-white/5 rounded overflow-hidden">
                 <button
                     v-for="opt in ([
-                        { v: 'date_desc', label: 'Newest' },
-                        { v: 'date_asc',  label: 'Oldest' },
+                        { v: 'date_desc', label: $t('Newest') },
+                        { v: 'date_asc',  label: $t('Oldest') },
                         { v: 'name_asc',  label: 'A→Z' },
                         { v: 'name_desc', label: 'Z→A' },
-                        { v: 'render_first', label: 'Has video' },
+                        { v: 'render_first', label: $t('Has video') },
                     ] as const)"
                     :key="opt.v"
                     class="px-2.5 py-1 transition-colors"
@@ -1302,7 +1292,7 @@
                 class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-50"
                 :disabled="listLoading"
                 @click="refreshList"
-            >{{ listLoading ? 'Loading…' : 'Refresh' }}</button>
+            >{{ listLoading ? $t('Loading…') : $t('Refresh') }}</button>
             <span class="text-neutral-500 ml-auto">{{ filteredDemos.length }} / {{ allRows.length }}</span>
         </div>
 
@@ -1312,49 +1302,48 @@
             v-if="compareSel.length"
             class="flex-shrink-0 flex items-center gap-2 px-5 py-2 bg-amber-500/10 border-b border-amber-500/30 text-sm"
         >
-            <span class="text-amber-200 font-semibold flex-shrink-0">Compare ({{ compareSel.length }}/{{ MAX_COMPARE }}):</span>
-            <span class="text-amber-300/70 flex-shrink-0 truncate">pick {{ compareSel.length < 2 ? 'at least one more' : 'up to ' + MAX_COMPARE }} demo, same map first</span>
+            <span class="text-amber-200 font-semibold flex-shrink-0">{{ $t('Compare (:picked of :max):', { picked: compareSel.length, max: MAX_COMPARE }) }}</span>
+            <span class="text-amber-300/70 flex-shrink-0 truncate">{{ compareSel.length < 2 ? $t('pick at least one more demo, same map first') : $t('pick up to :max demos, same map first', { max: MAX_COMPARE }) }}</span>
             <div class="ml-auto flex items-center gap-2 flex-shrink-0">
                 <button
                     class="px-3 py-1 rounded text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed bg-purple-500/25 hover:bg-purple-500/35 text-purple-200"
                     :disabled="compareSel.length < 2"
                     @click="launchCompare"
-                >Start compare ⚖ ({{ compareSel.length }})</button>
+                >{{ $t('Start compare') }} ⚖ ({{ compareSel.length }})</button>
                 <button
                     class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 text-xs"
                     @click="cancelComparePick"
-                >Cancel</button>
+                >{{ $t('Cancel') }}</button>
             </div>
         </div>
 
         <!-- the list -->
         <div ref="scrollEl" class="flex-1 overflow-auto queue-scroll" @scroll="onListScroll">
             <div v-if="listLoading && !allRows.length" class="p-8 text-center text-sm text-neutral-500">
-                Listing demos…
+                {{ $t('Listing demos…') }}
             </div>
             <div v-else-if="!allRows.length" class="h-full flex items-center justify-center p-8">
                 <div class="text-center space-y-2 max-w-sm">
                     <div class="text-5xl">🎬</div>
-                    <div class="text-neutral-300 font-semibold">No demos yet</div>
+                    <div class="text-neutral-300 font-semibold">{{ $t('No demos yet') }}</div>
                     <p class="text-sm text-neutral-500">
                         <template v-if="config.autoUploadRunning">
-                            The launcher is watching your demos folder. Record a run and it will appear here.
+                            {{ $t('The launcher is watching your demos folder. Record a run and it will appear here.') }}
                         </template>
                         <template v-else>
-                            Set your demos folder in Settings, then turn on auto-backup. Your demos will appear here.
+                            {{ $t('Set your demos folder in Settings, then turn on auto-backup. Your demos will appear here.') }}
                         </template>
                     </p>
                     <p class="text-sm text-neutral-500">
-                        You can also drag a demo file onto this window to watch it right away, wherever
-                        it is on your disk.
+                        {{ $t('You can also drag a demo file onto this window to watch it right away, wherever it is on your disk.') }}
                     </p>
                 </div>
             </div>
             <div v-else-if="!filteredDemos.length" class="h-full flex items-center justify-center p-8">
                 <div class="text-center space-y-2 max-w-sm">
-                    <div class="text-neutral-300 font-semibold">Nothing matches</div>
+                    <div class="text-neutral-300 font-semibold">{{ $t('Nothing matches') }}</div>
                     <p class="text-sm text-neutral-500">
-                        <button class="text-brand-400 hover:underline" @click="search = ''; rowFilter = 'all'">Clear search &amp; filters</button>.
+                        <button class="text-brand-400 hover:underline" @click="search = ''; rowFilter = 'all'">{{ $t('Clear the search and filters') }}</button>.
                     </p>
                 </div>
             </div>
@@ -1400,15 +1389,15 @@
                         <button
                             class="text-[11px] px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-semibold disabled:opacity-50 flex-shrink-0 whitespace-nowrap"
                             :disabled="compsBusy.has(d.path)"
-                            :title="`Enter ${d.filename} into this week's comps round`"
+                            :title="$t('Enter :file into the comps round this week', { file: d.filename })"
                             @click.stop="answerComps(d.path, true)"
-                        >Enter into comps</button>
+                        >{{ $t('Enter into comps') }}</button>
                         <button
                             class="text-[11px] px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-50 flex-shrink-0 whitespace-nowrap"
                             :disabled="compsBusy.has(d.path)"
-                            title="Back it up like any other demo. Decides this file only - the next run on a comps map is asked about again."
+                            :title="$t('Back it up like any other demo. Decides this file only - the next run on a comps map is asked about again.')"
                             @click.stop="answerComps(d.path, false)"
-                        >Upload normally</button>
+                        >{{ $t('Upload normally') }}</button>
                     </template>
 
                     <!-- retry when the live upload errored -->
@@ -1416,25 +1405,25 @@
                         v-if="resolveStatus(d).kind === 'error' && config.autoUploadRunning"
                         class="text-[11px] px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-semibold disabled:opacity-50 flex-shrink-0"
                         :disabled="retrying.has(d.path)"
-                        :title="`Re-queue ${d.filename} for upload`"
+                        :title="$t('Queue :file for upload again', { file: d.filename })"
                         @click.stop="retryUpload(d.path)"
-                    >{{ retrying.has(d.path) ? 'Retrying…' : 'Retry' }}</button>
+                    >{{ retrying.has(d.path) ? $t('Retrying…') : $t('Retry') }}</button>
 
                     <!-- comparison pick mode: rows become add/remove selectors -->
                     <template v-if="compareSel.length">
                         <button
                             v-if="compareIndexOf(d) >= 0"
                             class="px-3 py-1 rounded text-xs font-semibold bg-amber-500/30 hover:bg-amber-500/40 text-amber-200 flex-shrink-0 whitespace-nowrap"
-                            title="Remove from comparison"
+                            :title="$t('Remove from the comparison')"
                             @click.stop="toggleCompareSel(d)"
-                        >✓ Demo {{ compareLetter(compareIndexOf(d)) }} (remove)</button>
+                        >✓ {{ $t('Demo :letter (remove)', { letter: compareLetter(compareIndexOf(d)) }) }}</button>
                         <button
                             v-else
                             class="px-3 py-1 rounded text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 flex-shrink-0 whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
                             :disabled="compareSel.length >= MAX_COMPARE"
-                            :title="compareSel.length >= MAX_COMPARE ? 'Maximum of 4 demos' : (isSameMapAsA(d) ? 'Add this run to the comparison' : 'Different map - add anyway')"
+                            :title="compareSel.length >= MAX_COMPARE ? $t('Four demos at most') : (isSameMapAsA(d) ? $t('Add this run to the comparison') : $t('Different map - add it anyway'))"
                             @click.stop="toggleCompareSel(d)"
-                        >+ Add ⚖</button>
+                        >+ {{ $t('Add') }} ⚖</button>
                     </template>
 
                     <!-- normal mode actions (hidden while picking a comparison) -->
@@ -1443,17 +1432,17 @@
                     <button
                         v-if="isEmbedSupported"
                         class="px-3 py-1 rounded text-xs font-semibold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 flex-shrink-0 flex items-center gap-1 whitespace-nowrap"
-                        title="Plays right here in the launcher - instant, no rendering or upload needed"
+                        :title="$t('Plays right here in the launcher - instant, no rendering or upload needed')"
                         @click.stop="playDemo(d)"
-                    >▶ Play instantly in launcher</button>
+                    >▶ {{ $t('Play instantly in the launcher') }}</button>
 
                     <!-- compare two demos side by side (premium, token-gated) -->
                     <button
                         v-if="isEmbedSupported && config.hasToken"
                         class="px-3 py-1 rounded text-xs font-semibold bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 flex-shrink-0 flex items-center gap-1 whitespace-nowrap"
-                        title="Compare this run side by side with another demo - two engines, locked together"
+                        :title="$t('Compare this run side by side with another demo - two engines, locked together')"
                         @click.stop="startComparePick(d)"
-                    >⚖ Compare</button>
+                    >⚖ {{ $t('Compare') }}</button>
 
                     <!-- render / play YouTube -->
                     <button
@@ -1464,12 +1453,12 @@
                             : 'bg-brand-500/20 hover:bg-brand-500/30 text-brand-300'"
                         :disabled="!d.hash || (!!d.hash && rendering.has(d.hash))"
                         :title="renderIsCompleted(d)
-                            ? 'Open the rendered run on YouTube'
+                            ? $t('Open the rendered run on YouTube')
                             : (d.hash
-                                ? 'Render this run to a video and upload it to the defrag.racing YouTube channel'
+                                ? $t('Render this run to a video and upload it to the defrag.racing YouTube channel')
                                 : ((d.upload_status === 'done' || d.upload_status === 'duplicate')
-                                    ? 'Backed up, but its fingerprint is missing locally - turn on auto-backup (Start) to recompute it, then you can render'
-                                    : 'Back this demo up first (turn on auto-backup), then you can render it'))"
+                                    ? $t('Backed up, but its fingerprint is missing on this PC - turn auto-backup on to work it out again, then you can render')
+                                    : $t('Back this demo up first by turning auto-backup on, then you can render it')))"
                         @click="renderClickFor(d)"
                     >
                         <svg v-if="renderIsCompleted(d)" class="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"/><path d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#0a0a0a"/></svg>
@@ -1487,15 +1476,15 @@
                 class="fixed z-50 min-w-[180px] bg-neutral-900 border border-white/10 rounded shadow-xl py-1 text-sm"
                 :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
             >
-                <button class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-neutral-200" @click="ctxOpenInExplorer">Open in explorer</button>
-                <button class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-neutral-200" @click="ctxCopyPath">Copy path</button>
+                <button class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-neutral-200" @click="ctxOpenInExplorer">{{ $t('Open in the file manager') }}</button>
+                <button class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-neutral-200" @click="ctxCopyPath">{{ $t('Copy path') }}</button>
                 <button
                     class="w-full text-left px-3 py-1.5 hover:bg-white/5 text-neutral-200"
-                    title="Copy a /demo console command you can paste in Quake to play this demo"
+                    :title="$t('Copy a /demo console command you can paste into Quake to play this demo')"
                     @click="ctxCopyDemoCmd"
-                >Copy /demo command</button>
+                >{{ $t('Copy /demo command') }}</button>
                 <div class="my-1 border-t border-white/10"></div>
-                <button class="w-full text-left px-3 py-1.5 hover:bg-red-500/10 text-red-300" @click="ctxDeleteDemo">Delete demo</button>
+                <button class="w-full text-left px-3 py-1.5 hover:bg-red-500/10 text-red-300" @click="ctxDeleteDemo">{{ $t('Delete demo') }}</button>
             </div>
         </template>
 
@@ -1509,34 +1498,34 @@
                         <div class="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center flex-shrink-0">
                             <svg class="w-5 h-5 text-red-400" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"/><path d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z" fill="#fff"/></svg>
                         </div>
-                        <h3 class="text-sm font-bold text-neutral-100">Render to YouTube?</h3>
+                        <h3 class="text-sm font-bold text-neutral-100">{{ $t('Render to YouTube?') }}</h3>
                     </div>
-                    <p class="text-xs text-neutral-400 mb-3">This queues your demo to be rendered into a video and uploaded to the defrag.racing YouTube channel. Rendering can take several minutes.</p>
+                    <p class="text-xs text-neutral-400 mb-3">{{ $t('This queues your demo to be rendered into a video and uploaded to the defrag.racing YouTube channel. Rendering can take several minutes.') }}</p>
 
                     <div class="border border-red-500/30 bg-red-500/[0.06] rounded-lg p-3 mb-3">
                         <p class="text-[11px] text-neutral-300 leading-relaxed">
-                            <span class="font-bold text-red-300">Renders cost real money.</span>
-                            The render farm time and storage are paid for by defrag.racing out of the project's own pocket, and YouTube caps how many videos demome can upload per day. Every render you queue spends part of that shared, limited budget - so please only render runs that are worth keeping.
+                            <span class="font-bold text-red-300">{{ $t('Renders cost real money.') }}</span>
+                            {{ $t('The render farm time and storage are paid for by defrag.racing out of its own pocket, and YouTube caps how many videos can be uploaded per day. Every render you queue spends part of that shared, limited budget - so please only render runs that are worth keeping.') }}
                         </p>
                     </div>
 
                     <div class="border border-white/10 bg-white/[0.02] rounded-lg p-3 mb-3">
-                        <h4 class="text-xs font-bold text-neutral-100 mb-2">Render etiquette</h4>
+                        <h4 class="text-xs font-bold text-neutral-100 mb-2">{{ $t('Render etiquette') }}</h4>
                         <ul class="text-[11px] text-neutral-400 space-y-1.5 list-disc pl-4">
-                            <li>Render your best run. Don't queue your whole time history when you already have - or will beat in minutes or hours - a faster time.</li>
-                            <li>Several near-identical times on the same map, a few ms apart? Pick one.</li>
-                            <li>Slower time but a genuinely cool trick or something worth showing off? That's totally fine, go for it.</li>
+                            <li>{{ $t('Render your best run. Do not queue your whole time history when you already have, or will soon beat, a faster time.') }}</li>
+                            <li>{{ $t('Several near-identical times on the same map, a few ms apart? Pick one.') }}</li>
+                            <li>{{ $t('A slower time but a genuinely cool trick, or something worth showing off? That is completely fine, go for it.') }}</li>
                         </ul>
                     </div>
 
                     <label class="flex items-start gap-2 mb-4 cursor-pointer select-none">
                         <input type="checkbox" v-model="etiquetteAccepted" class="mt-0.5 w-3.5 h-3.5 rounded border-white/20 bg-white/5 accent-red-600" />
-                        <span class="text-xs text-neutral-300">I won't render my whole time history - just the runs actually worth keeping.</span>
+                        <span class="text-xs text-neutral-300">{{ $t('I will not render my whole time history - just the runs actually worth keeping.') }}</span>
                     </label>
 
                     <div class="flex gap-2 justify-end">
-                        <button @click="cancelRenderConfirm" class="px-3 py-1.5 text-xs font-medium text-neutral-300 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors">Cancel</button>
-                        <button @click="confirmRender" :disabled="!etiquetteAccepted" class="px-3 py-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors">Render</button>
+                        <button @click="cancelRenderConfirm" class="px-3 py-1.5 text-xs font-medium text-neutral-300 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors">{{ $t('Cancel') }}</button>
+                        <button @click="confirmRender" :disabled="!etiquetteAccepted" class="px-3 py-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors">{{ $t('Render') }}</button>
                     </div>
                 </div>
             </div>

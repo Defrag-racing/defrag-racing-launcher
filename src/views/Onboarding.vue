@@ -5,6 +5,7 @@
     import { openExternal } from '../lib/open';
     import { tauri, type EngineCandidate } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
+    import { t } from '../lib/i18n';
     import TokenFeatureList from '../components/TokenFeatureList.vue';
     import TokenFreeFeatures from '../components/TokenFreeFeatures.vue';
 
@@ -145,7 +146,7 @@
             try {
                 await tauri.validateDemosPath(selectedEngine.value, picked);
             } catch (e: any) {
-                demosError.value = typeof e === 'string' ? e : (e?.toString?.() ?? 'That folder is not inside your Defrag demos folder.');
+                demosError.value = typeof e === 'string' ? e : (e?.toString?.() ?? t('That folder is not inside your Defrag demos folder.'));
                 return;
             }
         }
@@ -240,65 +241,63 @@
             <div class="p-6 overflow-y-auto flex-1 min-h-0">
                 <!-- step 1 -->
                 <div v-if="step === 1" class="space-y-4">
-                    <h1 class="text-2xl font-bold">Welcome to Defrag Racing Launcher</h1>
+                    <h1 class="text-2xl font-bold">{{ $t('Welcome to Defrag Racing Launcher') }}</h1>
                     <p class="text-sm text-neutral-400 leading-relaxed">
-                        A small companion app for
-                        <a href="#" @click.prevent="openExternal('https://defrag.racing')" class="text-brand-400 hover:underline">defrag.racing</a>.
-                        Here's what's inside:
+                        {{ $t('A small companion app for :site. Here is what is inside:', { site: 'defrag.racing' }) }}
                     </p>
                     <ul class="text-sm text-neutral-300 grid sm:grid-cols-2 gap-x-8 gap-y-1.5 pl-1">
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
-                            <span><strong>Auto-backup demos</strong> - every new <code class="text-xs bg-black/40 px-1 rounded">.dm_*</code> file in your demos folder gets uploaded to your account.</span>
+                            <span><strong>{{ $t('Auto-backup demos') }}</strong> - {{ $t('every new demo file in your demos folder gets uploaded to your account.') }}</span>
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
-                            <span><strong>Instant demo player</strong> - hit play on any demo and watch it <strong>right inside the launcher</strong>, no separate game launch. Scrub, pause, change speed, seek with the keyboard.</span>
+                            <span><strong>{{ $t('Instant demo player') }}</strong> - {{ $t('hit play on any demo and watch it right inside the launcher, no separate game launch. Scrub, pause, change speed, seek with the keyboard.') }}</span>
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
-                            <span><strong>Demos</strong> - browse every local demo and queue YouTube renders from one click, right next to the live auto-backup status.</span>
+                            <span><strong>{{ $t('Demos') }}</strong> - {{ $t('browse every local demo and queue YouTube renders from one click, right next to the live auto-backup status.') }}</span>
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
-                            <span><strong>Servers</strong> - live list of Defrag servers with your PB and rank on each map.</span>
+                            <span><strong>{{ $t('Servers') }}</strong> - {{ $t('live list of Defrag servers with your PB and rank on each map.') }}</span>
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
-                            <span><strong>Records &amp; Maps</strong> - paginated leaderboards (VQ3 + CPM side-by-side) and the full map list with thumbnails, weapon/item/function icons and per-map info.</span>
+                            <span><strong>{{ $t('Records and Maps') }}</strong> - {{ $t('leaderboards with VQ3 and CPM side by side, and the full map list with thumbnails, icons for weapons, items and functions, and per-map info.') }}</span>
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
-                            <span><strong>Run any map offline</strong> - one click on a map's <strong>VQ3</strong> / <strong>CPM</strong> button downloads it (if you don't have it) and launches straight into it.</span>
+                            <span><strong>{{ $t('Run any map offline') }}</strong> - {{ $t('one click on a VQ3 or CPM button downloads the map if you do not have it and launches straight into it.') }}</span>
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
-                            <span><strong>Notifications</strong> - PB beats, world record takes, render-done events and account alerts, sorted by type.</span>
+                            <span><strong>{{ $t('Notifications') }}</strong> - {{ $t('beaten times, world records taken, finished renders and account alerts, sorted by type.') }}</span>
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
-                            <span><strong>History</strong> - log of every <code class="text-xs bg-black/40 px-1 rounded">defrag://</code> server you joined, one-click Reconnect, plus the maps that played while you were on each server.</span>
+                            <span><strong>{{ $t('History') }}</strong> - {{ $t('a log of every server you joined, one-click Reconnect, plus the maps that played while you were there.') }}</span>
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
-                            <span><strong><code class="text-xs bg-black/40 px-1 rounded">defrag://</code> links</strong> - click "Join" on the website, the launcher asks you to confirm, your engine launches.</span>
+                            <span><strong>{{ $t('defrag:// links') }}</strong> - {{ $t('click Join on the website, the launcher asks you to confirm, your engine launches.') }}</span>
                         </li>
                         <li class="flex gap-2">
                             <span class="text-brand-400 mt-0.5">•</span>
-                            <span><strong>Developer mode</strong> - optional: add custom engine launch arguments and your own named Quick-launch profiles (in Settings).</span>
+                            <span><strong>{{ $t('Developer mode') }}</strong> - {{ $t('optional: add custom engine launch arguments and your own named quick-launch profiles, in Settings.') }}</span>
                         </li>
                     </ul>
                     <p class="text-xs text-neutral-500 leading-relaxed pt-1">
-                        Most of this needs a token from your defrag.racing account. The <code class="bg-black/40 px-1 rounded">defrag://</code> handler works without one. Setup takes under a minute.
+                        {{ $t('Most of this needs a token from your defrag.racing account. Server join links work without one. Setup takes under a minute.') }}
                     </p>
                 </div>
 
                 <!-- step 3: token (optional - last because it's the only
                      skippable part of setup) -->
                 <div v-else-if="step === 3" class="space-y-4">
-                    <h2 class="text-xl font-bold">Account token <span class="text-sm font-normal text-neutral-500">(optional)</span></h2>
+                    <h2 class="text-xl font-bold">{{ $t('Account token') }} <span class="text-sm font-normal text-neutral-500">{{ $t('(optional)') }}</span></h2>
                     <p class="text-sm text-neutral-400 leading-relaxed">
-                        A token links the launcher to your defrag.racing account. It unlocks:
+                        {{ $t('A token links the launcher to your defrag.racing account. It unlocks:') }}
                     </p>
                     <!-- Two columns on the wide card so the full feature list
                          stays short vertically - the token input below must be
@@ -307,10 +306,10 @@
                         <TokenFeatureList />
                     </ul>
                     <p class="text-xs text-neutral-500 leading-relaxed">
-                        Auto-upload of new demos stays <strong>off by default</strong> - you turn it on later with the Start button on the dashboard.
+                        {{ $t('Auto-upload of new demos stays off by default - you turn it on later with the Start button on the Demos tab.') }}
                     </p>
                     <p class="text-xs text-neutral-500 leading-relaxed">
-                        Without a token, only <code class="bg-black/40 px-1 rounded">defrag://</code> server-join links work. You can paste a token later from Settings.
+                        {{ $t('Without a token, only server join links work. You can paste a token later from Settings.') }}
                     </p>
 
                     <!-- Big obvious step-1 CTA. Was "blue underlined link"
@@ -325,31 +324,31 @@
                         >
                             <div class="text-left">
                                 <div class="text-sm font-semibold text-brand-100 group-hover:underline">
-                                    Step 1 - Click here to open the token page
+                                    {{ $t('Step 1 - click here to open the token page') }}
                                 </div>
                                 <div class="text-xs text-brand-300/70 mt-0.5 font-mono">
                                     defrag.racing &gt; Settings &gt; Security &gt; "Launcher Tokens"
                                 </div>
                             </div>
                             <span class="flex items-center gap-1 text-brand-200 font-semibold text-sm flex-shrink-0 whitespace-nowrap">
-                                Open <span class="text-lg">↗</span>
+                                {{ $t('Open') }} <span class="text-lg">↗</span>
                             </span>
                         </button>
-                        <div class="text-[11px] text-neutral-500 mt-1 text-center">opens in your web browser</div>
+                        <div class="text-[11px] text-neutral-500 mt-1 text-center">{{ $t('opens in your web browser') }}</div>
                     </div>
 
                     <!-- Ordered list starts at 2 because step 1 is the
                          big CTA button above. Custom marker color keeps
                          the numbers from going default-black on dark bg. -->
                     <ol start="2" class="text-sm text-neutral-300 list-decimal list-inside space-y-1 pt-1 pl-1 marker:text-brand-400">
-                        <li>On that page, find the <strong class="text-brand-200">Launcher Tokens</strong> block, click <em>New token</em> and label it (e.g. "Home PC")</li>
-                        <li>Copy the generated token and paste it below</li>
+                        <li>{{ $t('On that page, find the Launcher Tokens block, click New token and give it a label such as Home PC') }}</li>
+                        <li>{{ $t('Copy the generated token and paste it below') }}</li>
                     </ol>
 
                     <input
                         v-model="token"
                         type="text"
-                        placeholder="1|abc123def…  (paste token here)"
+                        :placeholder="$t('1|abc123def…  (paste the token here)')"
                         class="w-full bg-black/60 border border-white/10 rounded px-3 py-2 text-sm font-mono focus:border-brand-500/60 focus:outline-none"
                         @keydown.enter="saveToken"
                     />
@@ -359,9 +358,7 @@
                             <span>{{ tokenError }}</span>
                         </div>
                         <div class="text-red-300/80 pl-6">
-                            Open the token page above and check you copied the token from the
-                            <strong class="text-red-200">Launcher Tokens</strong> block under
-                            <span class="font-mono">defrag.racing &gt; Settings &gt; Security</span> - not another token type.
+                            {{ $t('Open the token page above and check you copied the token from the Launcher Tokens block, not another token type.') }}
                         </div>
                     </div>
 
@@ -376,24 +373,24 @@
                         @click.self="showSkipConfirm = false"
                     >
                         <div class="max-w-md w-full bg-neutral-900 border border-amber-500/40 rounded-xl p-5 space-y-3">
-                            <h3 class="text-lg font-bold text-amber-200">Continue without a token?</h3>
+                            <h3 class="text-lg font-bold text-amber-200">{{ $t('Continue without a token?') }}</h3>
                             <p class="text-sm text-neutral-300">
-                                Without a token these features will be <strong>disabled</strong> and visibly empty:
+                                {{ $t('Without a token these features will be disabled and visibly empty:') }}
                             </p>
                             <ul class="text-xs text-amber-100 space-y-0.5 pl-1 rounded border border-amber-500/30 bg-amber-500/10 p-3">
                                 <TokenFeatureList />
                             </ul>
-                            <div class="text-xs text-emerald-300 font-semibold">These still work without a token:</div>
+                            <div class="text-xs text-emerald-300 font-semibold">{{ $t('These still work without a token:') }}</div>
                             <ul class="text-xs text-emerald-200/90 space-y-0.5 pl-1 rounded border border-emerald-500/30 bg-emerald-500/10 p-3">
                                 <TokenFreeFeatures />
                             </ul>
-                            <p class="text-xs text-neutral-500">You can paste a token anytime later from Settings.</p>
+                            <p class="text-xs text-neutral-500">{{ $t('You can paste a token later from Settings at any time.') }}</p>
                             <div class="flex justify-end gap-2 pt-1">
-                                <button class="btn-ghost" @click="showSkipConfirm = false">Back - I'll add a token</button>
+                                <button class="btn-ghost" @click="showSkipConfirm = false">{{ $t('Back - I will add a token') }}</button>
                                 <button
                                     class="px-3 py-1.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-sm font-semibold"
                                     @click="confirmSkipToken"
-                                >Skip anyway</button>
+                                >{{ $t('Skip anyway') }}</button>
                             </div>
                         </div>
                     </div>
@@ -402,20 +399,19 @@
                 <!-- step 2: engine + demos (required - the launcher's
                      base, comes before the optional token step) -->
                 <div v-else-if="step === 2" class="space-y-4">
-                    <h2 class="text-xl font-bold">Defrag installation</h2>
+                    <h2 class="text-xl font-bold">{{ $t('Defrag installation') }}</h2>
                     <p class="text-sm text-neutral-400 leading-relaxed">
-                        Pick the engine you want <code class="text-xs bg-black/40 px-1 rounded">defrag://</code> links to open, and confirm the demos folder the launcher will watch.
-                        Both are required - the engine opens join links and the demos folder is what gets backed up.
+                        {{ $t('Pick the engine you want server join links to open, and confirm the demos folder the launcher will watch. Both are required - the engine opens join links and the demos folder is what gets backed up.') }}
                     </p>
 
                     <div class="space-y-2">
                         <div class="flex items-center justify-between">
-                            <div class="text-xs uppercase tracking-wider text-neutral-500">Engines</div>
-                            <span v-if="engines.length" class="text-xs text-neutral-600">{{ engines.length }} found</span>
+                            <div class="text-xs uppercase tracking-wider text-neutral-500">{{ $t('Engines') }}</div>
+                            <span v-if="engines.length" class="text-xs text-neutral-600">{{ $t(':count found', { count: engines.length }) }}</span>
                         </div>
-                        <div v-if="enginesLoading" class="text-sm text-neutral-500">Scanning…</div>
+                        <div v-if="enginesLoading" class="text-sm text-neutral-500">{{ $t('Scanning…') }}</div>
                         <div v-else-if="!engines.length" class="text-sm text-neutral-500">
-                            None detected automatically.
+                            {{ $t('None detected automatically.') }}
                         </div>
                         <!-- Scroll the list (not the whole page) so the header and the
                              Selected / Demos / Next sections below stay on screen even
@@ -445,12 +441,12 @@
                             </label>
                         </div>
 
-                        <button class="btn-ghost w-full" @click="pickManualEngine">Browse manually…</button>
-                        <button class="text-xs text-neutral-500 hover:text-neutral-300" @click="rescanEngines">Rescan</button>
+                        <button class="btn-ghost w-full" @click="pickManualEngine">{{ $t('Browse manually…') }}</button>
+                        <button class="text-xs text-neutral-500 hover:text-neutral-300" @click="rescanEngines">{{ $t('Rescan') }}</button>
                     </div>
 
                     <div v-if="selectedEngine" class="space-y-2 pt-2">
-                        <div class="text-xs uppercase tracking-wider text-neutral-500">Selected engine</div>
+                        <div class="text-xs uppercase tracking-wider text-neutral-500">{{ $t('Selected engine') }}</div>
                         <div class="flex items-center gap-2 bg-emerald-500/5 border border-emerald-500/30 rounded p-3">
                             <svg class="w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
@@ -459,44 +455,44 @@
                                 <div class="text-sm text-neutral-100 font-medium truncate">{{ pathFile(selectedEngine) }}</div>
                                 <div class="text-xs text-neutral-500 truncate" :title="prettyPath(selectedEngine)">{{ pathDir(selectedEngine) }}</div>
                             </div>
-                            <button class="btn-ghost flex-shrink-0" @click="selectedEngine = null">Change</button>
+                            <button class="btn-ghost flex-shrink-0" @click="selectedEngine = null">{{ $t('Change') }}</button>
                         </div>
                     </div>
 
                     <div v-if="selectedEngine || demosPath" class="space-y-2 pt-2">
-                        <div class="text-xs uppercase tracking-wider text-neutral-500">Demos folder</div>
+                        <div class="text-xs uppercase tracking-wider text-neutral-500">{{ $t('Demos folder') }}</div>
                         <div class="flex items-center gap-2 bg-black/30 border border-white/10 rounded p-3">
                             <div class="flex-1 text-sm text-neutral-200 break-all min-w-0">
-                                {{ demosPath ? prettyPath(demosPath) : '(not detected - click Change)' }}
+                                {{ demosPath ? prettyPath(demosPath) : $t('(not detected - click Change)') }}
                             </div>
-                            <button class="btn-ghost" @click="pickDemosFolder">Change</button>
+                            <button class="btn-ghost" @click="pickDemosFolder">{{ $t('Change') }}</button>
                         </div>
                         <p v-if="demosError" class="text-xs text-red-300">{{ demosError }}</p>
-                        <p class="text-xs text-neutral-500">Must be your engine's <code class="bg-black/40 px-1 rounded">defrag/demos</code> folder (or a subfolder of it).</p>
+                        <p class="text-xs text-neutral-500">{{ $t('It must be the defrag/demos folder of your engine, or a folder inside it.') }}</p>
                     </div>
 
                     <p v-if="!canProceedFromEngine" class="text-xs text-amber-300/80 pt-1">
-                        Pick your engine and demos folder to continue - both are required for the launcher (and even <code class="bg-black/40 px-1 rounded">defrag://</code> links) to work.
+                        {{ $t('Pick your engine and demos folder to continue - both are required for the launcher, and even for server join links, to work.') }}
                     </p>
                 </div>
 
                 <!-- step 4: finish -->
                 <div v-else class="space-y-4">
-                    <h2 class="text-xl font-bold">All set</h2>
+                    <h2 class="text-xl font-bold">{{ $t('All set') }}</h2>
                     <ul class="text-sm text-neutral-300 space-y-1">
                         <li class="flex items-center gap-2">
                             <span :class="tokenSkipped ? 'text-amber-400' : 'text-brand-400'">{{ tokenSkipped ? '!' : '✓' }}</span>
-                            <span v-if="tokenSkipped">Token skipped</span>
-                            <span v-else-if="tokenSavedName">Signed in as <strong class="text-neutral-100">{{ tokenSavedName }}</strong></span>
-                            <span v-else>Token stored</span>
+                            <span v-if="tokenSkipped">{{ $t('Token skipped') }}</span>
+                            <span v-else-if="tokenSavedName">{{ $t('Signed in as :name', { name: tokenSavedName }) }}</span>
+                            <span v-else>{{ $t('Token stored') }}</span>
                         </li>
                         <li class="flex items-center gap-2">
                             <span class="text-brand-400">✓</span>
-                            <span class="truncate">Engine: {{ pathFile(selectedEngine) }}</span>
+                            <span class="truncate">{{ $t('Engine:') }} {{ pathFile(selectedEngine) }}</span>
                         </li>
                         <li class="flex items-center gap-2">
                             <span class="text-brand-400">✓</span>
-                            <span class="break-all">Demos folder: {{ prettyPath(demosPath) }}</span>
+                            <span class="break-all">{{ $t('Demos folder:') }} {{ prettyPath(demosPath) }}</span>
                         </li>
                     </ul>
 
@@ -509,20 +505,19 @@
                         v-if="tokenSkipped"
                         class="rounded border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-100 space-y-1.5"
                     >
-                        <div class="font-semibold text-amber-200">Without a token, these features stay disabled:</div>
+                        <div class="font-semibold text-amber-200">{{ $t('Without a token, these features stay disabled:') }}</div>
                         <ul class="space-y-0.5 pl-1">
                             <TokenFeatureList />
                         </ul>
-                        <div class="font-semibold text-emerald-300 pt-1">These still work without a token:</div>
+                        <div class="font-semibold text-emerald-300 pt-1">{{ $t('These still work without a token:') }}</div>
                         <ul class="space-y-0.5 pl-1 text-emerald-200/90">
                             <TokenFreeFeatures />
                         </ul>
                         <div class="pt-1">
-                            You can add a token anytime from
-                            <strong class="text-amber-200">Settings → Auto-upload token</strong>.
+                            {{ $t('You can add a token at any time from Settings.') }}
                         </div>
                         <button class="mt-1 text-amber-200 hover:underline font-semibold" @click="step = 3">
-                            ← Go back and paste a token instead
+                            {{ $t('← Go back and paste a token instead') }}
                         </button>
                     </div>
 
@@ -533,25 +528,25 @@
                  far the content above is scrolled. Back lets you revisit a step
                  before finishing; the right side is the step's primary action. -->
             <div class="flex-shrink-0 border-t border-white/10 p-4 flex items-center justify-between gap-2 bg-neutral-900">
-                <button v-if="step > 1" class="btn-ghost" @click="goBack">← Back</button>
+                <button v-if="step > 1" class="btn-ghost" @click="goBack">{{ $t('← Back') }}</button>
                 <span v-else></span>
 
                 <div class="flex items-center gap-2">
                     <template v-if="step === 1">
-                        <button class="btn-primary" @click="step = 2">Next</button>
+                        <button class="btn-primary" @click="step = 2">{{ $t('Next') }}</button>
                     </template>
                     <template v-else-if="step === 2">
-                        <button class="btn-primary" :disabled="!canProceedFromEngine" @click="step = 3">Next</button>
+                        <button class="btn-primary" :disabled="!canProceedFromEngine" @click="step = 3">{{ $t('Next') }}</button>
                     </template>
                     <template v-else-if="step === 3">
-                        <button class="btn-ghost" @click="requestSkipToken">Skip - defrag:// only</button>
+                        <button class="btn-ghost" @click="requestSkipToken">{{ $t('Skip - join links only') }}</button>
                         <button class="btn-primary" :disabled="!token.trim() || tokenSaving" @click="saveToken">
-                            {{ tokenSaving ? 'Saving…' : 'Save & continue' }}
+                            {{ tokenSaving ? $t('Saving…') : $t('Save and continue') }}
                         </button>
                     </template>
                     <template v-else>
                         <button class="btn-primary" :disabled="finishing" @click="finish">
-                            {{ finishing ? 'Finishing…' : 'Open launcher' }}
+                            {{ finishing ? $t('Finishing…') : $t('Open the launcher') }}
                         </button>
                     </template>
                 </div>

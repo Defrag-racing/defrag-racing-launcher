@@ -13,6 +13,7 @@
     import { onActivated, onMounted, onUnmounted, ref, watch } from 'vue';
     import { tauri, type OfflineMap, type OfflineMapPage } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
+    import { t } from '../lib/i18n';
 
     const config = useConfigStore();
 
@@ -37,7 +38,7 @@
         try {
             data.value = await tauri.listOfflineMaps(page.value, 24, search.value);
         } catch (e: any) {
-            error.value = e?.toString?.() ?? 'Failed to read local maps';
+            error.value = e?.toString?.() ?? t('Failed to read local maps');
             data.value = null;
         } finally {
             loading.value = false;
@@ -108,7 +109,7 @@
             // Already in baseq3 -> launch directly, no download.
             await tauri.launchEngineArgs(`+${physics} "${m.name}"`);
         } catch (e: any) {
-            error.value = e?.toString?.() ?? 'Failed to run the map';
+            error.value = e?.toString?.() ?? t('Failed to run the map');
         } finally {
             runningKey.value = null;
         }
@@ -122,17 +123,17 @@
             <input
                 v-model="search"
                 type="text"
-                placeholder="Search local map name…"
+                :placeholder="$t('Search local map name…')"
                 class="flex-1 min-w-[180px] bg-black/60 border border-white/10 rounded px-2 py-1.5 text-neutral-200 placeholder:text-neutral-600 focus:border-brand-500/60 focus:outline-none"
             />
             <div v-if="data" class="text-neutral-500 whitespace-nowrap">
-                page {{ data.current_page }} / {{ data.last_page }} · {{ data.total }} local
+                {{ $t('page :n of :total', { n: data.current_page, total: data.last_page }) }} · {{ $t(':count installed', { count: data.total }) }}
             </div>
             <button
                 class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-50"
                 :disabled="loading"
                 @click="load"
-            >{{ loading ? 'Scanning…' : 'Rescan' }}</button>
+            >{{ loading ? $t('Scanning…') : $t('Rescan') }}</button>
         </div>
 
         <p v-if="error" class="px-5 py-2 bg-red-500/10 border-b border-red-500/20 text-xs text-red-300">
@@ -141,17 +142,16 @@
 
         <div class="flex-1 overflow-auto">
             <div v-if="loading && !data" class="p-8 text-center text-sm text-neutral-500">
-                Scanning baseq3…
+                {{ $t('Scanning baseq3…') }}
             </div>
             <div v-else-if="!config.config.engine_path" class="p-8 text-center text-sm text-neutral-500">
-                Pick an engine in Settings to see your installed maps.
+                {{ $t('Pick an engine in Settings to see your installed maps.') }}
             </div>
             <div v-else-if="data && !data.total" class="p-8 text-center text-sm text-neutral-500">
-                No maps found in <code class="bg-black/40 px-1 rounded">baseq3</code>. Install maps (or use
-                "Run offline" on the online Maps tab) and they'll show up here.
+                {{ $t('No maps found in baseq3. Install maps, or use Run offline on the online Maps tab, and they will show up here.') }}
             </div>
             <div v-else-if="data && !data.data.length" class="p-8 text-center text-sm text-neutral-500">
-                No local maps match this search.
+                {{ $t('No local maps match this search.') }}
             </div>
             <ul v-else-if="data" class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 p-3">
                 <li
@@ -168,7 +168,7 @@
                             class="w-full h-full object-cover"
                         />
                         <div v-else class="text-[10px] text-neutral-600 uppercase">
-                            {{ m.has_levelshot ? '…' : 'no levelshot' }}
+                            {{ m.has_levelshot ? '…' : $t('no levelshot') }}
                         </div>
                     </div>
                     <div class="p-2 flex-1 flex flex-col">
@@ -176,17 +176,17 @@
                         <div class="text-[10px] text-neutral-500 truncate mt-0.5" :title="m.pk3">{{ m.pk3 }}</div>
 
                         <div class="flex items-center gap-1.5 mt-2 pt-2 border-t border-white/[0.06]">
-                            <span class="text-[10px] uppercase tracking-wider text-neutral-600 mr-0.5">Run</span>
+                            <span class="text-[10px] uppercase tracking-wider text-neutral-600 mr-0.5">{{ $t('Run') }}</span>
                             <button
                                 class="flex-1 px-2 py-1 rounded text-[11px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
                                 :disabled="!config.config.engine_path || !!runningKey"
-                                :title="`Run ${m.name} offline in VQ3`"
+                                :title="$t('Run :map offline in :physics', { map: m.name, physics: 'VQ3' })"
                                 @click="runOffline(m, 'vq3')"
                             >{{ isRunning(m, 'vq3') ? '…' : 'VQ3' }}</button>
                             <button
                                 class="flex-1 px-2 py-1 rounded text-[11px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
                                 :disabled="!config.config.engine_path || !!runningKey"
-                                :title="`Run ${m.name} offline in CPM`"
+                                :title="$t('Run :map offline in :physics', { map: m.name, physics: 'CPM' })"
                                 @click="runOffline(m, 'cpm')"
                             >{{ isRunning(m, 'cpm') ? '…' : 'CPM' }}</button>
                         </div>
@@ -203,13 +203,13 @@
                 class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-30"
                 :disabled="data.current_page <= 1 || loading"
                 @click="setPage(data!.current_page - 1)"
-            >← Prev</button>
-            <span class="text-neutral-500">page {{ data.current_page }} / {{ data.last_page }}</span>
+            >{{ $t('← Prev') }}</button>
+            <span class="text-neutral-500">{{ $t('page :n of :total', { n: data.current_page, total: data.last_page }) }}</span>
             <button
                 class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-30"
                 :disabled="data.current_page >= data.last_page || loading"
                 @click="setPage(data!.current_page + 1)"
-            >Next →</button>
+            >{{ $t('Next →') }}</button>
         </footer>
     </div>
 </template>

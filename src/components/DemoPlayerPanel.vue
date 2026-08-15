@@ -14,6 +14,7 @@
     import { getCurrentWindow } from '@tauri-apps/api/window';
     import { LazyStore } from '@tauri-apps/plugin-store';
     import { tauri, type DemoPlayerStatus } from '../lib/tauri';
+    import { t } from '../lib/i18n';
 
     /** The demo to play: absolute `path` on disk + a `name` for the banner. */
     export interface PlayTarget {
@@ -264,7 +265,7 @@
 
     const start = async (target: PlayTarget) => {
         if (!isEmbedSupported) {
-            playError.value = 'The embedded demo player is only available on Windows and Linux.';
+            playError.value = t('The embedded demo player is only available on Windows and Linux.');
             return;
         }
         playError.value = null;
@@ -288,7 +289,7 @@
             // control channel buffers it until the engine connects.
             applyAudio();
         } catch (e: any) {
-            playError.value = e?.toString?.() ?? 'Failed to start playback';
+            playError.value = e?.toString?.() ?? t('Failed to start playback');
             playing.value = false;
             booting.value = false;
         }
@@ -297,7 +298,7 @@
     // Start a side-by-side comparison of two demos (two engines, lockstep).
     const startCompare = async (c: CompareTarget) => {
         if (!isEmbedSupported) {
-            playError.value = 'The embedded demo player is only available on Windows and Linux.';
+            playError.value = t('The embedded demo player is only available on Windows and Linux.');
             return;
         }
         playError.value = null;
@@ -318,7 +319,7 @@
             // are up; the control channel buffers these until each connects.
             applyAudio();
         } catch (e: any) {
-            playError.value = e?.toString?.() ?? 'Failed to start comparison';
+            playError.value = e?.toString?.() ?? t('Failed to start comparison');
             playing.value = false;
             booting.value = false;
         }
@@ -866,7 +867,7 @@
                             type="range" min="0" max="1" step="0.05"
                             class="vol vol-sm flex-shrink-0"
                             :value="effVol(i)"
-                            :title="`Volume - demo ${paneLetter(i)}`"
+                            :title="$t('Volume - demo :letter', { letter: paneLetter(i) })"
                             @input="onVolInput(i, $event)"
                         />
                         <span class="truncate" :class="paneColor(i)" :title="d.name">
@@ -876,11 +877,11 @@
                 </template>
             </span>
             <span v-else class="flex-1 text-center text-sm font-semibold text-neutral-100 truncate">
-                {{ demo ? formatDemoName(demo.name) : 'Demo player' }}
+                {{ demo ? formatDemoName(demo.name) : $t('Demo player') }}
             </span>
             <button
                 class="flex-shrink-0 px-2 py-1 rounded text-sm bg-white/5 hover:bg-white/10 text-neutral-300"
-                title="Close player"
+                :title="$t('Close player')"
                 @click="close"
             >✕</button>
         </div>
@@ -915,8 +916,8 @@
                 class="absolute inset-0 flex flex-col items-center justify-center text-neutral-300 pointer-events-none"
             >
                 <div class="dr-spinner mb-4"></div>
-                <div class="text-sm font-semibold">Loading demo…</div>
-                <div class="text-xs text-neutral-500 mt-1">First launch builds the map cache - this can take a few seconds.</div>
+                <div class="text-sm font-semibold">{{ $t('Loading demo…') }}</div>
+                <div class="text-xs text-neutral-500 mt-1">{{ $t('First launch builds the map cache - this can take a few seconds.') }}</div>
             </div>
             <!-- Idle prompt (no demo playing, not booting). -->
             <div
@@ -924,7 +925,7 @@
                 class="absolute inset-0 flex flex-col items-center justify-center text-neutral-500 pointer-events-none"
             >
                 <div class="text-5xl mb-3">▶</div>
-                <div class="text-sm">{{ isEmbedSupported ? 'Pick a demo to play' : 'The demo player is only available on Windows and Linux.' }}</div>
+                <div class="text-sm">{{ isEmbedSupported ? $t('Pick a demo to play') : $t('The embedded demo player is only available on Windows and Linux.') }}</div>
             </div>
         </div>
 
@@ -939,7 +940,7 @@
                  they ate most of the width, leaving the scrub bar cramped. Giving
                  them a dedicated row lets the scrub bar below span the full width. -->
             <div class="flex items-center justify-center gap-1.5 flex-wrap mb-1.5">
-                <span class="text-[11px] uppercase tracking-wide text-neutral-500 mr-1">Speed</span>
+                <span class="text-[11px] uppercase tracking-wide text-neutral-500 mr-1">{{ $t('Speed') }}</span>
                 <template v-for="x in SPEEDS" :key="x">
                     <!-- small gap between the fractional speeds and the whole-number ones -->
                     <span v-if="x === 1" class="w-2 flex-shrink-0" aria-hidden="true"></span>
@@ -956,29 +957,29 @@
                 <button
                     class="px-3 py-1.5 rounded text-sm font-semibold"
                     :class="(!paused && !atEnd) ? 'bg-emerald-500/30 text-emerald-200' : 'bg-white/5 hover:bg-white/10 text-neutral-200'"
-                    title="Play / resume"
+                    :title="$t('Play or resume')"
                     @click="play"
-                >▶ Play</button>
+                >▶ {{ $t('Play') }}</button>
                 <button
                     class="px-3 py-1.5 rounded text-sm font-semibold"
                     :class="(paused || atEnd) ? 'bg-emerald-500/30 text-emerald-200' : 'bg-white/5 hover:bg-white/10 text-neutral-200'"
-                    title="Pause"
+                    :title="$t('Pause')"
                     @click="doPause"
-                >⏸ Pause</button>
+                >⏸ {{ $t('Pause') }}</button>
                 <!-- Single viewer audio: mute toggle + volume slider (comparison
                      panes get their own controls in the header instead). -->
                 <span v-if="!compare" class="flex items-center gap-1 flex-shrink-0">
                     <button
                         class="px-1.5 py-1 rounded text-sm bg-white/5 hover:bg-white/10"
                         :class="(muted[0] ?? false) ? 'opacity-50' : ''"
-                        :title="(muted[0] ?? false) ? 'Unmute' : 'Mute'"
+                        :title="(muted[0] ?? false) ? $t('Unmute') : $t('Mute')"
                         @click="toggleMute(0)"
                     >{{ (muted[0] ?? false) ? '🔇' : '🔊' }}</button>
                     <input
                         type="range" min="0" max="1" step="0.05"
                         class="vol"
                         :value="effVol(0)"
-                        title="Volume"
+                        :title="$t('Volume')"
                         @input="onVolInput(0, $event)"
                     />
                 </span>
@@ -1019,7 +1020,7 @@
                 <span
                     v-if="fineMode"
                     class="px-1.5 rounded bg-amber-500/25 text-amber-200 text-[10px] font-mono whitespace-nowrap leading-none"
-                >ms zoom {{ fmt(Math.floor(sliderMin/1000)) }}–{{ fmt(Math.ceil(sliderMax/1000)) }}</span>
+                >{{ $t('ms zoom') }} {{ fmt(Math.floor(sliderMin/1000)) }}-{{ fmt(Math.ceil(sliderMax/1000)) }}</span>
             </div>
 
             <!-- Comparison: nudge each demo against demo A to line the runs up.
@@ -1032,7 +1033,7 @@
                     :key="i"
                     class="flex items-center gap-1.5 text-[11px] text-neutral-400 flex-wrap"
                 >
-                    <span class="font-semibold mr-0.5 w-12 flex-shrink-0" :class="paneColor(i)">Sync {{ paneLetter(i) }}:</span>
+                    <span class="font-semibold mr-0.5 w-12 flex-shrink-0" :class="paneColor(i)">{{ $t('Sync :letter:', { letter: paneLetter(i) }) }}</span>
                     <button v-for="s in NUDGE_STEPS_DESC" :key="'m'+s" class="nudge" @click="nudgePane(i, -s)">-{{ s }}</button>
                     <span class="text-neutral-600 mx-0.5">|</span>
                     <button v-for="s in NUDGE_STEPS" :key="'p'+s" class="nudge" @click="nudgePane(i, s)">+{{ s }}</button>
@@ -1040,34 +1041,38 @@
                         {{ (offsets[i] ?? 0) > 0 ? '+' : '' }}{{ offsets[i] ?? 0 }}ms
                         <span v-if="offsets[i]" class="text-neutral-500">({{ ((offsets[i] ?? 0) / 8).toFixed((offsets[i] ?? 0) % 8 ? 1 : 0) }}f)</span>
                     </span>
-                    <button class="nudge-reset ml-1" @click="resetOffset(i)" title="Reset this demo's sync to 0">reset</button>
+                    <button
+                        class="nudge-reset ml-1"
+                        :title="$t('Reset the sync for this demo to 0')"
+                        @click="resetOffset(i)"
+                    >{{ $t('reset') }}</button>
                 </div>
             </div>
             <!-- Keyboard legend: what the shortcuts do while a demo plays. -->
             <div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-neutral-500">
                 <span class="inline-flex items-center gap-1.5">
                     <kbd class="kbd">Space</kbd>
-                    <span>pause / resume</span>
+                    <span>{{ $t('pause or resume') }}</span>
                 </span>
                 <span class="inline-flex items-center gap-1.5">
                     <kbd class="kbd">←</kbd><kbd class="kbd">→</kbd>
-                    <span>seek 5 s <span class="text-neutral-600">(hold to scrub)</span></span>
+                    <span>{{ $t('seek 5 s') }} <span class="text-neutral-600">{{ $t('(hold to scrub)') }}</span></span>
                 </span>
                 <span class="inline-flex items-center gap-1.5">
                     <kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd>
-                    <span>seek 10 s</span>
+                    <span>{{ $t('seek 10 s') }}</span>
                 </span>
                 <span class="inline-flex items-center gap-1.5">
                     <kbd class="kbd">Shift</kbd><kbd class="kbd">←</kbd><kbd class="kbd">→</kbd>
-                    <span>step 1 frame</span>
+                    <span>{{ $t('step 1 frame') }}</span>
                 </span>
                 <span class="inline-flex items-center gap-1.5">
                     <kbd class="kbd">Esc</kbd>
-                    <span>close player</span>
+                    <span>{{ $t('close player') }}</span>
                 </span>
                 <span class="inline-flex items-center gap-1.5">
                     <span class="text-amber-400">⤢</span>
-                    <span>hold the scrub still to zoom to milliseconds</span>
+                    <span>{{ $t('hold the scrub still to zoom to milliseconds') }}</span>
                 </span>
             </div>
         </div>

@@ -7,6 +7,7 @@
     import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
     import { tauri, type MapRow, type Paginated } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
+    import { t } from '../lib/i18n';
     import { openExternal } from '../lib/open';
     import {
         splitCodes,
@@ -37,7 +38,7 @@
             data.value = await tauri.getMaps(page.value, search.value);
             lastFetchedAt.value = new Date();
         } catch (e: any) {
-            error.value = e?.toString?.() ?? 'Failed to load maps';
+            error.value = e?.toString?.() ?? t('Failed to load maps');
         } finally {
             loading.value = false;
         }
@@ -140,7 +141,7 @@
         try {
             await tauri.runMapOffline(m.name, physics, m.pk3);
         } catch (e: any) {
-            error.value = e?.toString?.() ?? 'Failed to run the map';
+            error.value = e?.toString?.() ?? t('Failed to run the map');
         } finally {
             runningKey.value = null;
         }
@@ -164,28 +165,28 @@
     <div class="flex-1 flex flex-col min-h-0">
         <header class="px-5 py-3 border-b border-white/10 flex items-center justify-between gap-3">
             <div class="min-w-0 flex items-center gap-3">
-                <div class="font-semibold">Maps</div>
+                <div class="font-semibold">{{ $t('Maps') }}</div>
                 <!-- Online / Offline sub-tabs -->
                 <div class="flex items-center gap-1 text-xs">
                     <button
                         class="px-2 py-1 rounded transition-colors"
                         :class="subtab === 'online' ? 'bg-white/10 text-neutral-100 font-semibold' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
                         @click="subtab = 'online'"
-                    >Online</button>
+                    >{{ $t('Online') }}</button>
                     <button
                         class="px-2 py-1 rounded transition-colors"
                         :class="subtab === 'offline' ? 'bg-white/10 text-neutral-100 font-semibold' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
                         @click="subtab = 'offline'"
-                    >Offline <span class="text-neutral-500">(local)</span></button>
+                    >{{ $t('Offline') }} <span class="text-neutral-500">{{ $t('(on this PC)') }}</span></button>
                 </div>
             </div>
             <div v-if="subtab === 'online'" class="flex items-center gap-2 text-xs text-neutral-500 flex-shrink-0">
-                <span v-if="lastFetchedAt">Updated {{ lastFetchedLabel }}</span>
+                <span v-if="lastFetchedAt">{{ $t('Updated') }} {{ lastFetchedLabel }}</span>
                 <button
                     class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-50"
                     :disabled="loading || !config.hasToken"
                     @click="load"
-                >{{ loading ? 'Loading…' : 'Refresh' }}</button>
+                >{{ loading ? $t('Loading…') : $t('Refresh') }}</button>
             </div>
         </header>
 
@@ -193,14 +194,14 @@
         <div v-if="!config.hasToken" class="flex-1 flex items-center justify-center p-8">
             <div class="text-center max-w-sm space-y-2">
                 <div class="text-5xl">🔑</div>
-                <div class="text-neutral-300 font-semibold">Token required</div>
+                <div class="text-neutral-300 font-semibold">{{ $t('Token required') }}</div>
                 <p class="text-sm text-neutral-500">
-                    Maps browser needs a token from your defrag.racing account.
+                    {{ $t('The maps browser needs a token from your defrag.racing account.') }}
                 </p>
                 <RouterLink
                     :to="{ name: 'settings', query: { highlight: 'token' } }"
                     class="inline-flex items-center gap-1 mt-1 px-3 py-1.5 rounded bg-brand-500/20 hover:bg-brand-500/30 text-brand-300 text-sm font-semibold"
-                >Open Settings to paste a token →</RouterLink>
+                >{{ $t('Open Settings to paste a token →') }}</RouterLink>
             </div>
         </div>
 
@@ -209,11 +210,11 @@
                 <input
                     v-model="search"
                     type="text"
-                    placeholder="Search map name…"
+                    :placeholder="$t('Search map name…')"
                     class="flex-1 min-w-[180px] bg-black/60 border border-white/10 rounded px-2 py-1.5 text-neutral-200 placeholder:text-neutral-600 focus:border-brand-500/60 focus:outline-none"
                 />
                 <div v-if="data" class="text-neutral-500 whitespace-nowrap">
-                    page {{ data.current_page }} / {{ data.last_page }} · {{ data.total }} total
+                    {{ $t('page :n of :total', { n: data.current_page, total: data.last_page ?? 1 }) }} · {{ $t(':count in total', { count: data.total ?? 0 }) }}
                 </div>
             </div>
 
@@ -223,10 +224,10 @@
 
             <div class="flex-1 overflow-auto">
                 <div v-if="loading && !data" class="p-8 text-center text-sm text-neutral-500">
-                    Loading…
+                    {{ $t('Loading…') }}
                 </div>
                 <div v-else-if="data && !data.data.length" class="p-8 text-center text-sm text-neutral-500">
-                    No maps match this search.
+                    {{ $t('No maps match this search.') }}
                 </div>
                 <ul v-else-if="data" class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 p-3">
                     <li
@@ -236,7 +237,7 @@
                     >
                         <button
                             class="relative aspect-video bg-black/40 overflow-hidden flex items-center justify-center"
-                            :title="`Open ${m.name} on defrag.racing`"
+                            :title="$t('Open :map on defrag.racing', { map: m.name })"
                             @click="openMap(m.name)"
                         >
                             <img
@@ -247,7 +248,7 @@
                                 loading="lazy"
                             />
                             <div v-else class="text-[10px] text-neutral-600 uppercase">
-                                no thumbnail
+                                {{ $t('no thumbnail') }}
                             </div>
 
                             <!-- Weapons / items / functions icons over the
@@ -297,7 +298,7 @@
                                 @click="openMap(m.name)"
                             >{{ m.name }}</button>
                             <div class="text-xs text-neutral-500 truncate mt-0.5" v-if="m.author">
-                                by {{ m.author }}
+                                {{ $t('by :author', { author: m.author }) }}
                             </div>
                             <div class="flex items-center gap-2 mt-1 text-[10px] text-neutral-500">
                                 <span v-if="m.physics" class="uppercase px-1 py-0.5 rounded bg-white/5 text-neutral-300">{{ m.physics }}</span>
@@ -316,23 +317,23 @@
                             <div class="mt-2 pt-2 border-t border-white/[0.06]">
                                 <div class="text-[10px] uppercase tracking-wider text-neutral-400 mb-1 flex items-center gap-1">
                                     <span class="text-emerald-400">▶</span>
-                                    Click to run offline instantly
+                                    {{ $t('Click to run offline instantly') }}
                                 </div>
                                 <div class="flex items-center gap-1.5">
                                     <button
                                         class="flex-1 px-2 py-1 rounded text-[11px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
                                         :disabled="!config.config.engine_path || !!runningKey"
                                         :title="config.config.engine_path
-                                            ? `Run ${m.name} offline in VQ3 (downloads the map if missing)`
-                                            : 'Pick an engine in Settings first'"
+                                            ? $t('Run :map offline in :physics - downloads the map if it is missing', { map: m.name, physics: 'VQ3' })
+                                            : $t('Pick an engine in Settings first')"
                                         @click="runOffline(m, 'vq3')"
                                     >{{ isRunning(m.id, 'vq3') ? '…' : 'VQ3' }}</button>
                                     <button
                                         class="flex-1 px-2 py-1 rounded text-[11px] font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
                                         :disabled="!config.config.engine_path || !!runningKey"
                                         :title="config.config.engine_path
-                                            ? `Run ${m.name} offline in CPM (downloads the map if missing)`
-                                            : 'Pick an engine in Settings first'"
+                                            ? $t('Run :map offline in :physics - downloads the map if it is missing', { map: m.name, physics: 'CPM' })
+                                            : $t('Pick an engine in Settings first')"
                                         @click="runOffline(m, 'cpm')"
                                     >{{ isRunning(m.id, 'cpm') ? '…' : 'CPM' }}</button>
                                 </div>
@@ -350,13 +351,13 @@
                     class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-30"
                     :disabled="data.current_page <= 1 || loading"
                     @click="setPage(data!.current_page - 1)"
-                >← Prev</button>
-                <span class="text-neutral-500">page {{ data.current_page }} / {{ data.last_page }}</span>
+                >{{ $t('← Prev') }}</button>
+                <span class="text-neutral-500">{{ $t('page :n of :total', { n: data.current_page, total: data.last_page ?? 1 }) }}</span>
                 <button
                     class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-30"
                     :disabled="data.current_page >= (data.last_page ?? 1) || loading"
                     @click="setPage(data!.current_page + 1)"
-                >Next →</button>
+                >{{ $t('Next →') }}</button>
             </footer>
         </template>
         </template>

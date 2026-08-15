@@ -5,6 +5,7 @@
     import { useNotificationsStore } from '../stores/notifications';
     import { q3ToHtml } from '../lib/q3color';
     import { openExternal } from '../lib/open';
+    import { t } from '../lib/i18n';
 
     const config = useConfigStore();
     const notifStore = useNotificationsStore();
@@ -33,7 +34,7 @@
                 notifStore.set(feed.value.unread.records, feed.value.unread.system);
             }
         } catch (e: any) {
-            error.value = e?.toString?.() ?? 'Failed to load notifications';
+            error.value = e?.toString?.() ?? t('Failed to load notifications');
         } finally {
             loading.value = false;
         }
@@ -71,7 +72,7 @@
         } catch (e: any) {
             n.read = wasRead;
             adjustUnread('record', wasRead ? -1 : +1);
-            error.value = e?.toString?.() ?? 'Toggle failed';
+            error.value = e?.toString?.() ?? t('Could not change that');
         } finally {
             busyRows.value.delete(key);
             busyRows.value = new Set(busyRows.value);
@@ -93,7 +94,7 @@
         } catch (e: any) {
             n.read = wasRead;
             adjustUnread('system', wasRead ? -1 : +1);
-            error.value = e?.toString?.() ?? 'Toggle failed';
+            error.value = e?.toString?.() ?? t('Could not change that');
         } finally {
             busyRows.value.delete(key);
             busyRows.value = new Set(busyRows.value);
@@ -115,7 +116,7 @@
         } catch (e: any) {
             // Roll back: restore each row's prior read state.
             feed.value.records.forEach((r, i) => { r.read = previous[i]; });
-            error.value = e?.toString?.() ?? 'Bulk mark failed';
+            error.value = e?.toString?.() ?? t('Could not mark them all');
             await refresh();
         } finally {
             bulkBusy.value = false;
@@ -135,7 +136,7 @@
             notifStore.set(resp.unread.records, resp.unread.system);
         } catch (e: any) {
             feed.value.system.forEach((r, i) => { r.read = previous[i]; });
-            error.value = e?.toString?.() ?? 'Bulk mark failed';
+            error.value = e?.toString?.() ?? t('Could not mark them all');
             await refresh();
         } finally {
             bulkBusy.value = false;
@@ -171,11 +172,11 @@
         if (!ms) return '';
         const diff = Date.now() - ms;
         const s = Math.round(diff / 1000);
-        if (s < 60) return `${s}s ago`;
+        if (s < 60) return t(':count seconds ago', { count: s });
         const m = Math.round(s / 60);
-        if (m < 60) return `${m} min ago`;
+        if (m < 60) return t(':count minutes ago', { count: m });
         const h = Math.round(m / 60);
-        if (h < 48) return `${h}h ago`;
+        if (h < 48) return t(':count hours ago', { count: h });
         return new Date(ms).toLocaleString();
     };
 
@@ -270,8 +271,13 @@
         render_completed:      { label: 'Render done',  icon: '📺', tone: 'emerald' },
         render_failed:         { label: 'Render failed', icon: '⚠️', tone: 'red' },
     };
-    const typeInfoOf = (n: SystemNotificationRow): TypeInfo =>
-        SYSTEM_TYPES[n.type] ?? { label: n.type || 'Notification', icon: '•', tone: 'neutral' };
+    // Translated at call time, not at module scope: the table is built once
+    // and the language can change afterwards.
+    const typeInfoOf = (n: SystemNotificationRow): TypeInfo => {
+        const info = SYSTEM_TYPES[n.type];
+        if (!info) return { label: n.type || t('Notification'), icon: '•', tone: 'neutral' };
+        return { ...info, label: t(info.label) };
+    };
 
     /** Tailwind classes per tone. Tailwind's JIT scrapes statics so we
      *  use a switch + concrete strings rather than template literals. */
@@ -317,11 +323,11 @@
 
     const prefixFor = (type: string | null | undefined): string | null => {
         if (!type) return null;
-        if (type.startsWith('clan_')) return 'Clan';
-        if (type.startsWith('tournament_') || type.startsWith('round_')) return 'Tournament';
-        if (type === 'alias_suggestion') return 'Alias';
-        if (type === 'announcement') return 'Announcement';
-        if (type === 'render_completed' || type === 'render_failed') return 'Render';
+        if (type.startsWith('clan_')) return t('Clan');
+        if (type.startsWith('tournament_') || type.startsWith('round_')) return t('Tournament');
+        if (type === 'alias_suggestion') return t('Alias');
+        if (type === 'announcement') return t('Announcement');
+        if (type === 'render_completed' || type === 'render_failed') return t('Render');
         return null;
     };
 </script>
@@ -331,12 +337,12 @@
         <!-- Header -->
         <header class="px-5 py-3 border-b border-white/10 flex items-center justify-between gap-3">
             <div class="min-w-0">
-                <div class="font-semibold">Notifications</div>
+                <div class="font-semibold">{{ $t('Notifications') }}</div>
                 <div class="text-xs text-neutral-500 mt-0.5 truncate">
                     <span v-if="(unreadMain.records + unreadMain.system) > 0">
-                        {{ unreadMain.records + unreadMain.system }} unread
+                        {{ $t(':count unread', { count: unreadMain.records + unreadMain.system }) }}
                     </span>
-                    <span v-else>All caught up.</span>
+                    <span v-else>{{ $t('All caught up.') }}</span>
                 </div>
             </div>
             <div class="flex items-center gap-2 text-xs flex-shrink-0">
@@ -344,17 +350,16 @@
                     class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-50"
                     :disabled="loading || !config.hasToken"
                     @click="refresh"
-                >{{ loading ? 'Loading…' : 'Refresh' }}</button>
+                >{{ loading ? $t('Loading…') : $t('Refresh') }}</button>
             </div>
         </header>
 
         <div v-if="!config.hasToken" class="flex-1 flex items-center justify-center p-8">
             <div class="text-center max-w-sm space-y-2">
                 <div class="text-5xl">🔑</div>
-                <div class="text-neutral-300 font-semibold">Token required</div>
+                <div class="text-neutral-300 font-semibold">{{ $t('Token required') }}</div>
                 <p class="text-sm text-neutral-500">
-                    Notifications need a token from your defrag.racing account.
-                    Open Settings to paste one.
+                    {{ $t('Notifications need a token from your defrag.racing account. Open Settings to paste one.') }}
                 </p>
             </div>
         </div>
@@ -368,7 +373,7 @@
                     @click="mainTab = 'records'"
                 >
                     <span>🏁</span>
-                    <span>Record notifications</span>
+                    <span>{{ $t('Record notifications') }}</span>
                     <span
                         v-if="unreadMain.records > 0"
                         class="px-2 py-0.5 rounded-full text-[10px] font-bold"
@@ -381,7 +386,7 @@
                     @click="mainTab = 'system'"
                 >
                     <span>📢</span>
-                    <span>System notifications</span>
+                    <span>{{ $t('System notifications') }}</span>
                     <span
                         v-if="unreadMain.system > 0"
                         class="px-2 py-0.5 rounded-full text-[10px] font-bold"
@@ -402,24 +407,24 @@
                         class="px-2 py-0.5 rounded bg-yellow-500/15 hover:bg-yellow-500/25 text-yellow-300 font-semibold disabled:opacity-50"
                         :disabled="bulkBusy || !feed.records.some(r => !r.read)"
                         @click="markAllRecords(true)"
-                    >Mark all read</button>
+                    >{{ $t('Mark all read') }}</button>
                     <button
                         class="px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 font-semibold disabled:opacity-50"
                         :disabled="bulkBusy || !feed.records.some(r => r.read)"
                         @click="markAllRecords(false)"
-                    >Mark all unread</button>
+                    >{{ $t('Mark all unread') }}</button>
                 </template>
                 <template v-if="mainTab === 'system' && feed">
                     <button
                         class="px-2 py-0.5 rounded bg-yellow-500/15 hover:bg-yellow-500/25 text-yellow-300 font-semibold disabled:opacity-50"
                         :disabled="bulkBusy || !feed.system.some(r => !r.read)"
                         @click="markAllSystem(true)"
-                    >Mark all read</button>
+                    >{{ $t('Mark all read') }}</button>
                     <button
                         class="px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 font-semibold disabled:opacity-50"
                         :disabled="bulkBusy || !feed.system.some(r => r.read)"
                         @click="markAllSystem(false)"
-                    >Mark all unread</button>
+                    >{{ $t('Mark all unread') }}</button>
                 </template>
             </div>
 
@@ -429,9 +434,9 @@
                 <div class="flex border-b border-white/[0.04] bg-black/20 text-xs">
                     <button
                         v-for="opt in ([
-                            { v: 'all',          label: 'All records',     tone: 'orange' },
-                            { v: 'beaten',       label: 'Beaten by others', tone: 'blue' },
-                            { v: 'worldrecords', label: 'World records taken', tone: 'yellow' },
+                            { v: 'all',          label: $t('All records'),     tone: 'orange' },
+                            { v: 'beaten',       label: $t('Beaten by others'), tone: 'blue' },
+                            { v: 'worldrecords', label: $t('World records taken'), tone: 'yellow' },
                         ] as const)"
                         :key="opt.v"
                         class="flex-1 px-3 py-1.5 transition-colors flex items-center justify-center gap-1.5"
@@ -451,13 +456,13 @@
                 </div>
 
                 <div class="flex-1 overflow-auto">
-                    <div v-if="loading && !feed" class="p-8 text-center text-sm text-neutral-500">Loading…</div>
+                    <div v-if="loading && !feed" class="p-8 text-center text-sm text-neutral-500">{{ $t('Loading…') }}</div>
                     <div v-else-if="!visibleRecords.length" class="h-full flex items-center justify-center p-8">
                         <div class="text-center space-y-2 max-w-sm">
                             <div class="text-5xl">🏁</div>
-                            <div class="text-neutral-300 font-semibold">No record notifications</div>
+                            <div class="text-neutral-300 font-semibold">{{ $t('No record notifications') }}</div>
                             <p class="text-sm text-neutral-500">
-                                When someone beats your PB or takes a WR you hold, it'll appear here.
+                                {{ $t('When someone beats your PB or takes a world record you hold, it will appear here.') }}
                             </p>
                         </div>
                     </div>
@@ -477,7 +482,7 @@
                                 :class="n.worldrecord
                                     ? 'bg-yellow-500/20 border-yellow-500/30 text-yellow-300'
                                     : 'bg-orange-500/20 border-orange-500/30 text-orange-300'"
-                                :title="n.worldrecord ? 'World record taken' : 'Personal best beaten'"
+                                :title="n.worldrecord ? $t('World record taken') : $t('Personal best beaten')"
                             >{{ n.worldrecord ? '🏆' : '🏁' }}</div>
 
                             <!-- Content -->
@@ -492,7 +497,7 @@
                                 <button
                                     class="font-bold text-neutral-100 hover:text-brand-300 hover:underline"
                                     @click.stop="openProfile(n.mdd_id)"
-                                    v-html="q3ToHtml(n.name || 'Someone')"
+                                    v-html="q3ToHtml(n.name || $t('Someone'))"
                                 ></button>
                                 <span
                                     v-if="n.physics"
@@ -502,14 +507,14 @@
                                         : 'bg-blue-500/20 text-blue-300'"
                                 >{{ n.physics }}</span>
                                 <span class="text-neutral-500">
-                                    {{ n.worldrecord ? 'took the world record on' : 'broke your time on' }}
+                                    {{ n.worldrecord ? $t('took the world record on') : $t('broke your time on') }}
                                 </span>
                                 <button
                                     v-if="n.mapname"
                                     class="text-brand-400 hover:text-brand-300 font-semibold hover:underline"
                                     @click.stop="openMap(n.mapname)"
                                 >{{ n.mapname }}</button>
-                                <span class="text-neutral-500">with</span>
+                                <span class="text-neutral-500">{{ $t('with') }}</span>
                                 <span class="font-mono font-bold text-emerald-300">{{ formatMs(n.time) }}</span>
                                 <span
                                     v-if="n.my_time && n.time && n.my_time > n.time"
@@ -525,7 +530,7 @@
                                 <button
                                     class="p-1 rounded hover:bg-white/5 disabled:opacity-50 leading-none"
                                     :disabled="busyRows.has('record#' + n.id)"
-                                    :title="n.read ? 'Mark as unread' : 'Mark as read'"
+                                    :title="n.read ? $t('Mark as unread') : $t('Mark as read')"
                                     @click.stop="toggleRecord(n)"
                                 >
                                     <span v-if="!n.read" class="text-emerald-400 text-sm">●</span>
@@ -543,13 +548,13 @@
                 <div class="flex border-b border-white/[0.04] bg-black/20 text-xs overflow-x-auto">
                     <button
                         v-for="opt in ([
-                            { v: 'all',           label: 'All' },
-                            { v: 'announcements', label: 'Announcements' },
-                            { v: 'maps',          label: 'Maps' },
-                            { v: 'clan',          label: 'Clan' },
-                            { v: 'tournament',    label: 'Tournament' },
-                            { v: 'profile',       label: 'Profile' },
-                            { v: 'render',        label: 'Render' },
+                            { v: 'all',           label: $t('All') },
+                            { v: 'announcements', label: $t('Announcements') },
+                            { v: 'maps',          label: $t('Maps') },
+                            { v: 'clan',          label: $t('Clan') },
+                            { v: 'tournament',    label: $t('Tournament') },
+                            { v: 'profile',       label: $t('Profile') },
+                            { v: 'render',        label: $t('Render') },
                         ] as const)"
                         :key="opt.v"
                         class="flex-1 min-w-[80px] px-3 py-1.5 transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap"
@@ -567,13 +572,13 @@
                 </div>
 
                 <div class="flex-1 overflow-auto">
-                    <div v-if="loading && !feed" class="p-8 text-center text-sm text-neutral-500">Loading…</div>
+                    <div v-if="loading && !feed" class="p-8 text-center text-sm text-neutral-500">{{ $t('Loading…') }}</div>
                     <div v-else-if="!visibleSystem.length" class="h-full flex items-center justify-center p-8">
                         <div class="text-center space-y-2 max-w-sm">
                             <div class="text-5xl">📭</div>
-                            <div class="text-neutral-300 font-semibold">No notifications here</div>
+                            <div class="text-neutral-300 font-semibold">{{ $t('No notifications here') }}</div>
                             <p class="text-sm text-neutral-500">
-                                Renders, clan events and announcements for your account will appear in this list.
+                                {{ $t('Renders, clan events and announcements for your account will appear in this list.') }}
                             </p>
                         </div>
                     </div>
@@ -623,18 +628,18 @@
                                         v-if="n.subheadline"
                                         class="text-[11px] inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200"
                                         @click.stop="openExternal(n.subheadline!).catch(() => {})"
-                                    >📥 Demo</button>
+                                    >📥 {{ $t('Demo') }}</button>
                                     <button
                                         v-if="n.url"
                                         class="text-[11px] inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-500/20 hover:bg-red-500/30 text-red-200"
                                         @click.stop="openSystemLink(n)"
-                                    >▶ Watch on YouTube</button>
+                                    >▶ {{ $t('Watch on YouTube') }}</button>
                                 </div>
                                 <div v-else-if="n.type === 'alias_suggestion' && n.url" class="mt-1">
                                     <button
                                         class="text-[11px] px-2 py-0.5 rounded bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-200 inline-flex items-center gap-1"
                                         @click.stop="openSystemLink(n)"
-                                    >✓ Approve / reject</button>
+                                    >✓ {{ $t('Approve or reject') }}</button>
                                 </div>
                             </div>
 
@@ -646,7 +651,7 @@
                                 <button
                                     class="p-1 rounded hover:bg-white/5 disabled:opacity-50 leading-none"
                                     :disabled="busyRows.has('system#' + n.id)"
-                                    :title="n.read ? 'Mark as unread' : 'Mark as read'"
+                                    :title="n.read ? $t('Mark as unread') : $t('Mark as read')"
                                     @click.stop="toggleSystem(n)"
                                 >
                                     <span v-if="!n.read" class="text-blue-400 text-sm">●</span>

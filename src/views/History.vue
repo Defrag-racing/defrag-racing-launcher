@@ -9,6 +9,7 @@
     import { tauri, type ConnectionEntry } from '../lib/tauri';
     import { q3ToHtml } from '../lib/q3color';
     import { openExternal } from '../lib/open';
+    import { t } from '../lib/i18n';
 
     const entries = ref<ConnectionEntry[]>([]);
     const loading = ref(true);
@@ -23,7 +24,7 @@
         try {
             entries.value = await tauri.getConnectionHistory();
         } catch (e: any) {
-            error.value = e?.toString?.() ?? 'Failed to load history';
+            error.value = e?.toString?.() ?? t('Failed to load history');
         } finally {
             loading.value = false;
         }
@@ -77,7 +78,7 @@
             await tauri.clearConnectionHistory();
             entries.value = [];
         } catch (e: any) {
-            error.value = e?.toString?.() ?? 'Failed to clear history';
+            error.value = e?.toString?.() ?? t('Failed to clear history');
         }
     };
 
@@ -96,7 +97,7 @@
             );
             await refresh();
         } catch (err: any) {
-            error.value = err?.toString?.() ?? 'Connect failed';
+            error.value = err?.toString?.() ?? t('Connect failed');
         } finally {
             reconnecting.value = null;
         }
@@ -114,11 +115,11 @@
     const formatTime = (ms: number): string => {
         const diff = Date.now() - ms;
         const s = Math.round(diff / 1000);
-        if (s < 60) return `${s}s ago`;
+        if (s < 60) return t(':count seconds ago', { count: s });
         const m = Math.round(s / 60);
-        if (m < 60) return `${m} min ago`;
+        if (m < 60) return t(':count minutes ago', { count: m });
         const h = Math.round(m / 60);
-        if (h < 48) return `${h}h ago`;
+        if (h < 48) return t(':count hours ago', { count: h });
         return new Date(ms).toLocaleString();
     };
 
@@ -167,10 +168,9 @@
     <div class="flex-1 flex flex-col min-h-0">
         <header class="px-5 py-3 border-b border-white/10 flex items-center justify-between gap-3">
             <div class="min-w-0">
-                <div class="font-semibold">History</div>
+                <div class="font-semibold">{{ $t('History') }}</div>
                 <div class="text-xs text-neutral-500 mt-0.5 truncate">
-                    Servers you joined via <code class="bg-black/40 px-1 rounded">defrag://</code> links.
-                    Newest first. Click a row to reconnect.
+                    {{ $t('Servers you joined via defrag:// links. Newest first. Click a row to reconnect.') }}
                 </div>
             </div>
             <div class="flex items-center gap-2 text-xs flex-shrink-0">
@@ -178,23 +178,23 @@
                     class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-50"
                     :disabled="loading"
                     @click="refresh()"
-                >{{ loading ? 'Loading…' : 'Refresh' }}</button>
+                >{{ loading ? $t('Loading…') : $t('Refresh') }}</button>
                 <template v-if="entries.length">
                     <button
                         v-if="!confirmingClear"
                         class="px-2 py-1 rounded bg-white/5 hover:bg-red-500/20 text-neutral-400 hover:text-red-300"
                         @click="askClear"
-                    >Clear</button>
+                    >{{ $t('Clear') }}</button>
                     <template v-else>
-                        <span class="text-neutral-400">Clear all history?</span>
+                        <span class="text-neutral-400">{{ $t('Clear all history?') }}</span>
                         <button
                             class="px-2 py-1 rounded bg-red-500/20 hover:bg-red-500/30 text-red-300 font-semibold"
                             @click="clearAll"
-                        >Clear all</button>
+                        >{{ $t('Clear all') }}</button>
                         <button
                             class="px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300"
                             @click="cancelClear"
-                        >Cancel</button>
+                        >{{ $t('Cancel') }}</button>
                     </template>
                 </template>
             </div>
@@ -206,15 +206,14 @@
 
         <div class="flex-1 overflow-auto">
             <div v-if="loading && !entries.length" class="p-8 text-center text-sm text-neutral-500">
-                Loading…
+                {{ $t('Loading…') }}
             </div>
             <div v-else-if="!entries.length" class="h-full flex items-center justify-center p-8">
                 <div class="text-center space-y-2 max-w-sm">
                     <div class="text-5xl">🕒</div>
-                    <div class="text-neutral-300 font-semibold">No connections yet</div>
+                    <div class="text-neutral-300 font-semibold">{{ $t('No connections yet') }}</div>
                     <p class="text-sm text-neutral-500">
-                        Click a <code class="bg-black/40 px-1 rounded">defrag://</code> link on a
-                        defrag.racing server card to join one - it'll show up here.
+                        {{ $t("Click a defrag:// link on a defrag.racing server card to join one - it will show up here.") }}
                     </p>
                 </div>
             </div>
@@ -243,7 +242,7 @@
                             <span
                                 class="uppercase text-[10px] px-1 py-0.5 rounded flex-shrink-0"
                                 :class="e.source === 'auto' ? 'bg-amber-500/10 text-amber-300' : 'bg-brand-500/10 text-brand-300'"
-                                :title="e.source === 'auto' ? 'Auto-connect (Settings)' : 'You pressed Connect'"
+                                :title="e.source === 'auto' ? $t('Auto-connect (Settings)') : $t('You pressed Connect')"
                             >{{ e.source }}</span>
                         </div>
                         <div class="text-xs text-neutral-500 truncate flex items-center gap-2 mt-0.5">
@@ -259,11 +258,11 @@
                             <button
                                 v-if="e.maps_played && e.maps_played.length"
                                 class="ml-1 text-neutral-400 hover:text-neutral-200 flex items-center gap-0.5"
-                                :title="isExpanded(e) ? 'Hide maps played' : 'Show maps played'"
+                                :title="isExpanded(e) ? $t('Hide maps played') : $t('Show maps played')"
                                 @click="toggleExpand(e)"
                             >
                                 <span class="inline-block transition-transform" :class="isExpanded(e) ? 'rotate-90' : ''">▸</span>
-                                {{ e.maps_played.length }} map{{ e.maps_played.length === 1 ? '' : 's' }}
+                                {{ e.maps_played.length }} {{ e.maps_played.length === 1 ? $t('map') : $t('maps') }}
                             </button>
                         </div>
 
@@ -292,7 +291,7 @@
                         class="px-3 py-1 rounded bg-brand-500/20 hover:bg-brand-500/30 text-brand-300 text-xs font-semibold disabled:opacity-50 flex-shrink-0"
                         :disabled="reconnecting === `${e.ip}:${e.port}#${e.timestamp_ms}`"
                         @click="reconnect(e)"
-                    >Reconnect</button>
+                    >{{ $t('Reconnect') }}</button>
                 </li>
             </ul>
         </div>

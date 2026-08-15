@@ -10,7 +10,7 @@
     import { useConfigStore } from '../stores/config';
     import { useUpdaterStore } from '../stores/updater';
     import { displayPath } from '../lib/path';
-    import { LANGUAGES, locale, resolveLocale, setLocale } from '../lib/i18n';
+    import { LANGUAGES, locale, resolveLocale, setLocale, t } from '../lib/i18n';
     import { locale as osLocale } from '@tauri-apps/plugin-os';
 
     const router = useRouter();
@@ -115,13 +115,12 @@
             // what gets installers flagged as malware. So when it does not
             // take, say what to do instead of leaving a dead button.
             if (!assoc.value.is_default) {
-                assocNote.value =
-                    'Windows keeps its own choice for this file type. Right-click any .dm_68 file, choose "Open with" → "Choose another app", pick Defrag Launcher and tick "Always use this app".';
+                assocNote.value = t('Windows keeps its own choice for this file type. Right-click any .dm_68 file, choose Open with, then Choose another app, pick Defrag Launcher and tick Always use this app.');
             }
 
             await config.save({ demo_assoc_asked: true });
         } catch (e: any) {
-            assocNote.value = e?.toString?.() ?? 'Could not change the file association';
+            assocNote.value = e?.toString?.() ?? t('Could not change the file association');
         } finally {
             assocBusy.value = false;
         }
@@ -195,7 +194,7 @@
             // Re-read OS state so the toggle reflects reality even if
             // our write failed (e.g. permission denied on Linux).
             autostart.value = await tauri.isAutostartEnabled();
-            alert(`Couldn't change autostart: ${e}`);
+            alert(t('Could not change the autostart setting: :reason', { reason: String(e) }));
         }
     };
 
@@ -261,7 +260,7 @@
         try {
             folders.value = await tauri.listDemoFolders();
         } catch (e: any) {
-            foldersError.value = e?.toString?.() ?? 'Could not read your demos folder';
+            foldersError.value = e?.toString?.() ?? t('Could not read your demos folder');
             folders.value = [];
         } finally {
             foldersLoading.value = false;
@@ -283,7 +282,7 @@
             );
             await config.refresh();
         } catch (e: any) {
-            foldersError.value = e?.toString?.() ?? 'Could not save that';
+            foldersError.value = e?.toString?.() ?? t('Could not save that');
         } finally {
             folderBusy.value = null;
         }
@@ -320,7 +319,7 @@
     };
 
     const clearToken = async () => {
-        if (! confirm('Clear the stored token? Auto-upload will stop until you paste a new one.')) return;
+        if (! confirm(t('Clear the stored token? Auto-upload will stop until you paste a new one.'))) return;
         await tauri.clearToken();
         try { await tauri.stopAutoUpload(); } catch {}
         await config.refresh();
@@ -328,7 +327,7 @@
 
     const forceRecheck = async () => {
         if (reCheckBusy.value || reCheckCooldown.value > 0) return;
-        if (! confirm('Re-check every demo against the server? This re-hashes the whole folder and can take a while - watch the progress bar on the Demos tab.')) return;
+        if (! confirm(t('Re-check every demo against the server? This goes through the whole folder again and can take a while - watch the progress bar on the Demos tab.'))) return;
         reCheckBusy.value = true;
         try {
             await tauri.clearUploadCache();
@@ -419,8 +418,8 @@
 <template>
     <div class="flex-1 flex flex-col">
         <header class="px-5 py-3 border-b border-white/10 flex items-center gap-3">
-            <button class="text-sm text-neutral-400 hover:text-neutral-200" @click="router.back()">← Back</button>
-            <h1 class="font-semibold">Settings</h1>
+            <button class="text-sm text-neutral-400 hover:text-neutral-200" @click="router.back()">{{ $t('← Back') }}</button>
+            <h1 class="font-semibold">{{ $t('Settings') }}</h1>
         </header>
 
         <div class="flex-1 overflow-auto p-5 space-y-4 max-w-2xl w-full">
@@ -444,7 +443,7 @@
                     </select>
                 </div>
                 <p v-if="locale !== 'en'" class="text-xs text-neutral-500">
-                    {{ $t('Anything not translated yet stays in English.') }}
+                    {{ $t('Notifications sent by defrag.racing arrive already written and stay in English.') }}
                 </p>
             </section>
 
@@ -452,10 +451,10 @@
             <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
                 <div class="flex items-start justify-between gap-3">
                     <div>
-                        <div class="font-semibold">Defrag engine</div>
-                        <div class="text-xs text-neutral-500 mt-0.5">Used when opening <code class="bg-black/40 px-1 rounded">defrag://</code> links.</div>
+                        <div class="font-semibold">{{ $t('Defrag engine') }}</div>
+                        <div class="text-xs text-neutral-500 mt-0.5">{{ $t('Used when opening server join links.') }}</div>
                     </div>
-                    <button class="btn-ghost" @click="pickEngine">Change</button>
+                    <button class="btn-ghost" @click="pickEngine">{{ $t('Change') }}</button>
                 </div>
                 <div class="text-sm text-neutral-300 break-all" :title="config.config.engine_path || ''">
                     {{ displayPath(config.config.engine_path) || '(not set)' }}
@@ -470,10 +469,9 @@
                     class="flex items-center justify-between gap-3 pt-3 border-t border-white/[0.05]"
                 >
                     <div>
-                        <div class="text-sm font-medium">Skip <code class="bg-black/40 px-1 rounded">defrag://</code> confirmation</div>
+                        <div class="text-sm font-medium">{{ $t('Skip the join confirmation') }}</div>
                         <div class="text-xs text-neutral-500 mt-0.5">
-                            Launch the engine immediately without asking. Useful if you
-                            join often and trust the links you click. Engine must be set.
+                            {{ $t('Launch the engine immediately without asking. Useful if you join often and trust the links you click. An engine must be set.') }}
                         </div>
                     </div>
                     <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
@@ -499,23 +497,22 @@
             >
                 <div class="flex items-start justify-between gap-3">
                     <div>
-                        <div class="font-semibold">Demos folder</div>
-                        <div class="text-xs text-neutral-500 mt-0.5">The launcher watches this folder for new demos.</div>
+                        <div class="font-semibold">{{ $t('Demos folder') }}</div>
+                        <div class="text-xs text-neutral-500 mt-0.5">{{ $t('The launcher watches this folder for new demos.') }}</div>
                         <div class="text-[11px] text-brand-400/80 mt-1">
-                            Drives the <strong>Demos</strong> tab: auto-backup, the on-disk demo list, and YouTube renders.
+                            {{ $t('Drives the Demos tab: auto-backup, the list of demos on disk, and YouTube renders.') }}
                         </div>
                     </div>
-                    <button class="btn-ghost" @click="pickDemos">Change</button>
+                    <button class="btn-ghost" @click="pickDemos">{{ $t('Change') }}</button>
                 </div>
                 <div class="text-sm text-neutral-300 break-all" :title="config.config.demos_path || ''">
                     {{ displayPath(config.config.demos_path) || '(not set)' }}
                 </div>
                 <div class="flex items-center justify-between gap-3 pt-2 border-t border-white/[0.05]">
                     <div>
-                        <div class="text-sm font-medium">Include subfolders</div>
+                        <div class="text-sm font-medium">{{ $t('Include subfolders') }}</div>
                         <div class="text-xs text-neutral-500 mt-0.5">
-                            Watch nested folders too (e.g. <code class="bg-black/40 px-1 rounded">demos/2024/</code>).
-                            Takes effect on next Start.
+                            {{ $t('Watch folders inside it too. Takes effect on the next Start.') }}
                         </div>
                     </div>
                     <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
@@ -534,26 +531,24 @@
                      all - with that switch off there is nothing here to
                      decide, and an empty list would just look broken. -->
                 <div v-if="config.config.include_subfolders" class="pt-3 border-t border-white/[0.05]">
-                    <div class="text-sm font-medium">Your folders</div>
+                    <div class="text-sm font-medium">{{ $t('Your folders') }}</div>
                     <div class="text-xs text-neutral-500 mt-0.5">
-                        Everything is backed up and listed unless you say otherwise here. A folder of
-                        somebody else's demos can stay off your account; an archive can stay backed up
-                        and out of the way. Subfolders follow their parent unless you change them too.
+                        {{ $t('Everything is backed up and listed unless you say otherwise here. A folder of demos that are not yours can stay off your account; an archive can stay backed up and out of the way. Subfolders follow their parent unless you change them too.') }}
                     </div>
 
                     <p v-if="foldersError" class="mt-2 text-xs text-red-300">{{ foldersError }}</p>
                     <p v-else-if="foldersLoading && !folders.length" class="mt-3 text-xs text-neutral-500">
-                        Reading your demos folder…
+                        {{ $t('Reading your demos folder…') }}
                     </p>
                     <p v-else-if="!folders.length" class="mt-3 text-xs text-neutral-500">
-                        No subfolders in <span class="text-neutral-400">{{ displayPath(config.config.demos_path) }}</span>.
+                        {{ $t('No subfolders in :folder.', { folder: displayPath(config.config.demos_path) }) }}
                     </p>
 
                     <div v-else class="mt-3 space-y-1">
                         <div class="flex items-center gap-3 px-1 text-[11px] uppercase tracking-wide text-neutral-500">
-                            <span class="flex-1">Folder</span>
-                            <span class="w-16 text-center">Back up</span>
-                            <span class="w-16 text-center">Show</span>
+                            <span class="flex-1">{{ $t('Folder') }}</span>
+                            <span class="w-16 text-center">{{ $t('Back up') }}</span>
+                            <span class="w-16 text-center">{{ $t('Show') }}</span>
                         </div>
                         <div
                             v-for="f in folders"
@@ -566,13 +561,13 @@
                                     <span class="text-neutral-600">{{ f.depth > 1 ? '└ ' : '' }}</span>{{ f.name }}
                                 </div>
                                 <div class="text-[11px] text-neutral-500">
-                                    {{ f.demos === 1 ? '1 demo' : `${f.demos} demos` }}
+                                    {{ f.demos === 1 ? $t('1 demo') : $t(':count demos', { count: f.demos }) }}
                                     <span v-if="f.inherited && (!f.sync || !f.visible)" class="text-neutral-600">
-                                        · following its parent
+                                        · {{ $t('following its parent') }}
                                     </span>
                                 </div>
                             </div>
-                            <label class="w-16 relative inline-flex items-center justify-center cursor-pointer" :title="f.sync ? 'Backed up to defrag.racing' : 'Not backed up'">
+                            <label class="w-16 relative inline-flex items-center justify-center cursor-pointer" :title="f.sync ? $t('Backed up to defrag.racing') : $t('Not backed up')">
                                 <input
                                     type="checkbox"
                                     class="sr-only peer"
@@ -583,7 +578,7 @@
                                 <span class="w-9 h-[18px] bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors block"></span>
                                 <span class="absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform peer-checked:translate-x-[18px]"></span>
                             </label>
-                            <label class="w-16 relative inline-flex items-center justify-center cursor-pointer" :title="f.visible ? 'Shown in the Demos list' : 'Hidden from the Demos list'">
+                            <label class="w-16 relative inline-flex items-center justify-center cursor-pointer" :title="f.visible ? $t('Shown in the Demos list') : $t('Hidden from the Demos list')">
                                 <input
                                     type="checkbox"
                                     class="sr-only peer"
@@ -601,21 +596,18 @@
                 <!-- CPU throttle -->
                 <div class="pt-3 border-t border-white/5">
                     <div class="mb-2">
-                        <div class="text-sm font-medium">CPU usage during hashing</div>
+                        <div class="text-sm font-medium">{{ $t('CPU usage while checking demos') }}</div>
                         <div class="text-xs text-neutral-500 mt-0.5">
-                            How much of one CPU core the launcher may use while hashing your demos.
-                            Lower = more comfortable while gaming, slower rescans of big folders.
-                            The <strong class="text-brand-400">Speed up</strong> button on the dashboard
-                            temporarily overrides this for a backlog drain.
+                            {{ $t('How much of one CPU core the launcher may use while going through your demos. Lower is more comfortable while gaming and slower on a big folder. The Speed up button on the Demos tab overrides this while a backlog drains.') }}
                         </div>
                     </div>
                     <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
                         <button
                             v-for="opt in [
-                                { label: 'Background', sub: '15%', value: 15 },
-                                { label: 'Normal',     sub: '25%', value: 25 },
-                                { label: 'Fast',       sub: '50%', value: 50 },
-                                { label: 'No limit',   sub: 'max', value: 0  },
+                                { label: $t('Background'), sub: '15%', value: 15 },
+                                { label: $t('Normal'),     sub: '25%', value: 25 },
+                                { label: $t('Fast'),       sub: '50%', value: 50 },
+                                { label: $t('No limit'),   sub: $t('max'), value: 0  },
                             ]"
                             :key="opt.value"
                             class="px-3 py-2 rounded text-sm border transition-colors text-left"
@@ -629,7 +621,7 @@
                         </button>
                     </div>
                     <p class="text-xs text-neutral-500 mt-2">
-                        Takes effect immediately for the running watcher.
+                        {{ $t('Takes effect straight away, even while a backup is running.') }}
                     </p>
                 </div>
             </section>
@@ -638,24 +630,17 @@
                  rule about what happens to demos found in it. -->
             <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
                 <div>
-                    <div class="font-semibold">Runs on comps maps</div>
+                    <div class="font-semibold">{{ $t('Runs on comps maps') }}</div>
                     <div class="text-xs text-neutral-500 mt-0.5">
-                        Backed-up demos are public straight away. A run on a map being played in
-                        <a href="#" class="text-brand-400 hover:underline"
-                           @click.prevent="openExternal('https://defrag.racing/comps')">comps</a>
-                        would therefore publish your time and your route in the middle of the round,
-                        and that cannot be taken back - so the launcher treats those demos separately.
-                        The map is read from the filename, and the site checks it again after parsing
-                        the demo: if it was not a run of that map, the entry is withdrawn and it
-                        becomes an ordinary upload.
+                        {{ $t('Backed-up demos are public straight away. A run on a map being played in comps would therefore publish your time and your route in the middle of the round, and that cannot be taken back - so the launcher treats those demos separately. The map is read from the filename, and the site checks it again after reading the demo: if it was not a run of that map, the entry is withdrawn and it becomes an ordinary upload.') }}
                     </div>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <button
                         v-for="opt in [
-                            { value: 'ask',  label: 'Ask me',           sub: 'hold it and let me choose' },
-                            { value: 'auto', label: 'Enter it',         sub: 'send it to comps for me' },
-                            { value: 'off',  label: 'Treat as normal',  sub: 'back it up publicly' },
+                            { value: 'ask',  label: $t('Ask me'),          sub: $t('hold it and let me choose') },
+                            { value: 'auto', label: $t('Enter it'),        sub: $t('send it to comps for me') },
+                            { value: 'off',  label: $t('Treat as normal'), sub: $t('back it up publicly') },
                         ]"
                         :key="opt.value"
                         class="px-3 py-2 rounded text-sm border transition-colors text-left"
@@ -669,11 +654,10 @@
                     </button>
                 </div>
                 <p v-if="(config.config.comps_mode ?? 'ask') === 'off'" class="text-xs text-amber-300">
-                    With this off, a run you record on this week's map is published as soon as it is
-                    backed up, while the round is still being played.
+                    {{ $t('With this off, a run you record on the map being played this week is published as soon as it is backed up, while the round is still running.') }}
                 </p>
                 <p v-else class="text-xs text-neutral-500">
-                    Takes effect immediately, for the next demo the watcher sees.
+                    {{ $t('Takes effect straight away, from the next demo onwards.') }}
                 </p>
             </section>
 
@@ -681,35 +665,33 @@
                  backend reports the whole idea unsupported. -->
             <section v-if="assoc?.supported" class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
                 <div>
-                    <div class="font-semibold">Demo files (.dm_68)</div>
+                    <div class="font-semibold">{{ $t('Demo files (.dm_68)') }}</div>
                     <div class="text-xs text-neutral-500 mt-0.5">
-                        Right-clicking a demo in Explorer offers <em>Play in Defrag Launcher</em>. That entry
-                        sits next to whatever you already use and changes nothing else - DemoCleaner3 keeps
-                        the file type unless you say otherwise here.
+                        {{ $t('Right-clicking a demo already offers to play it in the launcher. That entry sits next to whatever you already use and changes nothing else - your current program keeps the file type unless you say otherwise here.') }}
                     </div>
                 </div>
 
                 <div class="flex flex-wrap items-center gap-3 text-sm">
                     <span :class="assoc.context_menu ? 'text-emerald-300' : 'text-amber-300'">
-                        {{ assoc.context_menu ? 'Right-click entry registered' : 'Right-click entry missing' }}
+                        {{ assoc.context_menu ? $t('Right-click entry registered') : $t('Right-click entry missing') }}
                     </span>
                     <span class="text-neutral-600">·</span>
                     <span :class="assoc.is_default ? 'text-emerald-300' : 'text-neutral-400'">
                         {{ assoc.is_default
-                            ? 'Double-clicking a demo opens the launcher'
-                            : 'Double-clicking a demo opens something else' }}
+                            ? $t('Double-clicking a demo opens the launcher')
+                            : $t('Double-clicking a demo opens something else') }}
                     </span>
                     <button
                         v-if="!assoc.is_default"
                         class="ml-auto px-3 py-1.5 rounded text-sm font-semibold bg-brand-500/20 hover:bg-brand-500/30 text-brand-300 disabled:opacity-50"
                         :disabled="assocBusy"
                         @click="makeDefault"
-                    >{{ assocBusy ? 'Working…' : 'Open .dm_68 in the launcher' }}</button>
+                    >{{ assocBusy ? $t('Working…') : $t('Open .dm_68 in the launcher') }}</button>
                 </div>
 
                 <p v-if="assocNote" class="text-xs text-amber-300">{{ assocNote }}</p>
                 <p v-else-if="assoc.default_owner && !assoc.is_default" class="text-xs text-neutral-600">
-                    Currently owned by <span class="font-mono">{{ assoc.default_owner }}</span>.
+                    {{ $t('Currently owned by :owner.', { owner: assoc.default_owner }) }}
                 </p>
             </section>
 
@@ -723,14 +705,13 @@
             >
                 <div class="flex items-start justify-between gap-3">
                     <div>
-                        <div class="font-semibold">Account token</div>
+                        <div class="font-semibold">{{ $t('Account token') }}</div>
                         <div class="text-xs text-neutral-500 mt-0.5">
-                            Personal access token from the
                             <a href="#" class="text-brand-400 hover:underline"
                                @click.prevent="openExternal('https://defrag.racing/user/settings?tab=security')">
-                                "Launcher Tokens" block on defrag.racing → Settings → Security
+                                {{ $t('Open the Launcher Tokens page on defrag.racing') }}
                             </a>.
-                            Stored in your OS keyring. Unlocks:
+                            {{ $t('The token is stored in your operating system keyring. It unlocks:') }}
                         </div>
                         <ul class="text-xs text-neutral-400 mt-1 space-y-0.5 pl-1">
                             <TokenFeatureList />
@@ -739,13 +720,13 @@
                 </div>
 
                 <div v-if="config.hasToken" class="flex items-center gap-2">
-                    <div class="flex-1 text-sm text-emerald-400 font-mono">• • • • • • • • • • •  (stored)</div>
-                    <button class="btn-ghost" @click="showTokenForm = !showTokenForm">Replace</button>
-                    <button class="btn-danger" @click="clearToken">Clear</button>
+                    <div class="flex-1 text-sm text-emerald-400 font-mono">• • • • • • • • • • •  {{ $t('(stored)') }}</div>
+                    <button class="btn-ghost" @click="showTokenForm = !showTokenForm">{{ $t('Replace') }}</button>
+                    <button class="btn-danger" @click="clearToken">{{ $t('Clear') }}</button>
                 </div>
                 <div v-else class="text-sm text-amber-300">
-                    No token saved - the features above are disabled.
-                    <div class="text-emerald-300 font-semibold mt-2">Works without a token:</div>
+                    {{ $t('No token saved - the features above are disabled.') }}
+                    <div class="text-emerald-300 font-semibold mt-2">{{ $t('Works without a token:') }}</div>
                     <ul class="text-xs text-emerald-200/90 mt-1 space-y-0.5 pl-1">
                         <TokenFreeFeatures />
                     </ul>
@@ -755,11 +736,11 @@
                     <input
                         v-model="tokenInput"
                         type="text"
-                        placeholder="Paste token here"
+                        :placeholder="$t('Paste the token here')"
                         class="flex-1 bg-black/60 border border-white/10 rounded px-3 py-2 text-sm font-mono"
                     />
                     <button class="btn-primary" :disabled="!tokenInput.trim() || tokenSaving" @click="saveToken">
-                        {{ tokenSaving ? 'Saving…' : 'Save' }}
+                        {{ tokenSaving ? $t('Saving…') : $t('Save') }}
                     </button>
                 </div>
                 <div v-if="tokenError" class="mt-2 rounded border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-200 space-y-1.5">
@@ -768,8 +749,7 @@
                         <span>{{ tokenError }}</span>
                     </div>
                     <div class="text-red-300/80 pl-6">
-                        Create the token from the <strong class="text-red-200">Launcher Tokens</strong> block under
-                        <span class="font-mono">defrag.racing &gt; Settings &gt; Security</span> - not another token type.
+                        {{ $t('Create the token from the Launcher Tokens block, not another token type.') }}
                     </div>
                 </div>
             </section>
@@ -777,15 +757,13 @@
             <!-- Force re-check uploaded demos -->
             <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 flex items-center justify-between gap-3">
                 <div>
-                    <div class="font-semibold">Re-check uploaded demos</div>
+                    <div class="font-semibold">{{ $t('Re-check uploaded demos') }}</div>
                     <div class="text-xs text-neutral-500 mt-0.5">
-                        Forget the local "already uploaded" cache. Next Start re-asks the server
-                        for every demo - useful if a demo was deleted on defrag.racing and you want
-                        to re-upload it.
+                        {{ $t('Forget what this PC remembers about which demos are already uploaded. The next Start asks the server about every demo again - useful if one was deleted on defrag.racing and you want to send it once more.') }}
                     </div>
                 </div>
                 <button class="btn-ghost flex-shrink-0" :disabled="reCheckBusy || reCheckCooldown > 0" @click="forceRecheck">
-                    {{ reCheckBusy ? 'Re-checking…' : (reCheckCooldown > 0 ? `Started - wait ${reCheckCooldown}s` : 'Force re-check') }}
+                    {{ reCheckBusy ? $t('Re-checking…') : (reCheckCooldown > 0 ? $t('Started - wait :seconds s', { seconds: reCheckCooldown }) : $t('Force a re-check')) }}
                 </button>
             </section>
 
@@ -793,15 +771,13 @@
             <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
                 <div class="flex items-center justify-between gap-3">
                     <div>
-                        <div class="font-semibold">Check &amp; repair</div>
+                        <div class="font-semibold">{{ $t('Check and repair') }}</div>
                         <div class="text-xs text-neutral-500 mt-0.5">
-                            Scan the launcher's local state - login, demos folder, backup cache,
-                            activity list, watcher - and fix anything corrupt. Your demos on the
-                            server are never touched.
+                            {{ $t('Go through what the launcher keeps on this PC - login, demos folder, backup records, activity list, the watcher - and fix anything broken. Your demos on the server are never touched.') }}
                         </div>
                     </div>
                     <button class="btn-ghost flex-shrink-0" :disabled="healthBusy" @click="runHealthCheck">
-                        {{ healthBusy ? 'Checking…' : (healthRan ? 'Re-run' : 'Run check') }}
+                        {{ healthBusy ? $t('Checking…') : (healthRan ? $t('Run it again') : $t('Run the check')) }}
                     </button>
                 </div>
 
@@ -821,7 +797,7 @@
                             class="btn-ghost flex-shrink-0 text-xs"
                             :disabled="healthFixing === item.id"
                             @click="runHealthRepair(item)"
-                        >{{ healthFixing === item.id ? 'Fixing…' : 'Fix' }}</button>
+                        >{{ healthFixing === item.id ? $t('Fixing…') : $t('Fix') }}</button>
                     </li>
                 </ul>
             </section>
@@ -829,11 +805,9 @@
             <!-- Autostart -->
             <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 flex items-center justify-between gap-3">
                 <div>
-                    <div class="font-semibold">Start with system</div>
+                    <div class="font-semibold">{{ $t('Start with the system') }}</div>
                     <div class="text-xs text-neutral-500 mt-0.5">
-                        Launch silently to the tray on login so the demo watcher
-                        and <code class="bg-black/40 px-1 rounded">defrag://</code> links
-                        keep working without you having to open the launcher manually.
+                        {{ $t('Start quietly into the tray when you log in, so demo backup and server join links keep working without you having to open the launcher yourself.') }}
                     </div>
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
@@ -854,10 +828,9 @@
             <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
                 <div class="flex items-center justify-between gap-3">
                     <div>
-                        <div class="font-semibold">Desktop notifications</div>
+                        <div class="font-semibold">{{ $t('Desktop notifications') }}</div>
                         <div class="text-xs text-neutral-500 mt-0.5">
-                            Your system's own notifications, so the launcher can reach you while
-                            you are in a game. Your PC asks for permission the first time one is sent.
+                            {{ $t('Your system notifications, so the launcher can reach you while you are in a game. Your PC asks for permission the first time one is sent.') }}
                         </div>
                     </div>
                     <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
@@ -880,18 +853,18 @@
                         v-for="opt in [
                             {
                                 key: 'notify_comps' as const,
-                                title: 'Comps',
-                                detail: 'A round opens, a demo of yours is being held for an answer, your run counts or does not, results are up.',
+                                title: $t('Comps'),
+                                detail: $t('A round opens, a demo of yours is being held for an answer, your run counts or does not, results are up.'),
                             },
                             {
                                 key: 'notify_records' as const,
-                                title: 'Your records',
-                                detail: 'Somebody beats one of your times, or takes a world record.',
+                                title: $t('Your records'),
+                                detail: $t('Somebody beats one of your times, or takes a world record.'),
                             },
                             {
                                 key: 'notify_system' as const,
-                                title: 'Everything else from the site',
-                                detail: 'New maps, announcements, a finished render. The least urgent of the three, so it starts off.',
+                                title: $t('Everything else from the site'),
+                                detail: $t('New maps, announcements, a finished render. The least urgent of the three, so it starts off.'),
                             },
                         ]"
                         :key="opt.key"
@@ -946,13 +919,10 @@
             <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
                 <div class="flex items-center gap-2">
                     <span class="text-emerald-400">●</span>
-                    <div class="font-semibold">Automatic updates: on</div>
+                    <div class="font-semibold">{{ $t('Automatic updates: on') }}</div>
                 </div>
                 <div class="text-xs text-neutral-500 leading-relaxed">
-                    The launcher checks `defrag.racing` and GitHub for a newer signed release
-                    on every startup. Required to keep security fixes flowing - cannot be
-                    disabled. When an update is available an "Install &amp; restart" banner appears
-                    on every tab - and right here, with the full changelog.
+                    {{ $t('The launcher checks defrag.racing and GitHub for a newer signed release on every start. This cannot be switched off, because security fixes have to reach everybody. When an update is available a banner appears on every tab, and right here with the full list of changes.') }}
                 </div>
                 <!-- Manual check + next-check countdown. Lives here
                      (not on the main dashboard) because it's a setting-
@@ -960,24 +930,24 @@
                      see every time the launcher opens. -->
                 <div class="flex items-center justify-between gap-3 pt-2 border-t border-white/[0.04]">
                     <div class="text-xs">
-                        <span v-if="updater.state.kind === 'checking'" class="text-neutral-300">Checking…</span>
-                        <span v-else-if="updater.upToDateToast" class="text-emerald-400">✓ You're on the latest version</span>
+                        <span v-if="updater.state.kind === 'checking'" class="text-neutral-300">{{ $t('Checking…') }}</span>
+                        <span v-else-if="updater.upToDateToast" class="text-emerald-400">✓ {{ $t('You are on the latest version') }}</span>
                         <span v-else-if="updater.state.kind === 'available'" class="text-brand-300">
-                            Update v{{ updater.state.version }} is available.
+                            {{ $t('Update :version is available.', { version: `v${updater.state.version}` }) }}
                         </span>
                         <span v-else-if="updater.state.kind === 'error'" class="text-red-300">
-                            Last check failed: {{ updater.state.message }}
+                            {{ $t('The last check failed:') }} {{ updater.state.message }}
                         </span>
                         <span v-else-if="countdownLabel" class="text-neutral-500">
-                            Next check in <span class="font-mono text-neutral-300">{{ countdownLabel }}</span>
+                            {{ $t('Next check in') }} <span class="font-mono text-neutral-300">{{ countdownLabel }}</span>
                         </span>
-                        <span v-else class="text-neutral-500">Idle</span>
+                        <span v-else class="text-neutral-500">{{ $t('Idle') }}</span>
                     </div>
                     <button
                         class="btn-ghost text-xs disabled:opacity-50"
                         :disabled="updater.manualBusy"
                         @click="manualCheck"
-                    >{{ updater.manualBusy ? 'Checking…' : 'Check now' }}</button>
+                    >{{ updater.manualBusy ? $t('Checking…') : $t('Check now') }}</button>
                 </div>
 
                 <!-- The actionable banner (View changes + Install & restart,
@@ -999,12 +969,10 @@
                 <div class="flex items-center justify-between gap-3">
                     <div>
                         <div class="font-semibold flex items-center gap-2">
-                            <span>🛠️</span><span>Developer mode</span>
+                            <span>🛠️</span><span>{{ $t('Developer mode') }}</span>
                         </div>
                         <div class="text-xs text-neutral-500 mt-0.5 leading-relaxed">
-                            Adds custom engine arguments and your own named Quick-launch
-                            profiles. For power users tweaking startup flags - leave off if
-                            you're not sure.
+                            {{ $t('Adds custom engine arguments and your own named quick-launch profiles. For people who tweak startup flags - leave it off if you are not sure.') }}
                         </div>
                     </div>
                     <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
@@ -1022,7 +990,7 @@
                 <div v-if="config.config.developer_mode" class="space-y-4 pt-2 border-t border-white/[0.06]">
                     <!-- Custom args appended to the main Quick launch. -->
                     <div class="space-y-1.5">
-                        <div class="text-xs uppercase tracking-wider text-neutral-500">Custom launch arguments</div>
+                        <div class="text-xs uppercase tracking-wider text-neutral-500">{{ $t('Custom launch arguments') }}</div>
                         <input
                             v-model="customArgs"
                             type="text"
@@ -1033,8 +1001,7 @@
                             @keydown.enter="saveCustomArgs"
                         />
                         <div class="text-[11px] text-neutral-500">
-                            Appended to the <strong>Quick launch</strong> button. Quotes are respected,
-                            so <span class="font-mono">"my mod"</span> stays one argument.
+                            {{ $t('Added to the Quick launch button. Quotes are respected, so a value with a space stays one argument.') }}
                         </div>
                     </div>
 
@@ -1042,12 +1009,11 @@
                          the top nav's launch menu. -->
                     <div class="space-y-2">
                         <div class="flex items-center justify-between">
-                            <div class="text-xs uppercase tracking-wider text-neutral-500">Launch profiles</div>
-                            <button class="btn-ghost text-xs" @click="addProfile">+ Add profile</button>
+                            <div class="text-xs uppercase tracking-wider text-neutral-500">{{ $t('Launch profiles') }}</div>
+                            <button class="btn-ghost text-xs" @click="addProfile">+ {{ $t('Add a profile') }}</button>
                         </div>
                         <p v-if="profiles.length === 0" class="text-[11px] text-neutral-500">
-                            No profiles yet. Add one to get an extra labelled launch button
-                            (e.g. "Fullscreen", "Mod X") next to Quick launch.
+                            {{ $t('No profiles yet. Add one to get an extra named launch button next to Quick launch.') }}
                         </p>
                         <div
                             v-for="p in profiles"
@@ -1058,7 +1024,7 @@
                                 v-model="p.name"
                                 type="text"
                                 spellcheck="false"
-                                placeholder="Name (e.g. Fullscreen)"
+                                :placeholder="$t('Name')"
                                 class="w-40 flex-shrink-0 bg-black/60 border border-white/10 rounded px-2 py-1.5 text-sm text-neutral-200 placeholder:text-neutral-600 focus:border-brand-500/60 focus:outline-none"
                                 @blur="persistProfiles"
                             />
@@ -1066,21 +1032,19 @@
                                 v-model="p.args"
                                 type="text"
                                 spellcheck="false"
-                                placeholder="Arguments (e.g. +set r_fullscreen 1)"
+                                :placeholder="$t('Arguments')"
                                 class="flex-1 min-w-0 bg-black/60 border border-white/10 rounded px-2 py-1.5 text-sm font-mono text-neutral-200 placeholder:text-neutral-600 focus:border-brand-500/60 focus:outline-none"
                                 @blur="persistProfiles"
                                 @keydown.enter="persistProfiles"
                             />
                             <button
                                 class="flex-shrink-0 px-2 py-1.5 rounded bg-red-500/10 hover:bg-red-500/20 text-red-300 text-xs"
-                                title="Remove profile"
+                                :title="$t('Remove this profile')"
                                 @click="removeProfile(p.id)"
-                            >Remove</button>
+                            >{{ $t('Remove') }}</button>
                         </div>
                         <p v-if="profiles.length > 0" class="text-[11px] text-neutral-500">
-                            Each profile launches the engine with just its own arguments and
-                            appears in the launch menu next to <strong>Quick launch</strong>.
-                            Needs an engine set above.
+                            {{ $t('Each profile launches the engine with its own arguments and appears in the launch menu next to Quick launch. An engine has to be set above.') }}
                         </p>
                     </div>
                 </div>
@@ -1093,14 +1057,14 @@
                  way to redo setup, and every field is editable above anyway.) -->
             <section class="bg-red-500/5 border border-red-500/30 rounded-lg p-4 flex items-center justify-between">
                 <div>
-                    <div class="font-semibold text-red-300">Reset launcher</div>
-                    <div class="text-xs text-neutral-500 mt-0.5">Clear all settings and the stored token, then re-run the setup wizard. Demos on your PC are not touched.</div>
+                    <div class="font-semibold text-red-300">{{ $t('Reset the launcher') }}</div>
+                    <div class="text-xs text-neutral-500 mt-0.5">{{ $t('Clear all settings and the stored token, then go through the setup again. Demos on your PC are not touched.') }}</div>
                 </div>
-                <button class="btn-danger" @click="showResetConfirm = true">Reset</button>
+                <button class="btn-danger" @click="showResetConfirm = true">{{ $t('Reset') }}</button>
             </section>
 
             <div class="text-xs text-neutral-600 text-center pt-4">
-                Defrag Racing Launcher v{{ appVersion || '…' }}
+                {{ $t('Defrag Racing Launcher') }} v{{ appVersion || '…' }}
             </div>
         </div>
 
@@ -1113,18 +1077,15 @@
             @click.self="cancelReset"
         >
             <div class="bg-neutral-900 border border-red-500/40 rounded-lg p-5 max-w-md w-full space-y-3">
-                <div class="font-semibold text-red-300 text-lg">Reset launcher?</div>
+                <div class="font-semibold text-red-300 text-lg">{{ $t('Reset the launcher?') }}</div>
                 <p class="text-sm text-neutral-300">
-                    This clears <strong>everything the launcher stored</strong>: your account token,
-                    the engine path, the demos-folder path, and all settings. You'll be taken back
-                    through the setup wizard.
+                    {{ $t('This clears everything the launcher stored: your account token, the engine path, the demos folder and all settings. You will be taken back through the setup.') }}
                 </p>
                 <p class="text-xs text-neutral-500">
-                    Your demo files on your PC and your demos already backed up to defrag.racing are
-                    <strong>not</strong> touched.
+                    {{ $t('Your demo files on this PC, and the demos already backed up to defrag.racing, are NOT touched.') }}
                 </p>
                 <div class="pt-1">
-                    <label class="text-xs text-neutral-400">Type <code class="bg-black/40 px-1 rounded text-amber-300">yes</code> to confirm:</label>
+                    <label class="text-xs text-neutral-400">{{ $t('Type :word to confirm:', { word: 'yes' }) }}</label>
                     <input
                         v-model="resetConfirmText"
                         type="text"
@@ -1135,12 +1096,12 @@
                     />
                 </div>
                 <div class="flex justify-end gap-2 pt-1">
-                    <button class="btn-ghost" @click="cancelReset">Cancel</button>
+                    <button class="btn-ghost" @click="cancelReset">{{ $t('Cancel') }}</button>
                     <button
                         class="btn-danger disabled:opacity-40 disabled:cursor-not-allowed"
                         :disabled="!resetConfirmValid || resetting"
                         @click="resetLauncher"
-                    >{{ resetting ? 'Resetting…' : 'Reset everything' }}</button>
+                    >{{ resetting ? $t('Resetting…') : $t('Reset everything') }}</button>
                 </div>
             </div>
         </div>

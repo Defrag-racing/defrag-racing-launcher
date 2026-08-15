@@ -6,7 +6,7 @@ The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.
 
 ## 0.1.48
 
-- **The launcher speaks your language.** It follows whatever your system is set to, in Czech, German, Spanish, French, Dutch, Polish, Russian, Swedish and Ukrainian, and there is a language picker at the top of Settings if you want a different one. This first release translates the navigation, the update banner, the connect dialog and the setup screens; the rest of the tabs are still English and will follow.
+- **The launcher speaks your language.** Every screen, in Czech, German, Spanish, French, Dutch, Polish, Russian, Swedish and Ukrainian. It follows whatever your system is set to, and there is a language picker at the top of Settings if you want a different one. The only thing still in English is the text of notifications the website sends, which arrive already written.
 - **Drag a demo onto the window to watch it.** From Downloads, from the Desktop, from a Discord attachment - anywhere. Drop several at once and they open side by side.
 - **Choose per folder what gets backed up and what gets listed.** With "Include subfolders" on, every folder under your demos folder now has its own two switches in Settings. A folder of somebody else's demos can stay off your account; an archive can stay backed up and out of the way of tonight's runs. Subfolders follow their parent unless you change them too.
 - **Desktop notifications.** The launcher can now reach you while you are in a game: a comps round opening, a demo of yours being held for an answer, your run counting or not, and the round you entered finishing. Your records being beaten are on too; everything else the site sends is off by default. All of it is switchable in Settings.
