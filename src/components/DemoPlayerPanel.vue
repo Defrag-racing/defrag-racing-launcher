@@ -12,6 +12,7 @@
     import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
     import { getCurrentWindow } from '@tauri-apps/api/window';
+    import { LazyStore } from '@tauri-apps/plugin-store';
     import { tauri, type DemoPlayerStatus } from '../lib/tauri';
 
     /** The demo to play: absolute `path` on disk + a `name` for the banner. */
@@ -48,22 +49,60 @@
     // single viewer has one slider+mute; in a comparison every demo gets its own
     // so you can balance them. By default only demo A is audible (the extra
     // demos start muted) so several runs don't pile into noise.
-    const DEFAULT_VOL = 0.8;
+    //
+    // 0.3 out of the box: a demo is something you glance at, usually with music
+    // or a stream already playing, and 0.8 arrived like a slap. Whatever the
+    // user sets instead is remembered - in a plugin-store file rather than
+    // localStorage, which does not survive a restart in this webview (see the
+    // same note in Dashboard.vue).
+    const DEFAULT_VOL = 0.3;
+    const prefsStore = new LazyStore('player-prefs.json');
+    const VOL_FIELD = 'volume';
+    const lastVol = ref(DEFAULT_VOL);
+    /** Has the user moved the slider this session? Then a late load must not undo it. */
+    let volTouched = false;
+    let volSaveTimer: ReturnType<typeof setTimeout> | undefined;
     const volume = ref<number[]>([]);
     const muted = ref<boolean[]>([]);
+
+    const loadVolume = async () => {
+        try {
+            const v = await prefsStore.get<number>(VOL_FIELD);
+            if (typeof v !== 'number' || Number.isNaN(v)) return;
+            lastVol.value = Math.min(1, Math.max(0, v));
+            if (volTouched) return;
+            volume.value = volume.value.map(() => lastVol.value);
+            if (playing.value) applyAudio();
+        } catch {
+            // No stored preference, or the store is unreadable: keep the default.
+        }
+    };
+
+    // Debounced: a slider drag fires a stream of input events and each write
+    // touches the disk.
+    const saveVolume = (v: number) => {
+        lastVol.value = v;
+        clearTimeout(volSaveTimer);
+        volSaveTimer = setTimeout(() => {
+            prefsStore
+                .set(VOL_FIELD, v)
+                .then(() => prefsStore.save())
+                .catch(() => {});
+        }, 400);
+    };
 
     const blankTimer = (): PaneTimer => ({ posMs: 0, lenMs: 0, posSec: 0, lenSec: 0, measured: false, atEnd: false });
     const initPaneArrays = () => {
         const n = paneCount.value;
         paneTimers.value = Array.from({ length: n }, blankTimer);
         offsets.value = Array.from({ length: n }, () => 0);
-        volume.value = Array.from({ length: n }, () => DEFAULT_VOL);
+        volume.value = Array.from({ length: n }, () => lastVol.value);
         // Default: demo A audible, the rest muted (avoids overlapping audio).
         muted.value = Array.from({ length: n }, (_, i) => isCompare.value && i > 0);
     };
 
     // The effective volume for a pane (0 while muted), clamped to Quake's 0..1.
-    const effVol = (i: number) => (muted.value[i] ? 0 : Math.min(1, Math.max(0, volume.value[i] ?? DEFAULT_VOL)));
+    const effVol = (i: number) => (muted.value[i] ? 0 : Math.min(1, Math.max(0, volume.value[i] ?? lastVol.value)));
     // Push one pane's current volume to its engine.
     const applyVol = (i: number) => {
         tauri.demoPlayerPaneCommand(i, `s_volume ${effVol(i)}`).catch(() => {});
@@ -86,6 +125,12 @@
         volume.value[i] = v;
         if (v > 0) muted.value[i] = false;
         applyVol(i);
+        // Remembered from pane 0 only: in a comparison the other sliders are
+        // there to balance THIS pair of runs, not to set a preference.
+        if (i === 0) {
+            volTouched = true;
+            saveVolume(v);
+        }
     };
 
     // The embedded player runs on Windows and Linux (X11 / XWayland). On Linux,
@@ -747,6 +792,10 @@
     );
 
     onMounted(async () => {
+        // Before startActive() below, so the first demo of the session already
+        // opens at the remembered level; loadVolume re-applies if it loses the
+        // race anyway.
+        void loadVolume();
         unlisten = await listen<DemoPlayerStatus>('demo-player-status', (e) => onStatus(e.payload));
         // The engine went away on its own (demo ended, crash, or the backend
         // killed it because the launcher was sent to the tray). Drop our UI back
