@@ -17,6 +17,7 @@
     "os:allow-platform",
     "os:allow-version",
     "os:allow-arch",
+    "os:allow-locale",
     "store:default",
     "deep-link:default",
     "updater:default",

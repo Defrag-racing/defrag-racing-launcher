@@ -495,7 +495,15 @@
         // did not choose English, they just never opened Settings - and a
         // launcher that opens in a language you cannot read is a launcher whose
         // Settings you cannot find.
-        setLocale(resolveLocale(config.config.language, await osLocale().catch(() => null)));
+        // The OS locale is a plugin call, and a plugin call the capability
+        // file does not allow just throws - which is how "Same as my system"
+        // quietly meant English for a whole release. Say so in the log rather
+        // than swallowing it.
+        const systemLocale = await osLocale().catch((e: any) => {
+            void tauri.logToFile(`i18n: could not read the system locale: ${e}`);
+            return null;
+        });
+        setLocale(resolveLocale(config.config.language, systemLocale));
 
         // Bell badge poll. First call goes through immediately so the
         // badge isn't blank on first render; subsequent ticks every
