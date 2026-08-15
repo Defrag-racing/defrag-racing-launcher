@@ -101,20 +101,46 @@
     // has made us the default. The file is usually NOT in a demos folder -
     // Downloads, the Desktop, a Discord attachment - so it is staged into a
     // folder the engine can load from before it plays.
-    const openExternalDemo = async (path: string) => {
+    // Also the drop target: a demo dragged onto the window arrives here through
+    // the same door, since "a file from somewhere else on disk" is the same
+    // problem either way. More than one at a time only happens on a drop.
+    const openExternalDemos = async (paths: string[]) => {
+        if (paths.length === 0) return;
         try {
-            const staged = await tauri.stageDemo(path);
-            const filename = path.split(/[\\/]/).pop() ?? 'demo.dm_68';
+            // Comparing runs is token-gated, so extra files would open a panel
+            // the user cannot use. The first demo simply plays instead; the
+            // drop overlay says so before the mouse is released.
+            const wanted = config.hasToken ? paths.slice(0, MAX_COMPARE) : paths.slice(0, 1);
 
             router.push({ name: 'dashboard' });
+            playerTarget.value = null;
             compareTarget.value = null;
+            compareSel.value = [];
 
-            if (!(await ensureMaps([{ path: staged, map: mapNameFromFilename(filename) }]))) return;
+            const staged: PlayTarget[] = [];
+            for (const p of wanted) {
+                staged.push({
+                    path: await tauri.stageDemo(p),
+                    name: p.split(/[\\/]/).pop() ?? 'demo.dm_68',
+                });
+            }
 
-            playerTarget.value = { path: staged, name: filename };
+            const items = staged.map((d) => ({ path: d.path, map: mapNameFromFilename(d.name) }));
+            if (!(await ensureMaps(items))) return;
+
+            if (staged.length > 1) compareTarget.value = { demos: staged };
+            else playerTarget.value = staged[0];
         } catch (e: any) {
             toggleError.value = e?.toString?.() ?? 'Could not open that demo';
         }
+    };
+
+    const openExternalDemo = (path: string) => openExternalDemos([path]);
+
+    /** A drop landed on the window; App.vue has already filtered it to demos. */
+    const onDemosDropped = (ev: Event) => {
+        const paths = (ev as CustomEvent<string[]>).detail;
+        if (Array.isArray(paths) && paths.length) void openExternalDemos(paths);
     };
 
     const playDemo = async (d: DemoLibraryEntry) => {
@@ -668,6 +694,10 @@
             void openExternalDemo(ev.payload);
         });
 
+        // Dropped onto the window. App.vue owns the drag overlay (it has to
+        // show on whichever tab the user is on) and hands the paths over here.
+        window.addEventListener('demos-dropped', onDemosDropped);
+
         void refreshAssoc();
 
         unlisten = await listen<UploadStateSnapshot>('upload_state_changed', (ev) => {
@@ -728,6 +758,7 @@
         if (relistTimer !== undefined) window.clearTimeout(relistTimer);
         document.removeEventListener('visibilitychange', onDemosVisibility);
         window.removeEventListener('resize', measureViewport);
+        window.removeEventListener('demos-dropped', onDemosDropped);
     });
 
     const toggle = async () => {
@@ -1312,6 +1343,10 @@
                         <template v-else>
                             Set your demos folder in Settings, then turn on auto-backup. Your demos will appear here.
                         </template>
+                    </p>
+                    <p class="text-sm text-neutral-500">
+                        You can also drag a demo file onto this window to watch it right away, wherever
+                        it is on your disk.
                     </p>
                 </div>
             </div>

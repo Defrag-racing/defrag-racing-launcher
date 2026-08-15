@@ -2,6 +2,7 @@
     import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
     import { useRouter, useRoute } from 'vue-router';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+    import { getCurrentWebview } from '@tauri-apps/api/webview';
     import { tauri, type DefragServer } from './lib/tauri';
     import { q3ToHtml } from './lib/q3color';
     import { useConfigStore } from './stores/config';
@@ -219,6 +220,50 @@
     let unlistenPending: UnlistenFn | null = null;
     let unlistenResult: UnlistenFn | null = null;
     let unlistenQueue: UnlistenFn | null = null;
+    let unlistenDrop: UnlistenFn | null = null;
+
+    // ---- demos dragged onto the window ------------------------------
+    // The drop is caught here rather than in the Demos view because the drag
+    // lands wherever the user happens to be - the whole window is the target,
+    // and the overlay has to be visible on the Servers tab too. The Demos view
+    // does the actual work; it stays mounted behind the other tabs (KeepAlive),
+    // so a plain window event reaches it from here.
+    //
+    // Anything ending in `.dm_<number>` counts. The engine writes `.dm_68`
+    // today, but older protocols wrote 66 and 67 and those demos still exist
+    // on people's disks.
+    const DEMO_FILE = /\.dm_\d+$/i;
+    const demoFilesIn = (paths: string[]) => paths.filter((p) => DEMO_FILE.test(p));
+
+    /** Set while a drag is over the window: how many demos we would take, or
+     *  null for a drag holding none. Drives the overlay and nothing else. */
+    const dropHint = ref<{ demos: number } | null>(null);
+    const dropRefusal = ref(false);
+
+    /** Up to four demos play side by side, and only with a linked account -
+     *  so say what will really happen rather than what was dropped. */
+    const MAX_DROP_COMPARE = 4;
+    const dropTaken = computed(() => {
+        const n = dropHint.value?.demos ?? 0;
+        return config.hasToken ? Math.min(n, MAX_DROP_COMPARE) : Math.min(n, 1);
+    });
+    const dropHeadline = computed(() =>
+        dropTaken.value > 1 ? `Compare these ${dropTaken.value} demos` : 'Play this demo',
+    );
+    const dropDetail = computed(() => {
+        const dropped = dropHint.value?.demos ?? 0;
+        if (dropTaken.value > 1) {
+            return dropped > dropTaken.value
+                ? `Drop anywhere. Four is the most that fit, so the first ${dropTaken.value} open.`
+                : 'Drop anywhere to open them side by side.';
+        }
+        if (dropped > 1) {
+            return config.hasToken
+                ? 'Drop anywhere to open it in the player.'
+                : 'Drop anywhere. Comparing runs needs a linked account, so the first one plays.';
+        }
+        return 'Drop anywhere to open it in the player.';
+    });
 
     // Demos the comps guard is holding. Badged on the Comps tab because a
     // held demo is doing nothing until someone answers it, and the user has
@@ -280,6 +325,30 @@
             heldForComps.value = countHeld(snapshot.items);
         } catch { /* no queue yet */ }
 
+        unlistenDrop = await getCurrentWebview().onDragDropEvent((ev) => {
+            // Not during onboarding or the version-mismatch screen: those are
+            // full-screen forms, and the Demos view they would hand off to may
+            // not exist yet.
+            if (! showNav.value) return;
+
+            const p = ev.payload;
+            if (p.type === 'enter') {
+                const demos = demoFilesIn(p.paths);
+                dropHint.value = demos.length ? { demos: demos.length } : null;
+                dropRefusal.value = demos.length === 0;
+            } else if (p.type === 'leave') {
+                dropHint.value = null;
+                dropRefusal.value = false;
+            } else if (p.type === 'drop') {
+                dropHint.value = null;
+                dropRefusal.value = false;
+                const demos = demoFilesIn(p.paths);
+                if (demos.length) {
+                    window.dispatchEvent(new CustomEvent('demos-dropped', { detail: demos }));
+                }
+            }
+        });
+
         try {
             const url = await tauri.getPendingDeepLink();
             if (url && !pendingDeepLink.value) {
@@ -314,6 +383,7 @@
         if (unlistenPending) unlistenPending();
         if (unlistenResult) unlistenResult();
         if (unlistenQueue) unlistenQueue();
+        if (unlistenDrop) unlistenDrop();
         window.clearTimeout(deepLinkErrorTimer);
         updaterStore.stop();
     });
@@ -504,6 +574,33 @@
         </RouterView>
         <div v-else class="flex-1 flex items-center justify-center text-sm text-neutral-500">
             Loading…
+        </div>
+
+        <!-- Drop a demo anywhere on the window. Above every tab because the
+             drag lands wherever the user is; pointer-events off so it never
+             eats the drop it is describing. -->
+        <div
+            v-if="dropHint || dropRefusal"
+            class="fixed inset-0 z-[120] flex items-center justify-center p-8 bg-black/70 backdrop-blur-sm pointer-events-none"
+        >
+            <div
+                class="w-full max-w-md rounded-xl border-2 border-dashed px-8 py-10 text-center"
+                :class="dropRefusal
+                    ? 'border-neutral-600 bg-neutral-900/80'
+                    : 'border-brand-500 bg-brand-500/10'"
+            >
+                <template v-if="dropRefusal">
+                    <p class="text-base font-semibold text-neutral-200">That is not a demo</p>
+                    <p class="mt-2 text-sm text-neutral-400">
+                        Drop a Quake&nbsp;3 demo file here - the ones ending in
+                        <span class="font-mono text-neutral-300">.dm_68</span>.
+                    </p>
+                </template>
+                <template v-else-if="dropHint">
+                    <p class="text-base font-semibold text-white">{{ dropHeadline }}</p>
+                    <p class="mt-2 text-sm text-neutral-300">{{ dropDetail }}</p>
+                </template>
+            </div>
         </div>
 
         <!-- defrag:// pending-connection modal. Floats above the whole
