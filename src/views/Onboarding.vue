@@ -326,8 +326,11 @@
                                 <div class="text-sm font-semibold text-brand-100 group-hover:underline">
                                     {{ $t('Step 1 - click here to open the token page') }}
                                 </div>
+                                <!-- The site is translated too, so this trail
+                                     has to name the words the person will
+                                     actually see there, not the English ones. -->
                                 <div class="text-xs text-brand-300/70 mt-0.5 font-mono">
-                                    defrag.racing &gt; Settings &gt; Security &gt; "Launcher Tokens"
+                                    {{ $t('defrag.racing > Settings > Security > Launcher tokens') }}
                                 </div>
                             </div>
                             <span class="flex items-center gap-1 text-brand-200 font-semibold text-sm flex-shrink-0 whitespace-nowrap">
