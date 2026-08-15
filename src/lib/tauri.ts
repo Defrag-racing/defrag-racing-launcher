@@ -604,6 +604,14 @@ export interface DefragServer {
     defrag_gametype?: string;
     /** ISO country code for the server's host location (flag image). */
     location?: string | null;
+    /** `sv_cheats` as the server reported it.
+     *
+     *  Three states, and the third one matters: `null` means the server never
+     *  told us, because the cvar is systeminfo and only an engine new enough to
+     *  put it in its getdfstatus reply says anything at all. Silence is not the
+     *  same answer as "cheats are off" and must never be rendered as if it
+     *  were. */
+    cheats?: boolean | null;
     /** Currently-connected players. Snake-cased because Laravel's
      *  default toArray() snake-cases relation names. */
     online_players?: DefragPlayer[];

@@ -30,6 +30,7 @@
     type PhysicsFilter = 'all' | 'vq3' | 'cpm';
     type SortKey = 'popularity' | 'alphabetical';
     type SortOrder = 'asc' | 'desc';
+    type Layout = 'rows' | 'cards';
 
     const STORAGE_KEY = 'launcher.servers.filters.v1';
     const stored = (() => {
@@ -43,8 +44,12 @@
     const hideEmpty = ref<boolean>(stored.hideEmpty ?? false);
     const sortKey = ref<SortKey>(stored.sortKey ?? 'popularity');
     const sortOrder = ref<SortOrder>(stored.sortOrder ?? 'desc');
+    // Rows read densely and fit more servers on screen; cards put the map
+    // picture first, which is how the website's /servers page reads and how
+    // most people pick a server when they are browsing rather than hunting.
+    const layout = ref<Layout>(stored.layout ?? 'rows');
 
-    watch([search, gametype, physics, hideEmpty, sortKey, sortOrder], () => {
+    watch([search, gametype, physics, hideEmpty, sortKey, sortOrder, layout], () => {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({
             search: search.value,
             gametype: gametype.value,
@@ -52,6 +57,7 @@
             hideEmpty: hideEmpty.value,
             sortKey: sortKey.value,
             sortOrder: sortOrder.value,
+            layout: layout.value,
         }));
     });
 
@@ -192,6 +198,53 @@
         }
     };
 
+    // -- sv_cheats ----------------------------------------------------
+    // Three states, and the third is the one that needed thinking about.
+    // `true` invalidates every time set on the server. `false` is the ordinary
+    // case and needs no chrome. `null` means the server never said - the cvar
+    // is systeminfo, so only an engine new enough to put it in its getdfstatus
+    // reply reports it at all, and most do not.
+    //
+    // Silence is shown, quietly, precisely because it must not be read as "off".
+    // A row with no marking at all would say "checked, fine" about a server
+    // nobody has checked. The dim marker says "not known" and the tooltip says
+    // why.
+    type CheatsState = 'on' | 'unknown' | 'off';
+    const cheatsState = (s: DefragServer): CheatsState => {
+        if (s.cheats === true) return 'on';
+        if (s.cheats === false) return 'off';
+        return 'unknown';
+    };
+
+    /** On a freestyle server cheats are the point, not a problem: nothing there
+     *  is a timed result, so there is nothing to invalidate. The warning still
+     *  shows - it is true - but it stops shouting. A warning that fires loudly
+     *  where it does not matter is one people learn to ignore where it does. */
+    const cheatsExpected = (s: DefragServer): boolean =>
+        classifyServer(s).effectiveType === 'freestyle';
+
+    const cheatsTitle = (s: DefragServer): string => {
+        switch (cheatsState(s)) {
+            case 'on':
+                return cheatsExpected(s)
+                    ? 'This server runs with sv_cheats enabled. It is a freestyle server, so nothing here is a timed result anyway.'
+                    : 'This server runs with sv_cheats enabled - times set here do not count.';
+            case 'unknown':
+                return 'This server does not report sv_cheats, so nobody can say whether it is on. Only newer engines send it.';
+            default:
+                return 'This server reports sv_cheats off.';
+        }
+    };
+
+    /** A PB is worth more context than a number: a time from last week and a
+     *  time from 2013 are different facts about the same map. */
+    const formatDate = (iso: string | null | undefined): string | null => {
+        if (!iso) return null;
+        const d = new Date(iso.replace(' ', 'T'));
+        if (Number.isNaN(d.getTime())) return null;
+        return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    };
+
     const filteredServers = computed(() => {
         const q = search.value.trim().toLowerCase();
         let result = servers.value.filter((s) => {
@@ -242,6 +295,8 @@
         hideEmpty.value = false;
         sortKey.value = 'popularity';
         sortOrder.value = 'desc';
+        // Layout is not a filter. Reset is for "I cannot find the server I
+        // want"; it has no business changing how the list is drawn.
     };
 
     const connect = async (s: DefragServer) => {
@@ -430,6 +485,20 @@
                             </span>
                         </button>
                     </div>
+
+                    <span class="text-neutral-500 ml-2 mr-1">View:</span>
+                    <div class="flex bg-white/5 rounded overflow-hidden">
+                        <button
+                            v-for="opt in [
+                                { v: 'rows', label: 'List' },
+                                { v: 'cards', label: 'Cards' },
+                            ] as const"
+                            :key="opt.v"
+                            class="px-2.5 py-1 transition-colors"
+                            :class="layout === opt.v ? 'bg-brand-500/25 text-brand-200 font-semibold' : 'text-neutral-400 hover:text-neutral-200'"
+                            @click="layout = opt.v"
+                        >{{ opt.label }}</button>
+                    </div>
                 </div>
             </div>
 
@@ -445,7 +514,7 @@
                 <div v-else-if="!filteredServers.length" class="p-8 text-center text-sm text-neutral-500">
                     No servers match the current filter.
                 </div>
-                <ul v-else class="divide-y divide-white/[0.04]">
+                <ul v-else-if="layout === 'rows'" class="divide-y divide-white/[0.04]">
                     <li
                         v-for="s in filteredServers"
                         :key="`${s.ip}:${s.port}`"
@@ -488,6 +557,16 @@
                                     <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-brand-500/15 text-brand-300 flex-shrink-0">
                                         {{ gametypeTag(s) }}
                                     </span>
+                                    <span
+                                        v-if="cheatsState(s) !== 'off'"
+                                        class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded flex-shrink-0 cursor-help"
+                                        :class="cheatsState(s) === 'on'
+                                            ? (cheatsExpected(s)
+                                                ? 'bg-white/5 text-neutral-400 border border-white/10'
+                                                : 'bg-red-600/80 text-white font-bold')
+                                            : 'text-neutral-600 border border-white/[0.07]'"
+                                        :title="cheatsTitle(s)"
+                                    >{{ cheatsState(s) === 'on' ? 'cheats' : 'cheats ?' }}</span>
                                 </div>
                                 <div class="text-xs text-neutral-500 truncate flex items-center gap-2 mt-0.5">
                                     <button
@@ -505,6 +584,13 @@
                                     Your PB: <strong>{{ formatTime(s.mytime_time) }}</strong>
                                     <span v-if="s.myrank_position && s.myrank_total" class="text-emerald-300/60 ml-1">
                                         (rank {{ s.myrank_position }} / {{ s.myrank_total }})
+                                    </span>
+                                    <!-- When it was set. A time from last week and
+                                         a time from 2013 are different facts about
+                                         the same map, and only one of them is worth
+                                         trying to beat tonight. -->
+                                    <span v-if="formatDate(s.mytime_date)" class="text-neutral-500 ml-1">
+                                        · {{ formatDate(s.mytime_date) }}
                                     </span>
                                 </div>
                                 <!-- Map record holder for context. Skipped when
@@ -572,6 +658,150 @@
                         </div>
                     </li>
                 </ul>
+
+                <!-- Cards. The map picture leads, because that is what people
+                     recognise a server by when they are browsing rather than
+                     hunting for one by name. Same data as a row, arranged so a
+                     screen holds fewer servers and says more about each. -->
+                <div v-else class="p-4 grid gap-3 grid-cols-[repeat(auto-fill,minmax(19rem,1fr))]">
+                    <div
+                        v-for="s in filteredServers"
+                        :key="`card:${s.ip}:${s.port}`"
+                        class="relative rounded-xl border bg-black/30 overflow-hidden flex flex-col transition-colors"
+                        :class="cheatsState(s) === 'on' && !cheatsExpected(s)
+                            ? 'border-red-500/50 hover:border-red-400/70'
+                            : 'border-white/10 hover:border-brand-500/40'"
+                    >
+                        <!-- Cheats across the full width rather than as a corner
+                             badge: a time set here is worth nothing, and somebody
+                             scanning the grid should not have to hunt for that. -->
+                        <div
+                            v-if="cheatsState(s) === 'on'"
+                            class="flex items-center justify-center gap-1.5 py-0.5 text-[10px] uppercase tracking-widest font-black"
+                            :class="cheatsExpected(s)
+                                ? 'bg-neutral-800/90 text-neutral-400 border-b border-white/10'
+                                : 'bg-red-600/90 text-white border-b border-red-300/40'"
+                            :title="cheatsTitle(s)"
+                        >Cheats enabled</div>
+
+                        <button
+                            class="relative block w-full aspect-[16/7] bg-black/50 overflow-hidden group"
+                            :title="`Open ${s.map} on defrag.racing`"
+                            @click="openMap(s.map)"
+                        >
+                            <img
+                                v-if="thumbnailUrl(s)"
+                                :src="thumbnailUrl(s)!"
+                                :alt="s.map"
+                                class="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+                                loading="lazy"
+                            />
+                            <div v-else class="w-full h-full flex items-center justify-center text-[10px] text-neutral-600 uppercase">
+                                no map
+                            </div>
+                            <span class="absolute bottom-1 left-2 right-2 flex items-center gap-1.5 text-xs">
+                                <span class="px-1.5 py-0.5 rounded bg-black/75 text-brand-300 truncate">{{ s.map }}</span>
+                                <span class="px-1 py-0.5 rounded bg-black/75 text-neutral-400 uppercase text-[10px]">{{ physicsOf(s) }}</span>
+                            </span>
+                        </button>
+
+                        <div class="p-3 flex-1 flex flex-col gap-1.5 min-w-0">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <img
+                                    v-if="flagUrl(s.location)"
+                                    :src="flagUrl(s.location)!"
+                                    :alt="s.location || ''"
+                                    class="w-4 h-3 rounded flex-shrink-0"
+                                    @error="($event.target as HTMLImageElement).style.display='none'"
+                                />
+                                <div
+                                    class="text-sm text-neutral-100 truncate font-semibold flex-1 min-w-0"
+                                    :title="s.plain_name || stripColors(s.name)"
+                                    v-html="q3ToHtml(s.name || s.plain_name)"
+                                ></div>
+                                <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-brand-500/15 text-brand-300 flex-shrink-0">
+                                    {{ gametypeTag(s) }}
+                                </span>
+                                <span
+                                    v-if="cheatsState(s) === 'unknown'"
+                                    class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded flex-shrink-0 cursor-help text-neutral-600 border border-white/[0.07]"
+                                    :title="cheatsTitle(s)"
+                                >cheats ?</span>
+                            </div>
+
+                            <div v-if="s.mytime_time" class="text-xs text-emerald-300/80">
+                                Your PB: <strong>{{ formatTime(s.mytime_time) }}</strong>
+                                <span v-if="s.myrank_position && s.myrank_total" class="text-emerald-300/60 ml-1">
+                                    (rank {{ s.myrank_position }} / {{ s.myrank_total }})
+                                </span>
+                                <span v-if="formatDate(s.mytime_date)" class="text-neutral-500 ml-1">
+                                    · {{ formatDate(s.mytime_date) }}
+                                </span>
+                            </div>
+
+                            <div v-if="s.besttime_time && s.besttime_name" class="text-xs text-yellow-300/70 flex items-center gap-1 min-w-0">
+                                <span class="text-yellow-500 flex-shrink-0">★</span>
+                                <span class="flex-shrink-0">{{ formatTime(s.besttime_time) }}</span>
+                                <span class="text-neutral-500 flex-shrink-0">by</span>
+                                <img
+                                    v-if="flagUrl(s.besttime_country)"
+                                    :src="flagUrl(s.besttime_country)!"
+                                    :alt="s.besttime_country || ''"
+                                    class="w-3 h-2 rounded flex-shrink-0"
+                                    @error="($event.target as HTMLImageElement).style.display='none'"
+                                />
+                                <span
+                                    class="truncate"
+                                    :title="stripColors(s.besttime_name || '')"
+                                    v-html="q3ToHtml(s.besttime_name)"
+                                ></span>
+                            </div>
+
+                            <!-- Who is on. Names rather than a bare count: the
+                                 question a card answers is "is anyone I know
+                                 playing", and a number cannot answer it. -->
+                            <div
+                                v-if="(s.online_players?.length ?? 0) > 0"
+                                class="flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-neutral-400"
+                            >
+                                <span
+                                    v-for="(p, idx) in (s.online_players ?? [])"
+                                    :key="`card:${s.ip}:${s.port}#${idx}`"
+                                    class="flex items-center gap-1 max-w-[10rem] min-w-0"
+                                >
+                                    <img
+                                        v-if="flagUrl(p.country)"
+                                        :src="flagUrl(p.country)!"
+                                        :alt="p.country || ''"
+                                        class="w-3 h-2 rounded flex-shrink-0"
+                                        @error="($event.target as HTMLImageElement).style.display='none'"
+                                    />
+                                    <span
+                                        class="truncate"
+                                        :title="p.plain_name || stripColors(p.name)"
+                                        v-html="q3ToHtml(p.name || p.plain_name)"
+                                    ></span>
+                                </span>
+                            </div>
+
+                            <div class="mt-auto pt-2 flex items-center justify-between gap-2">
+                                <span class="text-xs text-neutral-500 font-mono truncate" :title="`${s.ip}:${s.port}`">
+                                    {{ s.ip }}:{{ s.port }}
+                                </span>
+                                <div class="flex items-center gap-2 flex-shrink-0">
+                                    <span class="text-xs text-neutral-400">
+                                        <span class="text-neutral-100 font-semibold">{{ playerCount(s) }}</span>
+                                        player{{ playerCount(s) === 1 ? '' : 's' }}
+                                    </span>
+                                    <button
+                                        class="px-3 py-1 rounded bg-brand-500/20 hover:bg-brand-500/30 text-brand-300 text-xs font-semibold"
+                                        @click="connect(s)"
+                                    >Connect</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </template>
     </div>
