@@ -1302,29 +1302,60 @@ fn spawn_pane(
     // injected in_nograb / con_notifytime / com_maxfps, ...) lands in
     // defrag.launcher.cfg and never touches q3config.cfg.
     //
-    // WINDOWS: everything (install, configs, demos) lives under one root, so
-    // fs_basepath=<derived from demo> is the whole story. We deliberately do NOT
-    // override fs_homepath - the bundled Windows build treats the base path as
-    // its home. The engine patch alone is enough isolation there (verified).
+    // WINDOWS: everything (install, configs, demos) lives under one root, and we
+    // deliberately do NOT override fs_homepath - the bundled Windows build treats
+    // the base path as its home, and the engine patch alone is enough isolation
+    // there (verified).
+    //
+    // The base path is **the engine configured in Settings**, not a root derived
+    // from where the demo happens to sit. That derivation was the whole story
+    // once, and it only ever worked for demos living inside the install: a demo
+    // opened from the Desktop, from Downloads or through the file association is
+    // copied into a staging folder, whose root holds no paks, no defrag mod and
+    // no configs at all - so the engine came up on stock defaults and ignored
+    // everything the user had set. What the demo's own root is still good for is
+    // finding the demo file itself, so it goes in as a second search root.
     #[cfg(not(target_os = "linux"))]
     {
+        let demo_root = crate::cache::normalize(&basepath);
+        let install = crate::config::Config::load()
+            .ok()
+            .and_then(|c| c.engine_path)
+            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
+            .map(|p| crate::cache::normalize(&p))
+            .filter(|p| p.is_dir());
+        let fs_base = install.unwrap_or_else(|| demo_root.clone());
+
         cmd.arg("+set")
             .arg("fs_basepath")
-            .arg(basepath.to_string_lossy().to_string());
-        let roots: Vec<std::path::PathBuf> =
-            std::iter::once(basepath.clone()).chain(engine_home_dir()).collect();
+            .arg(fs_base.to_string_lossy().to_string());
+
+        // Only when the demo lives somewhere else; pointing steampath at the
+        // base path would just add the same dir twice.
+        if demo_root != fs_base {
+            cmd.arg("+set")
+                .arg("fs_steampath")
+                .arg(demo_root.to_string_lossy().to_string());
+        }
+
+        // Seed the config the patched engine reads in embedded mode. The
+        // install comes first as a source: that is the setup the user means by
+        // "my settings". It is written to every root because the engine gives
+        // the later-added one priority, and a foreign install could otherwise
+        // answer with a stale copy of its own.
+        let roots: Vec<std::path::PathBuf> = if demo_root == fs_base {
+            vec![fs_base.clone()]
+        } else {
+            vec![fs_base.clone(), demo_root.clone()]
+        };
         let src = roots.iter().find_map(|r| {
             [r.join(&fs_game).join("q3config.cfg"), r.join("baseq3").join("q3config.cfg")]
                 .into_iter()
                 .find(|p| p.exists())
         });
         if let Some(src) = src {
-            let mut seen = std::collections::HashSet::new();
             for r in &roots {
                 let game_dir = r.join(&fs_game);
-                if !seen.insert(game_dir.clone()) {
-                    continue; // basepath and home path can coincide (Windows)
-                }
                 let _ = std::fs::create_dir_all(&game_dir);
                 let _ = std::fs::copy(&src, game_dir.join("defrag.launcher.cfg"));
             }

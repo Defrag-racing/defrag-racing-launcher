@@ -17,11 +17,20 @@
 //! Opening every pk3 in baseq3 to read its zip directory is the expensive
 //! part - a defrag player can have thousands of pk3s, and re-scanning them
 //! on every tab open pins the disk at 100%. So the full scan runs **once**
-//! and is cached to a manifest on disk (`offline_maps.json`). Re-opening the
-//! tab only does a cheap metadata pass (read_dir + file len/mtime) to build
+//! and is cached to a manifest on disk (`offline_maps-<key>.json`). Re-opening
+//! the tab only does a cheap metadata pass (read_dir + file len/mtime) to build
 //! a signature; if it matches the cached manifest's signature we reuse the
 //! cached map list and never touch a single zip. The frontend additionally
 //! paginates, so only a page worth of thumbnails is ever extracted.
+//!
+//! The manifest is **per install**, and the install path is normalised before
+//! it becomes the key. Both matter, and neither used to be true: there was one
+//! manifest for every root, keyed by the path spelling it was built with. The
+//! Maps tab passed the engine path from the config (`\\?\D:\...`) while the
+//! demo player's map check passed a path derived from a demo (`D:\...`) - the
+//! same folder, two spellings, so each call saw a manifest "for a different
+//! install", rescanned every pk3, and overwrote the other's cache. With 555
+//! pk3s that is seconds of disk on every single demo played.
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
@@ -132,19 +141,27 @@ struct Manifest {
     maps: Vec<OfflineMap>,
 }
 
-fn manifest_path() -> Option<PathBuf> {
+/// Filename prefix, shared by the per-install manifests and by `clear_cache`.
+const MANIFEST_PREFIX: &str = "offline_maps-";
+
+/// One manifest per install, so two roots can both stay cached instead of
+/// evicting each other. The install path is hashed rather than used raw: it
+/// contains separators and colons, which have no business in a filename.
+fn manifest_path(install: &str) -> Option<PathBuf> {
+    let mut h = DefaultHasher::new();
+    install.hash(&mut h);
     directories::ProjectDirs::from("racing", "defrag", "launcher")
-        .map(|d| d.cache_dir().join("offline_maps.json"))
+        .map(|d| d.cache_dir().join(format!("{MANIFEST_PREFIX}{:x}.json", h.finish())))
 }
 
-fn load_manifest() -> Option<Manifest> {
-    let path = manifest_path()?;
+fn load_manifest(install: &str) -> Option<Manifest> {
+    let path = manifest_path(install)?;
     let bytes = std::fs::read(path).ok()?;
     serde_json::from_slice(&bytes).ok()
 }
 
 fn save_manifest(m: &Manifest) {
-    let Some(path) = manifest_path() else { return };
+    let Some(path) = manifest_path(&m.install) else { return };
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -232,15 +249,15 @@ fn scan(dirs: &[PathBuf]) -> Vec<OfflineMap> {
 /// only a genuine change (added/removed/modified pk3 in either dir) triggers
 /// the heavy scan.
 pub fn list(engine_path: &Path) -> Result<Vec<OfflineMap>> {
-    let install = engine_path
-        .parent()
-        .context("engine path has no parent")?
+    // Normalised, or the same folder spelled two ways is two caches. See the
+    // module note - this is what made every demo rescan the whole collection.
+    let install = crate::cache::normalize(engine_path.parent().context("engine path has no parent")?)
         .to_string_lossy()
         .to_string();
     let dirs = game_dirs(engine_path);
     let sig = signature(&dirs);
 
-    if let Some(m) = load_manifest() {
+    if let Some(m) = load_manifest(&install) {
         if m.install == install && m.signature == sig {
             return Ok(m.maps);
         }
@@ -290,14 +307,28 @@ fn cache_dir() -> Option<PathBuf> {
 }
 
 /// Remove everything the offline Maps tab caches on disk: the thumbnail
-/// cache and the scan manifest. Called from the Settings "Reset launcher"
+/// cache and every scan manifest. Called from the Settings "Reset launcher"
 /// flow so a reset really starts from zero.
+///
+/// Sweeps by prefix rather than deleting one known filename: there is a
+/// manifest per install, and the pre-0.1.48 single `offline_maps.json` may
+/// still be lying around too.
 pub fn clear_cache() {
     if let Some(dir) = cache_dir() {
         let _ = std::fs::remove_dir_all(dir);
     }
-    if let Some(path) = manifest_path() {
-        let _ = std::fs::remove_file(path);
+    let Some(root) = directories::ProjectDirs::from("racing", "defrag", "launcher")
+        .map(|d| d.cache_dir().to_path_buf())
+    else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(root) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with(MANIFEST_PREFIX) || name == "offline_maps.json" {
+            let _ = std::fs::remove_file(entry.path());
+        }
     }
 }
 

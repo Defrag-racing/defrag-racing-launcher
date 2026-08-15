@@ -1063,8 +1063,9 @@ pub struct MapProgress {
 #[tauri::command]
 pub async fn ensure_demo_map(
     app: AppHandle,
-    // The demo's own path: what we read the real map name out of, and on
-    // non-Linux also the root the search paths are derived from.
+    // The demo's own path. Not used for search roots any more (both players
+    // take those from the configured engine), but it is what we read the real
+    // map name out of.
     demo: String,
     map_name: String,
 ) -> Result<DemoMapStatus, String> {
@@ -1105,13 +1106,16 @@ pub async fn ensure_demo_map(
     // Where does THIS demo's content live? Mirror the search roots the player
     // actually passes to the engine (see demo_player::spawn_pane), otherwise we
     // can report a map "installed" in a folder the engine never looks at.
-    //   - derived-from-demo root (fs_basepath on Windows, fs_steampath on Linux)
+    //   - Windows/macOS: the engine install, which is fs_basepath. It used to be
+    //     a root derived from the demo, which for a demo outside the install
+    //     meant scanning an empty staging folder, always missing, and downloading
+    //     the map into a folder the player then had to be told about.
     //   - Linux: the engine install (fs_basepath) and the launcher's private
     //     sandbox home (fs_homepath - where we download maps to).
     #[cfg(not(target_os = "linux"))]
-    let basepath = crate::demo_player::derive_demo_launch(std::path::Path::new(&demo))
-        .map(|(b, _, _)| b)
-        .unwrap_or_else(|_| engine.parent().map(|p| p.to_path_buf()).unwrap_or_default());
+    let basepath = crate::cache::normalize(
+        &engine.parent().map(|p| p.to_path_buf()).unwrap_or_default(),
+    );
     #[cfg(not(target_os = "linux"))]
     let roots: Vec<PathBuf> = vec![basepath.clone()];
     // Linux: the player pins fs_basepath=<install>, fs_steampath=~/.q3a,
@@ -1161,7 +1165,7 @@ pub async fn ensure_demo_map(
     // Download into a baseq3 the engine both searches AND can write to. On Linux
     // that's the launcher's sandbox home (fs_homepath of every embedded run, so
     // it is always in the engine's search path and never read-only); on Windows
-    // the home path == install base derived from the demo.
+    // the home path == the install, which is also where the user's own maps are.
     #[cfg(target_os = "linux")]
     let dl_base = crate::demo_player::sandbox_home_dir(&app)?;
     #[cfg(not(target_os = "linux"))]
