@@ -205,6 +205,84 @@ pub(crate) fn derive_demo_launch(demo: &std::path::Path) -> Result<(std::path::P
     Ok((base.to_path_buf(), fs_game, demo_arg))
 }
 
+/// The layout the engine must be started with, read from Settings: the folder
+/// the engine lives in, and the name of the mod folder the user's demos sit
+/// under (`defrag` for almost everybody, but it is whatever they picked).
+///
+/// This is the only trustworthy source for fs_game. Deriving it from the demo
+/// means trusting a folder name: a demo archive at `D:\enterdemos\demos\…`
+/// derives `fs_game=enterdemos`, and the engine then loads no mod at all and
+/// sits on the stock menu instead of playing anything.
+pub(crate) fn configured_layout() -> Option<(std::path::PathBuf, String)> {
+    let cfg = crate::config::Config::load().ok()?;
+
+    let base = cfg
+        .engine_path
+        .as_ref()?
+        .parent()
+        .map(crate::cache::normalize)
+        .filter(|p| p.is_dir())?;
+
+    let game = cfg
+        .demos_path
+        .as_ref()
+        .and_then(|d| d.parent())
+        .and_then(|g| g.file_name())
+        .map(|n| n.to_string_lossy().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "defrag".to_string());
+
+    Some((base, game))
+}
+
+/// Can this demo be played where it lies?
+///
+/// Only when it sits in the demos folder of the install Settings points at.
+/// Anything else - another install, a download, an archive of demos that
+/// happens to have a `demos` folder in it - is staged, so playback always
+/// runs the engine, the paks and the mod the user actually configured.
+///
+/// With no configured install yet (a demo opened through the file association
+/// before onboarding) the old rule stands: any `…/<game>/demos/…` layout is
+/// taken at face value, because there is nothing better to compare it to.
+fn plays_in_place(demo: &std::path::Path) -> bool {
+    let Ok((base, game, _)) = derive_demo_launch(demo) else {
+        return false;
+    };
+
+    let Some((install, install_game)) = configured_layout() else {
+        return true;
+    };
+
+    layout_matches((&base, &game), (&install, &install_game))
+}
+
+/// Is the layout a demo derives the same one the install uses? Split out from
+/// the config lookup so the comparison can be reasoned about on its own.
+fn layout_matches(derived: (&std::path::Path, &str), configured: (&std::path::Path, &str)) -> bool {
+    same_path(&crate::cache::normalize(derived.0), configured.0) && same_name(derived.1, configured.1)
+}
+
+#[cfg(windows)]
+fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
+    a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy())
+}
+
+#[cfg(not(windows))]
+fn same_path(a: &std::path::Path, b: &std::path::Path) -> bool {
+    a == b
+}
+
+#[cfg(windows)]
+fn same_name(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
+}
+
+#[cfg(not(windows))]
+fn same_name(a: &str, b: &str) -> bool {
+    a == b
+}
+
 /// Make a demo playable wherever it happens to live.
 ///
 /// The engine can only load a demo from `<base>/<game>/demos/…`, which is fine
@@ -224,16 +302,24 @@ pub(crate) fn stage_demo(app: &AppHandle, demo: &std::path::Path) -> Result<std:
         return Err("That demo file no longer exists.".into());
     }
 
-    if derive_demo_launch(demo).is_ok() {
+    if plays_in_place(demo) {
         return Ok(demo.to_path_buf());
     }
+
+    // The staged copy goes under the SAME game folder name the install uses.
+    // The engine gets one fs_game, and it has to be the one that both the
+    // install's own mod dir and the staging copy answer to, or the demo is
+    // not on any search path.
+    let game = configured_layout()
+        .map(|(_, game)| game)
+        .unwrap_or_else(|| "defrag".to_string());
 
     let dir = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("Could not resolve the app data dir: {e}"))?
         .join("stage")
-        .join("defrag")
+        .join(&game)
         .join("demos");
 
     std::fs::create_dir_all(&dir)
@@ -1250,7 +1336,17 @@ fn spawn_pane(
     rh: i32,
     aspect: f32,
 ) -> Result<Pane, String> {
-    let (basepath, fs_game, demo_arg) = derive_demo_launch(std::path::Path::new(demo_abs))?;
+    let (basepath, derived_game, demo_arg) = derive_demo_launch(std::path::Path::new(demo_abs))?;
+
+    // fs_game comes from the install in Settings. Derived from the demo it is
+    // only ever a guess at what a parent folder means, and a wrong guess sends
+    // the engine looking for a mod that does not exist - it then loads none at
+    // all and sits on the stock menu (the CD-key screen) instead of playing.
+    let configured = configured_layout();
+    let fs_game = configured
+        .as_ref()
+        .map(|(_, game)| game.clone())
+        .unwrap_or(derived_game);
 
     let (sx, sy, sw, sh) = letterbox(rx, ry, rw, rh, aspect);
     let stage = create_stage_on_main(app, parent, sx, sy, sw, sh);
@@ -1318,13 +1414,10 @@ fn spawn_pane(
     #[cfg(not(target_os = "linux"))]
     {
         let demo_root = crate::cache::normalize(&basepath);
-        let install = crate::config::Config::load()
-            .ok()
-            .and_then(|c| c.engine_path)
-            .and_then(|p| p.parent().map(|q| q.to_path_buf()))
-            .map(|p| crate::cache::normalize(&p))
-            .filter(|p| p.is_dir());
-        let fs_base = install.unwrap_or_else(|| demo_root.clone());
+        let fs_base = configured
+            .as_ref()
+            .map(|(install, _)| install.clone())
+            .unwrap_or_else(|| demo_root.clone());
 
         cmd.arg("+set")
             .arg("fs_basepath")
@@ -1459,6 +1552,15 @@ fn spawn_pane(
         cmd.env("SDL_VIDEODRIVER", "x11");
         cmd.arg("+set").arg("in_nograb").arg("1");
     }
+
+    // One line per pane in startup.log. "It opened plain Quake" is a report we
+    // have now had twice, and both times the answer was in the four values
+    // below - which took a round trip through the user's machine to find out.
+    crate::log_startup(&format!(
+        "demo-player: pane={index} fs_game={fs_game} demo_arg={demo_arg} demo_root={:?} args={:?}",
+        basepath,
+        cmd.get_args().collect::<Vec<_>>()
+    ));
 
     let child = match cmd.spawn() {
         Ok(c) => c,
