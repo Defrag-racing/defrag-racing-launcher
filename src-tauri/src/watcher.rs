@@ -730,15 +730,15 @@ pub fn start(
     app: AppHandle,
     state: Arc<UploadState>,
     comps: Arc<CompsState>,
-    demos_path: PathBuf,
+    demos_paths: Vec<PathBuf>,
     include_subfolders: bool,
     api_base_url: String,
     token: String,
     cpu_throttle_pct: u8,
 ) -> anyhow::Result<WatcherHandle> {
     crate::log_startup(&format!(
-        "watcher::start: demos_path={:?} include_subfolders={} throttle={}%",
-        demos_path, include_subfolders, cpu_throttle_pct
+        "watcher::start: demos_paths={:?} include_subfolders={} throttle={}%",
+        demos_paths, include_subfolders, cpu_throttle_pct
     ));
     // The Arc is shared with AppState so its non-queue runtime flags
     // would otherwise carry over from the previous watcher: a Pause +
@@ -784,17 +784,38 @@ pub fn start(
         RecursiveMode::NonRecursive
     };
     crate::log_startup("watcher::start: debouncer built, calling watch()");
-    debouncer.watcher().watch(&demos_path, mode)?;
-    crate::log_startup("watcher::start: watch() ok");
+    // Every watched folder goes through the one debouncer: a demo is a demo
+    // wherever it lands, and one channel keeps the ordering honest.
+    //
+    // A folder that is not there right now is skipped with a line in the log
+    // rather than failing the start - somebody who added a second drive
+    // expects the launcher to come up when that drive is not plugged in.
+    let mut watched = 0usize;
+    for path in &demos_paths {
+        if !path.is_dir() {
+            crate::log_startup(&format!("watcher::start: skipping missing folder {:?}", path));
+            continue;
+        }
+        match debouncer.watcher().watch(path, mode) {
+            Ok(()) => watched += 1,
+            Err(e) => crate::log_startup(&format!("watcher::start: watch({:?}) failed: {e}", path)),
+        }
+    }
+    if watched == 0 {
+        anyhow::bail!("none of the demo folders could be watched");
+    }
+    crate::log_startup(&format!("watcher::start: watch() ok for {watched} folder(s)"));
 
     // Kick off a rescan on start so demos created while the launcher was
     // closed still get uploaded. The Message variant carries the recursive
     // flag so the worker uses the same setting as the watcher.
     if state.try_queue_rescan() {
-        let _ = tx.send(Message::RescanFolder {
-            folder: demos_path.clone(),
-            recursive: include_subfolders,
-        });
+        for path in &demos_paths {
+            let _ = tx.send(Message::RescanFolder {
+                folder: path.clone(),
+                recursive: include_subfolders,
+            });
+        }
     }
     // Then redrive anything restored from queue.json still in Pending. The
     // rescan walks disk paths; a persisted Pending row keyed by a slightly
@@ -863,7 +884,7 @@ pub fn start(
     // is idempotent for already-processed files (cache hit OR queue
     // hit early-return), so a redundant rescan is cheap.
     let tx_rescan = tx.clone();
-    let demos_for_rescan = demos_path.clone();
+    let demos_for_rescan = demos_paths.clone();
     let state_rescan = state.clone();
     let rescan_pump = tauri::async_runtime::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(PERIODIC_RESCAN_SECS));
@@ -877,14 +898,21 @@ pub fn start(
             if !state_rescan.try_queue_rescan() {
                 continue;
             }
-            if tx_rescan
-                .send(Message::RescanFolder {
-                    folder: demos_for_rescan.clone(),
-                    recursive: include_subfolders,
-                })
-                .is_err()
-            {
-                // Worker side hung up; nothing more we can do.
+            let mut hung_up = false;
+            for folder in &demos_for_rescan {
+                if tx_rescan
+                    .send(Message::RescanFolder {
+                        folder: folder.clone(),
+                        recursive: include_subfolders,
+                    })
+                    .is_err()
+                {
+                    // Worker side hung up; nothing more we can do.
+                    hung_up = true;
+                    break;
+                }
+            }
+            if hung_up {
                 break;
             }
         }

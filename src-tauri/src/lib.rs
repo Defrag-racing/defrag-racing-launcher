@@ -319,6 +319,9 @@ pub fn run() {
             commands::list_demos,
             commands::list_demo_folders,
             commands::set_demo_folder,
+            commands::add_demo_root,
+            commands::remove_demo_root,
+            commands::set_demo_root,
             commands::get_notifications,
             commands::get_notifications_unread_count,
             commands::request_render,
@@ -434,11 +437,13 @@ fn autostart_watcher_if_enabled(app: &tauri::AppHandle) {
         }
     };
     let state: tauri::State<AppState> = app.state();
+    let demo_paths: Vec<std::path::PathBuf> =
+        cfg.demo_roots().into_iter().map(|r| r.path).collect();
     let handle = match watcher::start(
         app.clone(),
         state.upload_state.clone(),
         state.comps.clone(),
-        demos,
+        demo_paths,
         cfg.include_subfolders,
         config::api_base_url(),
         token,

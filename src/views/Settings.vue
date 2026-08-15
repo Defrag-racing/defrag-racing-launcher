@@ -3,7 +3,7 @@
     import { useRoute, useRouter } from 'vue-router';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
     import { openExternal } from '../lib/open';
-    import { tauri, type CompsMode, type DemoAssocStatus, type DemoFolderEntry, type EngineCandidate, type HealthItem, type LaunchProfile } from '../lib/tauri';
+    import { tauri, type CompsMode, type DemoAssocStatus, type DemoFolderEntry, type DemoFolderRoot, type EngineCandidate, type HealthItem, type LaunchProfile } from '../lib/tauri';
     import TokenFeatureList from '../components/TokenFeatureList.vue';
     import TokenFreeFeatures from '../components/TokenFreeFeatures.vue';
     import UpdateBanner from '../components/UpdateBanner.vue';
@@ -244,14 +244,14 @@
     // The list is walked off disk on demand rather than kept in the config:
     // folders appear and disappear without telling us, and the config holds
     // only the answers that differ from the default.
-    const folders = ref<DemoFolderEntry[]>([]);
+    const folders = ref<DemoFolderRoot[]>([]);
     const foldersLoading = ref(false);
     const foldersError = ref<string | null>(null);
     /** Which folder is mid-write, so its two switches can't be double-clicked. */
     const folderBusy = ref<string | null>(null);
 
     const loadFolders = async () => {
-        if (! config.config.include_subfolders || ! config.config.demos_path) {
+        if (! config.config.demos_path) {
             folders.value = [];
             return;
         }
@@ -267,19 +267,75 @@
         }
     };
 
-    const setFolder = async (f: DemoFolderEntry, patch: { sync?: boolean; visible?: boolean }) => {
+    const setFolder = async (
+        root: DemoFolderRoot,
+        f: DemoFolderEntry,
+        patch: { sync?: boolean; visible?: boolean },
+    ) => {
         if (folderBusy.value) return;
-        folderBusy.value = f.path;
+        folderBusy.value = `${root.path}::${f.path}`;
         foldersError.value = null;
         try {
-            // The whole list comes back: switching a parent off moves every
+            // Every folder comes back: switching a parent off moves every
             // child that was inheriting from it, and those rows have to
             // redraw too.
             folders.value = await tauri.setDemoFolder(
+                root.path,
                 f.path,
                 patch.sync ?? f.sync,
                 patch.visible ?? f.visible,
             );
+            await config.refresh();
+        } catch (e: any) {
+            foldersError.value = e?.toString?.() ?? t('Could not save that');
+        } finally {
+            folderBusy.value = null;
+        }
+    };
+
+    /** Back a whole added folder up, or show it, or neither. */
+    const setRoot = async (root: DemoFolderRoot, patch: { sync?: boolean; visible?: boolean }) => {
+        if (folderBusy.value) return;
+        folderBusy.value = root.path;
+        foldersError.value = null;
+        try {
+            folders.value = await tauri.setDemoRoot(
+                root.path,
+                patch.sync ?? root.sync,
+                patch.visible ?? root.visible,
+            );
+            await config.refresh();
+        } catch (e: any) {
+            foldersError.value = e?.toString?.() ?? t('Could not save that');
+        } finally {
+            folderBusy.value = null;
+        }
+    };
+
+    /** Add a demos folder from anywhere - another drive, an archive. */
+    const addRoot = async () => {
+        const picked = await openDialog({ directory: true, multiple: false });
+        if (typeof picked !== 'string') return;
+
+        folderBusy.value = picked;
+        foldersError.value = null;
+        try {
+            folders.value = await tauri.addDemoRoot(picked);
+            await config.refresh();
+        } catch (e: any) {
+            foldersError.value = e?.toString?.() ?? t('Could not add that folder');
+        } finally {
+            folderBusy.value = null;
+        }
+    };
+
+    /** Stop watching an added folder. The files are not touched. */
+    const removeRoot = async (root: DemoFolderRoot) => {
+        if (folderBusy.value) return;
+        folderBusy.value = root.path;
+        foldersError.value = null;
+        try {
+            folders.value = await tauri.removeDemoRoot(root.path);
             await config.refresh();
         } catch (e: any) {
             foldersError.value = e?.toString?.() ?? t('Could not save that');
@@ -527,68 +583,133 @@
                     </label>
                 </div>
 
-                <!-- Per-folder answers. Only when subfolders are watched at
-                     all - with that switch off there is nothing here to
-                     decide, and an empty list would just look broken. -->
-                <div v-if="config.config.include_subfolders" class="pt-3 border-t border-white/[0.05]">
-                    <div class="text-sm font-medium">{{ $t('Your folders') }}</div>
-                    <div class="text-xs text-neutral-500 mt-0.5">
-                        {{ $t('Everything is backed up and listed unless you say otherwise here. A folder of demos that are not yours can stay off your account; an archive can stay backed up and out of the way. Subfolders follow their parent unless you change them too.') }}
+                <!-- Every folder the launcher watches. The game's own is
+                     first and cannot be removed; the rest are wherever the
+                     person keeps demos - another drive, an archive, a
+                     collection that predates the launcher. -->
+                <div class="pt-3 border-t border-white/[0.05]">
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <div class="text-sm font-medium">{{ $t('Your folders') }}</div>
+                            <div class="text-xs text-neutral-500 mt-0.5">
+                                {{ $t('Demos can live on more than one drive. Add every folder you keep them in - each one decides on its own whether it is backed up to your account and whether it shows in the Demos list.') }}
+                            </div>
+                        </div>
+                        <button class="btn-ghost flex-shrink-0" :disabled="folderBusy !== null" @click="addRoot">
+                            {{ $t('Add a folder') }}
+                        </button>
                     </div>
 
                     <p v-if="foldersError" class="mt-2 text-xs text-red-300">{{ foldersError }}</p>
                     <p v-else-if="foldersLoading && !folders.length" class="mt-3 text-xs text-neutral-500">
                         {{ $t('Reading your demos folder…') }}
                     </p>
-                    <p v-else-if="!folders.length" class="mt-3 text-xs text-neutral-500">
-                        {{ $t('No subfolders in :folder.', { folder: displayPath(config.config.demos_path) }) }}
-                    </p>
 
-                    <div v-else class="mt-3 space-y-1">
-                        <div class="flex items-center gap-3 px-1 text-[11px] uppercase tracking-wide text-neutral-500">
-                            <span class="flex-1">{{ $t('Folder') }}</span>
-                            <span class="w-16 text-center">{{ $t('Back up') }}</span>
-                            <span class="w-16 text-center">{{ $t('Show') }}</span>
-                        </div>
+                    <div class="mt-3 space-y-3">
                         <div
-                            v-for="f in folders"
-                            :key="f.path"
-                            class="flex items-center gap-3 py-1.5 px-1 rounded hover:bg-white/[0.03]"
-                            :class="{ 'opacity-60': !f.visible && !f.sync }"
+                            v-for="root in folders"
+                            :key="root.path"
+                            class="rounded-lg border border-white/[0.06] bg-black/20 p-3"
                         >
-                            <div class="flex-1 min-w-0" :style="{ paddingLeft: `${(f.depth - 1) * 14}px` }">
-                                <div class="text-sm text-neutral-200 truncate" :title="f.path">
-                                    <span class="text-neutral-600">{{ f.depth > 1 ? '└ ' : '' }}</span>{{ f.name }}
+                            <div class="flex items-start gap-3">
+                                <div class="flex-1 min-w-0">
+                                    <div class="text-sm text-neutral-200 break-all" :title="root.path">{{ root.path }}</div>
+                                    <div class="text-[11px] text-neutral-500 mt-0.5">
+                                        <span v-if="root.primary">{{ $t('Where your game records - this one is your demos folder above') }}</span>
+                                        <span v-else-if="!root.exists" class="text-amber-300/80">{{ $t('Not there right now. A drive that is unplugged keeps its place in this list.') }}</span>
+                                        <span v-else>
+                                            {{ root.demos === 1 ? $t('1 demo') : $t(':count demos', { count: root.demos }) }}
+                                            <span v-if="root.folders.length"> · {{ root.folders.length === 1 ? $t('1 subfolder') : $t(':count subfolders', { count: root.folders.length }) }}</span>
+                                        </span>
+                                    </div>
                                 </div>
-                                <div class="text-[11px] text-neutral-500">
-                                    {{ f.demos === 1 ? $t('1 demo') : $t(':count demos', { count: f.demos }) }}
-                                    <span v-if="f.inherited && (!f.sync || !f.visible)" class="text-neutral-600">
-                                        · {{ $t('following its parent') }}
-                                    </span>
+
+                                <!-- The game's own folder has no switches: turning
+                                     backup off for it is what the button on the
+                                     Demos tab does, and the same choice in two
+                                     places is how one of them ends up lying. -->
+                                <template v-if="!root.primary">
+                                    <label class="w-16 relative inline-flex items-center justify-center cursor-pointer" :title="root.sync ? $t('Backed up to defrag.racing') : $t('Not backed up')">
+                                        <input
+                                            type="checkbox"
+                                            class="sr-only peer"
+                                            :checked="root.sync"
+                                            :disabled="folderBusy !== null"
+                                            @change="setRoot(root, { sync: ($event.target as HTMLInputElement).checked })"
+                                        />
+                                        <span class="w-9 h-[18px] bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors block"></span>
+                                        <span class="absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform peer-checked:translate-x-[18px]"></span>
+                                    </label>
+                                    <label class="w-16 relative inline-flex items-center justify-center cursor-pointer" :title="root.visible ? $t('Shown in the Demos list') : $t('Hidden from the Demos list')">
+                                        <input
+                                            type="checkbox"
+                                            class="sr-only peer"
+                                            :checked="root.visible"
+                                            :disabled="folderBusy !== null"
+                                            @change="setRoot(root, { visible: ($event.target as HTMLInputElement).checked })"
+                                        />
+                                        <span class="w-9 h-[18px] bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors block"></span>
+                                        <span class="absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform peer-checked:translate-x-[18px]"></span>
+                                    </label>
+                                    <button
+                                        class="text-neutral-500 hover:text-red-300 transition-colors flex-shrink-0"
+                                        :title="$t('Stop watching this folder. Nothing on your disk is touched.')"
+                                        :disabled="folderBusy !== null"
+                                        @click="removeRoot(root)"
+                                    >✕</button>
+                                </template>
+                            </div>
+
+                            <!-- Subfolders, only when they are watched at all.
+                                 With that switch off there is nothing here to
+                                 decide and an empty list would look broken. -->
+                            <div v-if="config.config.include_subfolders && root.exists && root.folders.length" class="mt-3 pt-2 border-t border-white/[0.05] space-y-1">
+                                <div class="flex items-center gap-3 px-1 text-[11px] uppercase tracking-wide text-neutral-500">
+                                    <span class="flex-1">{{ $t('Folder') }}</span>
+                                    <span class="w-16 text-center">{{ $t('Back up') }}</span>
+                                    <span class="w-16 text-center">{{ $t('Show') }}</span>
+                                </div>
+                                <div
+                                    v-for="f in root.folders"
+                                    :key="f.path"
+                                    class="flex items-center gap-3 py-1.5 px-1 rounded hover:bg-white/[0.03]"
+                                    :class="{ 'opacity-60': !f.visible && !f.sync }"
+                                >
+                                    <div class="flex-1 min-w-0" :style="{ paddingLeft: `${(f.depth - 1) * 14}px` }">
+                                        <div class="text-sm text-neutral-200 truncate" :title="f.path">
+                                            <span class="text-neutral-600">{{ f.depth > 1 ? '└ ' : '' }}</span>{{ f.name }}
+                                        </div>
+                                        <div class="text-[11px] text-neutral-500">
+                                            {{ f.demos === 1 ? $t('1 demo') : $t(':count demos', { count: f.demos }) }}
+                                            <span v-if="f.inherited && (!f.sync || !f.visible)" class="text-neutral-600">
+                                                · {{ $t('following its parent') }}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <label class="w-16 relative inline-flex items-center justify-center cursor-pointer" :title="f.sync ? $t('Backed up to defrag.racing') : $t('Not backed up')">
+                                        <input
+                                            type="checkbox"
+                                            class="sr-only peer"
+                                            :checked="f.sync"
+                                            :disabled="folderBusy !== null || !root.sync"
+                                            @change="setFolder(root, f, { sync: ($event.target as HTMLInputElement).checked })"
+                                        />
+                                        <span class="w-9 h-[18px] bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors block"></span>
+                                        <span class="absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform peer-checked:translate-x-[18px]"></span>
+                                    </label>
+                                    <label class="w-16 relative inline-flex items-center justify-center cursor-pointer" :title="f.visible ? $t('Shown in the Demos list') : $t('Hidden from the Demos list')">
+                                        <input
+                                            type="checkbox"
+                                            class="sr-only peer"
+                                            :checked="f.visible"
+                                            :disabled="folderBusy !== null || !root.visible"
+                                            @change="setFolder(root, f, { visible: ($event.target as HTMLInputElement).checked })"
+                                        />
+                                        <span class="w-9 h-[18px] bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors block"></span>
+                                        <span class="absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform peer-checked:translate-x-[18px]"></span>
+                                    </label>
                                 </div>
                             </div>
-                            <label class="w-16 relative inline-flex items-center justify-center cursor-pointer" :title="f.sync ? $t('Backed up to defrag.racing') : $t('Not backed up')">
-                                <input
-                                    type="checkbox"
-                                    class="sr-only peer"
-                                    :checked="f.sync"
-                                    :disabled="folderBusy !== null"
-                                    @change="setFolder(f, { sync: ($event.target as HTMLInputElement).checked })"
-                                />
-                                <span class="w-9 h-[18px] bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors block"></span>
-                                <span class="absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform peer-checked:translate-x-[18px]"></span>
-                            </label>
-                            <label class="w-16 relative inline-flex items-center justify-center cursor-pointer" :title="f.visible ? $t('Shown in the Demos list') : $t('Hidden from the Demos list')">
-                                <input
-                                    type="checkbox"
-                                    class="sr-only peer"
-                                    :checked="f.visible"
-                                    :disabled="folderBusy !== null"
-                                    @change="setFolder(f, { visible: ($event.target as HTMLInputElement).checked })"
-                                />
-                                <span class="w-9 h-[18px] bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors block"></span>
-                                <span class="absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform peer-checked:translate-x-[18px]"></span>
-                            </label>
                         </div>
                     </div>
                 </div>

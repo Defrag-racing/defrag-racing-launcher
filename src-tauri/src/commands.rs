@@ -601,6 +601,10 @@ pub fn start_auto_upload(
         crate::log_startup(&format!("start_auto_upload: demos not a dir: {:?}", demos));
         return Err(format!("Demos path {:?} does not exist", demos));
     }
+    // The game's folder plus every folder the user added. Only the game's own
+    // has to be there for backup to mean anything; a second drive that is
+    // unplugged is skipped inside the watcher.
+    let demo_paths: Vec<PathBuf> = cfg.demo_roots().into_iter().map(|r| r.path).collect();
     crate::log_startup("start_auto_upload: demos dir ok, loading token");
     let token = token::load()
         .map_err(err_to_string)?
@@ -612,7 +616,7 @@ pub fn start_auto_upload(
         app,
         state.upload_state.clone(),
         state.comps.clone(),
-        demos,
+        demo_paths,
         cfg.include_subfolders,
         config::api_base_url(),
         token,
@@ -775,12 +779,9 @@ pub fn list_demos(state: State<'_, AppState>) -> Result<Vec<DemoLibraryEntry>, S
     use std::collections::HashMap;
     use std::time::UNIX_EPOCH;
     let cfg = Config::load().map_err(err_to_string)?;
-    let demos = cfg
-        .demos_path
-        .clone()
-        .ok_or_else(|| "Demos path is not set".to_string())?;
-    if !demos.is_dir() {
-        return Err(format!("Demos path {:?} does not exist", demos));
+    let roots = cfg.demo_roots();
+    if roots.is_empty() {
+        return Err("Demos path is not set".to_string());
     }
     let cache = UploadCache::load();
 
@@ -795,26 +796,34 @@ pub fn list_demos(state: State<'_, AppState>) -> Result<Vec<DemoLibraryEntry>, S
         .collect();
 
     let mut entries = Vec::new();
-    let walker: Box<dyn Iterator<Item = PathBuf>> = if cfg.include_subfolders {
-        Box::new(
-            walkdir::WalkDir::new(&demos)
-                .follow_links(false)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.file_type().is_file())
-                .map(|e| e.path().to_path_buf()),
-        )
-    } else {
-        Box::new(
-            std::fs::read_dir(&demos)
-                .map_err(err_to_string)?
-                .filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .filter(|p| p.is_file()),
-        )
-    };
 
-    for p in walker {
+    // Every watched folder, not just the game's own. A root that is not there
+    // right now is skipped rather than fatal: the whole point of adding a
+    // second drive is that it is a second drive, and it can be unplugged.
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    for root in &roots {
+        if !root.path.is_dir() {
+            continue;
+        }
+        if cfg.include_subfolders {
+            candidates.extend(
+                walkdir::WalkDir::new(&root.path)
+                    .follow_links(false)
+                    .into_iter()
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_type().is_file())
+                    .map(|e| e.path().to_path_buf()),
+            );
+        } else if let Ok(read) = std::fs::read_dir(&root.path) {
+            candidates.extend(
+                read.filter_map(|e| e.ok())
+                    .map(|e| e.path())
+                    .filter(|p| p.is_file()),
+            );
+        }
+    }
+
+    for p in candidates {
         let ext_ok = p
             .extension()
             .and_then(|e| e.to_str())
@@ -918,24 +927,57 @@ pub struct DemoFolderEntry {
     pub inherited: bool,
 }
 
-/// Every subfolder under the demos folder, with its sync/visible answer.
+/// One watched folder, with everything the Settings page shows about it.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DemoFolderRoot {
+    /// Absolute, normalised. Also the handle the set/remove commands take.
+    pub path: String,
+    /// The game's own demos folder, the one Defrag records into. It cannot be
+    /// removed and has no switches: it is what auto-backup is.
+    pub primary: bool,
+    /// False when the drive is unplugged or the folder was moved. The row
+    /// stays - a removable drive is a normal thing to add here - it just says
+    /// so instead of quietly listing nothing.
+    pub exists: bool,
+    pub sync: bool,
+    pub visible: bool,
+    /// Demos directly in the folder, not counting the ones in subfolders.
+    pub demos: usize,
+    pub folders: Vec<DemoFolderEntry>,
+}
+
+/// Every watched folder and the subfolders inside each one.
 ///
 /// Walked fresh rather than remembered: folders appear and disappear without
 /// telling us, and the config deliberately holds only the exceptions, so it is
 /// not a list of what exists.
 #[tauri::command]
-pub fn list_demo_folders() -> Result<Vec<DemoFolderEntry>, String> {
+pub fn list_demo_folders() -> Result<Vec<DemoFolderRoot>, String> {
+    let cfg = Config::load().map_err(err_to_string)?;
+    Ok(cfg
+        .demo_roots()
+        .into_iter()
+        .enumerate()
+        .map(|(i, root)| describe_root(&root, i == 0))
+        .collect())
+}
+
+fn describe_root(root: &crate::folders::DemoRoot, primary: bool) -> DemoFolderRoot {
     use std::collections::BTreeMap;
 
-    let cfg = Config::load().map_err(err_to_string)?;
-    let root = cfg
-        .demos_path
-        .clone()
-        .ok_or_else(|| "Demos path is not set".to_string())?;
-    if !root.is_dir() {
-        return Err(format!("Demos path {:?} does not exist", root));
+    let path = crate::cache::normalize(&root.path);
+
+    if !path.is_dir() {
+        return DemoFolderRoot {
+            path: path.to_string_lossy().to_string(),
+            primary,
+            exists: false,
+            sync: root.sync,
+            visible: root.visible,
+            demos: 0,
+            folders: Vec::new(),
+        };
     }
-    let root = crate::cache::normalize(&root);
 
     // Quake writes the demo it is recording into `temp/` and renames it out on
     // stop-record, so that folder is machinery rather than something the user
@@ -950,14 +992,15 @@ pub fn list_demo_folders() -> Result<Vec<DemoFolderEntry>, String> {
     // directories again for no reason.
     let mut found: BTreeMap<String, String> = BTreeMap::new(); // key -> real spelling
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut loose = 0usize; // demos sitting in the root itself
 
-    for entry in walkdir::WalkDir::new(&root)
+    for entry in walkdir::WalkDir::new(&path)
         .follow_links(false)
         .min_depth(1)
         .into_iter()
         .filter_map(|e| e.ok())
     {
-        let Some(rel) = crate::folders::relative_to(&root, entry.path()) else { continue };
+        let Some(rel) = crate::folders::relative_to(&path, entry.path()) else { continue };
         let rel = rel.replace('\\', "/");
         if rel.is_empty() || in_temp(&rel) {
             continue;
@@ -974,18 +1017,17 @@ pub fn list_demo_folders() -> Result<Vec<DemoFolderEntry>, String> {
             if !is_demo {
                 continue;
             }
-            let folder = match rel.rfind('/') {
-                Some(i) => &rel[..i],
-                None => continue, // a demo in the root folder belongs to no subfolder
-            };
-            *counts.entry(crate::folders::key(folder)).or_insert(0) += 1;
+            match rel.rfind('/') {
+                Some(i) => *counts.entry(crate::folders::key(&rel[..i])).or_insert(0) += 1,
+                None => loose += 1,
+            }
         }
     }
 
-    Ok(found
+    let folders = found
         .into_iter()
         .map(|(k, rel)| {
-            let (sync, visible, explicit) = crate::folders::effective(&cfg.folders, &k);
+            let (sync, visible, explicit) = crate::folders::effective(&root.folders, &k);
             DemoFolderEntry {
                 name: rel.rsplit('/').next().unwrap_or(&rel).to_string(),
                 depth: crate::folders::depth(&rel),
@@ -996,31 +1038,192 @@ pub fn list_demo_folders() -> Result<Vec<DemoFolderEntry>, String> {
                 path: rel,
             }
         })
-        .collect())
+        .collect();
+
+    DemoFolderRoot {
+        path: path.to_string_lossy().to_string(),
+        primary,
+        exists: true,
+        sync: root.sync,
+        visible: root.visible,
+        demos: loose,
+        folders,
+    }
 }
 
-/// Set one folder's answer and return the whole list as it now stands.
+/// Set one subfolder's answer and return every folder as it now stands.
 ///
-/// The list comes back rather than the caller re-fetching, because one change
-/// can move several rows: switching a parent off follows through to every
-/// child that was inheriting from it.
+/// The whole list comes back rather than the caller re-fetching, because one
+/// change can move several rows: switching a parent off follows through to
+/// every child that was inheriting from it.
 #[tauri::command]
 pub fn set_demo_folder(
     app: AppHandle,
+    root: String,
     path: String,
     sync: bool,
     visible: bool,
-) -> Result<Vec<DemoFolderEntry>, String> {
+) -> Result<Vec<DemoFolderRoot>, String> {
     use tauri::Manager;
 
     let mut cfg = Config::load().map_err(err_to_string)?;
-    crate::folders::apply(&mut cfg.folders, &path, sync, visible);
+    let target = crate::cache::normalize(std::path::Path::new(&root));
+
+    // Which root's rules is this? The game's own live in `folders`, for no
+    // better reason than that they were there before any other root existed
+    // and moving them would have rewritten everybody's config for nothing.
+    if same_root(cfg.demos_path.as_deref(), &target) {
+        crate::folders::apply(&mut cfg.folders, &path, sync, visible);
+    } else {
+        let Some(extra) = cfg
+            .extra_demo_roots
+            .iter_mut()
+            .find(|r| same_root(Some(&r.path), &target))
+        else {
+            return Err("That folder is not one of the watched folders.".to_string());
+        };
+        crate::folders::apply(&mut extra.folders, &path, sync, visible);
+    }
+
     cfg.save().map_err(err_to_string)?;
 
     let state: State<AppState> = app.state();
     state.folders.reload();
 
     list_demo_folders()
+}
+
+/// Watch another folder full of demos, on any drive.
+#[tauri::command]
+pub fn add_demo_root(app: AppHandle, path: String) -> Result<Vec<DemoFolderRoot>, String> {
+    use tauri::Manager;
+
+    let candidate = crate::cache::normalize(std::path::Path::new(&path));
+
+    if !candidate.is_dir() {
+        return Err("That folder does not exist.".to_string());
+    }
+
+    let mut cfg = Config::load().map_err(err_to_string)?;
+
+    // Overlapping folders would ask the same demo twice and answer it twice.
+    for existing in cfg.demo_roots() {
+        if crate::folders::overlaps(&candidate, &existing.path) {
+            return Err(format!(
+                "That folder overlaps one the launcher already watches ({}). Pick a folder outside it, or use the switches on that folder's subfolders instead.",
+                crate::cache::normalize(&existing.path).display()
+            ));
+        }
+    }
+
+    cfg.extra_demo_roots.push(crate::folders::DemoRoot {
+        path: candidate,
+        sync: true,
+        visible: true,
+        folders: Vec::new(),
+    });
+    cfg.save().map_err(err_to_string)?;
+
+    let state: State<AppState> = app.state();
+    state.folders.reload();
+    restart_watcher_if_running(&app);
+
+    list_demo_folders()
+}
+
+/// Stop watching a folder. Nothing on disk is touched, and demos of its that
+/// are already backed up stay backed up - this is about what happens next.
+#[tauri::command]
+pub fn remove_demo_root(app: AppHandle, path: String) -> Result<Vec<DemoFolderRoot>, String> {
+    use tauri::Manager;
+
+    let target = crate::cache::normalize(std::path::Path::new(&path));
+    let mut cfg = Config::load().map_err(err_to_string)?;
+
+    if same_root(cfg.demos_path.as_deref(), &target) {
+        return Err("That is the folder your game records into. Change it at the top of Settings instead.".to_string());
+    }
+
+    let before = cfg.extra_demo_roots.len();
+    cfg.extra_demo_roots
+        .retain(|r| !same_root(Some(&r.path), &target));
+
+    if cfg.extra_demo_roots.len() == before {
+        return Err("That folder is not one of the watched folders.".to_string());
+    }
+
+    cfg.save().map_err(err_to_string)?;
+
+    let state: State<AppState> = app.state();
+    state.folders.reload();
+    restart_watcher_if_running(&app);
+
+    list_demo_folders()
+}
+
+/// Back this folder up, or show it in the list, or neither.
+#[tauri::command]
+pub fn set_demo_root(
+    app: AppHandle,
+    path: String,
+    sync: bool,
+    visible: bool,
+) -> Result<Vec<DemoFolderRoot>, String> {
+    use tauri::Manager;
+
+    let target = crate::cache::normalize(std::path::Path::new(&path));
+    let mut cfg = Config::load().map_err(err_to_string)?;
+
+    let Some(root) = cfg
+        .extra_demo_roots
+        .iter_mut()
+        .find(|r| same_root(Some(&r.path), &target))
+    else {
+        return Err("That folder is not one you added.".to_string());
+    };
+
+    root.sync = sync;
+    root.visible = visible;
+    cfg.save().map_err(err_to_string)?;
+
+    let state: State<AppState> = app.state();
+    state.folders.reload();
+
+    list_demo_folders()
+}
+
+fn same_root(a: Option<&std::path::Path>, b: &std::path::Path) -> bool {
+    let Some(a) = a else { return false };
+    let a = crate::cache::normalize(a);
+    #[cfg(windows)]
+    {
+        a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy())
+    }
+    #[cfg(not(windows))]
+    {
+        a == *b
+    }
+}
+
+/// A folder added or removed changes what is watched, and the watcher holds
+/// its list from when it started. Restart it if it is running; if it is not,
+/// there is nothing to do and the next Start reads the new list anyway.
+fn restart_watcher_if_running(app: &AppHandle) {
+    use tauri::Manager;
+
+    let state: State<AppState> = app.state();
+    let running = state.watcher.lock().map(|w| w.is_some()).unwrap_or(false);
+    if !running {
+        return;
+    }
+
+    if let Ok(mut guard) = state.watcher.lock() {
+        *guard = None; // dropping the handle stops the watcher and its worker
+    }
+
+    if let Err(e) = start_auto_upload(app.clone(), app.state()) {
+        crate::log_startup(&format!("add/remove demo root: watcher restart failed: {e}"));
+    }
 }
 
 #[tauri::command]

@@ -47,6 +47,13 @@ pub struct Config {
     #[serde(default)]
     pub include_subfolders: bool,
 
+    /// Demos folders outside the game's own one - other drives, archives,
+    /// somebody else's collection. The game's folder stays `demos_path`
+    /// because that is the one onboarding checks against the engine and the
+    /// one new runs land in; these are equal to it in every other way.
+    #[serde(default)]
+    pub extra_demo_roots: Vec<crate::folders::DemoRoot>,
+
     /// Subfolders the user has changed something about: not backed up, not
     /// listed, or both. Only exceptions are stored - see `folders.rs` for why
     /// that, rather than a full inventory, is the shape that survives a folder
@@ -187,6 +194,7 @@ impl Default for Config {
         Self {
             engine_path: None,
             demos_path: None,
+            extra_demo_roots: Vec::new(),
             auto_upload_enabled: false,
             include_subfolders: false,
             folders: Vec::new(),
@@ -211,6 +219,28 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Every folder the launcher watches, the game's own first.
+    ///
+    /// The game's folder has no switches of its own: turning backup off for
+    /// the folder Defrag records into is what the auto-backup button on the
+    /// Demos tab is for, and two switches meaning the same thing in two places
+    /// is how one of them ends up lying.
+    pub fn demo_roots(&self) -> Vec<crate::folders::DemoRoot> {
+        let mut roots = Vec::new();
+
+        if let Some(path) = self.demos_path.clone() {
+            roots.push(crate::folders::DemoRoot {
+                path,
+                sync: true,
+                visible: true,
+                folders: self.folders.clone(),
+            });
+        }
+
+        roots.extend(self.extra_demo_roots.iter().cloned());
+        roots
+    }
+
     pub fn path() -> Result<PathBuf> {
         let dirs = directories::ProjectDirs::from("racing", "defrag", "launcher")
             .context("could not resolve platform config directory")?;

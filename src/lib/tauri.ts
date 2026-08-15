@@ -78,6 +78,21 @@ export interface WatchedFolder {
 }
 
 /** A subfolder as it exists on disk right now, with the answer in force. */
+/** One watched folder: the game's own, or one the user added. */
+export interface DemoFolderRoot {
+    /** Absolute path; also the handle the set/remove calls take. */
+    path: string;
+    /** The game's own demos folder. Cannot be removed, has no switches. */
+    primary: boolean;
+    /** False when the drive is unplugged or the folder was moved. */
+    exists: boolean;
+    sync: boolean;
+    visible: boolean;
+    /** Demos directly in the folder, not counting subfolders. */
+    demos: number;
+    folders: DemoFolderEntry[];
+}
+
 export interface DemoFolderEntry {
     path: string;
     /** The folder's own name - the UI indents rather than repeating parents. */
@@ -402,12 +417,22 @@ export const tauri = {
     /** Every subfolder under the demos folder, with whether it is backed up
      *  and whether it is listed. Walked off disk on each call - folders come
      *  and go without telling us. */
-    listDemoFolders: () => invoke<DemoFolderEntry[]>('list_demo_folders'),
+    listDemoFolders: () => invoke<DemoFolderRoot[]>('list_demo_folders'),
 
-    /** Set one folder's answer. Returns the whole list, because one change can
+    /** Set one subfolder's answer. Returns every folder, because one change can
      *  move several rows: a parent switched off carries its children with it. */
-    setDemoFolder: (path: string, sync: boolean, visible: boolean) =>
-        invoke<DemoFolderEntry[]>('set_demo_folder', { path, sync, visible }),
+    setDemoFolder: (root: string, path: string, sync: boolean, visible: boolean) =>
+        invoke<DemoFolderRoot[]>('set_demo_folder', { root, path, sync, visible }),
+
+    /** Watch another folder full of demos, on any drive. */
+    addDemoRoot: (path: string) => invoke<DemoFolderRoot[]>('add_demo_root', { path }),
+
+    /** Stop watching a folder. Nothing on disk is touched. */
+    removeDemoRoot: (path: string) => invoke<DemoFolderRoot[]>('remove_demo_root', { path }),
+
+    /** Back a whole added folder up, or show it, or neither. */
+    setDemoRoot: (path: string, sync: boolean, visible: boolean) =>
+        invoke<DemoFolderRoot[]>('set_demo_root', { path, sync, visible }),
 
     /** Notifications feed for the bell badge + Notifications tab.
      *  Records (PB beats / WR takes) + system (render done, etc.)

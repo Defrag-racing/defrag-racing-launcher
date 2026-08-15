@@ -56,6 +56,52 @@ pub struct WatchedFolder {
     pub visible: bool,
 }
 
+/// A folder full of demos the launcher watches.
+///
+/// The first one is the game's own `demos` folder, the one Defrag writes into,
+/// and it is the one Settings has always had. People keep demos elsewhere too -
+/// a second drive, an archive of somebody else's runs, a collection that
+/// predates the launcher - and those are added here. Each carries its own two
+/// answers and its own rules for the folders inside it, because the reason for
+/// adding a whole drive of somebody else's demos is usually "show me these, do
+/// not put them on my account".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DemoRoot {
+    pub path: PathBuf,
+    /// Back its demos up to defrag.racing.
+    #[serde(default = "default_true")]
+    pub sync: bool,
+    /// Show its demos in the Demos list.
+    #[serde(default = "default_true")]
+    pub visible: bool,
+    /// Exceptions for the folders inside it, exactly as for the main one.
+    #[serde(default)]
+    pub folders: Vec<WatchedFolder>,
+}
+
+/// Which root a file belongs to: the DEEPEST one that contains it.
+///
+/// Depth matters because a root inside another root is refused when it is
+/// added, but a config written by hand, or an older one, can still hold a pair
+/// like that - and then the nearer folder is the one whose answers the user
+/// was thinking about.
+pub fn root_for<'a>(roots: &'a [DemoRoot], file: &Path) -> Option<&'a DemoRoot> {
+    roots
+        .iter()
+        .filter(|r| key_for_file(&r.path, file).is_some())
+        .max_by_key(|r| crate::cache::normalize(&r.path).as_os_str().len())
+}
+
+/// Is `candidate` the same folder as `other`, inside it, or its parent?
+///
+/// Two roots that overlap would ask the same demo two questions and answer it
+/// twice, so adding one is refused.
+pub fn overlaps(candidate: &Path, other: &Path) -> bool {
+    let a = crate::cache::normalize(candidate);
+    let b = crate::cache::normalize(other);
+    relative_to(&a, &b).is_some() || relative_to(&b, &a).is_some()
+}
+
 /// Normalise a relative folder path into the form rules are compared in:
 /// forward slashes, no empty segments, lowercased.
 ///
@@ -188,11 +234,11 @@ pub fn relative_to(base: &Path, child: &Path) -> Option<String> {
 
 #[derive(Default, Clone)]
 struct Rules {
-    root: Option<PathBuf>,
+    /// Every watched folder, the game's own first.
+    roots: Vec<DemoRoot>,
     /// Only meaningful when subfolders are watched at all; with that switch off
     /// there are no subfolders in play and every rule is moot.
     subfolders: bool,
-    folders: Vec<WatchedFolder>,
 }
 
 /// Shared, cheap to read, refreshed whenever the config is saved.
@@ -211,9 +257,8 @@ impl FolderState {
     pub fn reload(&self) {
         if let Ok(cfg) = crate::config::Config::load() {
             *self.inner.lock().unwrap() = Rules {
-                root: cfg.demos_path.clone(),
+                roots: cfg.demo_roots(),
                 subfolders: cfg.include_subfolders,
-                folders: cfg.folders.clone(),
             };
         }
     }
@@ -230,18 +275,27 @@ impl FolderState {
 
     fn decide(&self, file: &Path, which: u8) -> bool {
         let rules = self.inner.lock().unwrap();
-        if !rules.subfolders || rules.folders.is_empty() {
+
+        // A demo outside every watched folder - a staged copy, a file the user
+        // pointed at by hand. None of these rules are about it.
+        let Some(root) = root_for(&rules.roots, file) else { return true };
+
+        // The folder's own answer comes first: a whole drive switched off is
+        // off, whatever the folders inside it say.
+        let root_says = if which == 0 { root.sync } else { root.visible };
+        if !root_says {
+            return false;
+        }
+
+        if !rules.subfolders || root.folders.is_empty() {
             return true;
         }
-        let Some(root) = rules.root.as_ref() else { return true };
-        match key_for_file(root, file) {
+
+        match key_for_file(&root.path, file) {
             Some(k) => {
-                let (sync, visible, _) = effective(&rules.folders, &k);
+                let (sync, visible, _) = effective(&root.folders, &k);
                 if which == 0 { sync } else { visible }
             }
-            // A demo outside the watched folder entirely - a staged copy, a
-            // file the user pointed at by hand. Rules about subfolders have
-            // nothing to say about it.
             None => true,
         }
     }
