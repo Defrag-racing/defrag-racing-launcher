@@ -677,9 +677,16 @@
             if (!applyFrame) applyFrame = requestAnimationFrame(applyPendingSnapshot);
         });
 
-        unlistenMapProgress = await listen<{ phase: string; received: number; total: number | null }>(
+        unlistenMapProgress = await listen<{ map: string; phase: string; received: number; total: number | null }>(
             'demo-map-progress',
-            (ev) => { if (preparingMap.value) mapProgress.value = ev.payload; },
+            (ev) => {
+                if (!preparingMap.value) return;
+                mapProgress.value = ev.payload;
+                // The name we started with came from the filename; the backend
+                // reads the real one out of the demo and reports that. Show
+                // what is actually being fetched.
+                if (ev.payload.map) preparingMap.value = ev.payload.map;
+            },
         );
     });
 

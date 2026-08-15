@@ -3,6 +3,7 @@ mod cache;
 mod commands;
 mod comps;
 mod config;
+mod demo_meta;
 mod demo_player;
 mod engine;
 mod file_assoc;

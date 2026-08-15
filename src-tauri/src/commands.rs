@@ -1063,16 +1063,28 @@ pub struct MapProgress {
 #[tauri::command]
 pub async fn ensure_demo_map(
     app: AppHandle,
-    // Used on non-Linux to derive the demo's own install root; the Linux
-    // player copies the demo into the sandbox and uses fixed roots instead.
-    #[cfg_attr(target_os = "linux", allow(unused_variables))] demo: String,
+    // The demo's own path: what we read the real map name out of, and on
+    // non-Linux also the root the search paths are derived from.
+    demo: String,
     map_name: String,
 ) -> Result<DemoMapStatus, String> {
     use std::io::Write;
     use std::path::PathBuf;
     use tauri::Emitter;
 
-    let map_name = map_name.trim().to_string();
+    // The demo is the authority on which map it is; the name passed in comes
+    // from the filename, which is a convention rather than a fact. Old DeFRaG
+    // builds wrote it wrong often enough to matter: across 22k demos on one
+    // machine, 1459 filenames disagreed with the demo inside them - a cvar note
+    // glued to the front, a trailing character lost (`!minions-run9-strafez!`
+    // recorded as `!minions-run9-strafe`), or simply a stale name from the
+    // previous map. Every one of those asked the website for a map that does
+    // not exist and came back 404.
+    let map_name = crate::demo_meta::map_name(std::path::Path::new(&demo))
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| map_name.trim().to_string());
+
     if map_name.is_empty() {
         return Err("Could not determine which map this demo needs.".to_string());
     }
