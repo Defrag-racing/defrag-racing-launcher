@@ -4,6 +4,21 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.48
+
+- **The launcher speaks your language.** It follows whatever your system is set to, in Czech, German, Spanish, French, Dutch, Polish, Russian, Swedish and Ukrainian, and there is a language picker at the top of Settings if you want a different one. This first release translates the navigation, the update banner, the connect dialog and the setup screens; the rest of the tabs are still English and will follow.
+- **Drag a demo onto the window to watch it.** From Downloads, from the Desktop, from a Discord attachment - anywhere. Drop several at once and they open side by side.
+- **Choose per folder what gets backed up and what gets listed.** With "Include subfolders" on, every folder under your demos folder now has its own two switches in Settings. A folder of somebody else's demos can stay off your account; an archive can stay backed up and out of the way of tonight's runs. Subfolders follow their parent unless you change them too.
+- **Desktop notifications.** The launcher can now reach you while you are in a game: a comps round opening, a demo of yours being held for an answer, your run counting or not, and the round you entered finishing. Your records being beaten are on too; everything else the site sends is off by default. All of it is switchable in Settings.
+- **The server list says what a server does about cheats.** Where `sv_cheats` is on, the server is marked in red and every time set there is worth nothing. Where the server never reported it - most of them, because only newer engines send it at all - it says so quietly rather than looking fine.
+- **Your PB in the server list now shows when you set it.** A time from last week and a time from 2013 are different facts about the same map.
+- **A card view for the server list.** Map picture first, with the players named on each server. Switch between it and the list at the top; the choice is remembered.
+- **Fixed: a demo opened from outside your Quake folder played on stock settings.** No paks, no Defrag mod, none of your configs - the player took its game folder from where the demo was sitting instead of from the engine you set in Settings. It now uses your install on every platform.
+- **Fixed: playing a demo rescanned your whole map collection every time.** Two parts of the launcher spelled the same folder two different ways, so each decided the other's cached scan belonged to somebody else and did it all again. On a collection of 555 pk3s that was seconds of hammered disk per demo.
+- **Fixed: the map download 404'd on demos whose filename lies about the map.** Old Defrag builds wrote the name wrong often enough to matter - 1459 of 22484 files on one machine. The launcher now reads the map name out of the demo itself and falls back to the filename only when it cannot.
+- **Fixed: the .dm_68 icon did not appear until you logged out.** Windows was never told the file association had changed.
+- **The demo player opens at a sensible volume and remembers yours.** It used to start at 80% every single time.
+
 ## 0.1.47
 
 - **Fixed: the Run and Team tabs in the server list showed every server.** The mixed-server test read a field that reports the same value on every server in existence, so it was always true and counted into both tabs. Mixed is now decided by the server's own type or the word in its name, the type column is read properly (a teamrun server used to fall through the Team tab), and Team no longer lists mixed servers - if you filter there you want a server set up for teamruns, not a run server where one can be voted. The MIXED tag on the cards had the same cause and now loses to the specific type, so a teamrun server reads TEAM.
