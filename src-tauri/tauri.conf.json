@@ -45,9 +45,14 @@
       "icons/icon.ico"
     ],
     "windows": {
+      "allowDowngrades": false,
       "nsis": {
         "installMode": "currentUser",
-        "installerHooks": "installer-hooks.nsh"
+        "installerHooks": "installer-hooks.nsh",
+        "languages": ["English"],
+        "customLanguageFiles": {
+          "English": "nsis/English.nsh"
+        }
       },
       "wix": {
         "fragmentPaths": ["wix/cleanup.wxs"],
