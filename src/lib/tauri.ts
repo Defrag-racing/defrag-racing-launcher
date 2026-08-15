@@ -21,6 +21,18 @@ export interface LauncherConfig {
      *  without anything being rewritten. Written through `setDemoFolder`, not
      *  by hand. */
     folders: WatchedFolder[];
+    /** Master switch for desktop notifications. On by default: the launcher
+     *  lives minimised behind a fullscreen game, and a message nobody sees
+     *  until the next alt-tab arrived too late. */
+    notify_enabled: boolean;
+    /** Comps: a round opening, a demo held for an answer, an entry settling,
+     *  results landing. */
+    notify_comps: boolean;
+    /** Somebody beat one of your times, or took a world record. */
+    notify_records: boolean;
+    /** Everything else the site sends. Off by default - least urgent of the
+     *  three and the easiest to turn into noise. */
+    notify_system: boolean;
     auto_update_enabled: boolean;
     /** Target CPU% for the hashing worker. 0 = no throttle. */
     cpu_throttle_pct: number;

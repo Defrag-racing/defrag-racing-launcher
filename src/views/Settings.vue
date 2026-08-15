@@ -809,6 +809,73 @@
                 </label>
             </section>
 
+            <!-- Desktop notifications. The launcher spends its life minimised
+                 behind a fullscreen game, so anything worth saying has to
+                 leave the window or it arrives after it mattered. -->
+            <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
+                <div class="flex items-center justify-between gap-3">
+                    <div>
+                        <div class="font-semibold">Desktop notifications</div>
+                        <div class="text-xs text-neutral-500 mt-0.5">
+                            Your system's own notifications, so the launcher can reach you while
+                            you are in a game. Your PC asks for permission the first time one is sent.
+                        </div>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                        <input
+                            type="checkbox"
+                            class="sr-only peer"
+                            :checked="config.config.notify_enabled"
+                            @change="config.save({ notify_enabled: ($event.target as HTMLInputElement).checked })"
+                        />
+                        <div class="w-10 h-5 bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors"></div>
+                        <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+                    </label>
+                </div>
+
+                <div
+                    v-if="config.config.notify_enabled"
+                    class="pt-2 border-t border-white/[0.05] space-y-2"
+                >
+                    <div
+                        v-for="opt in [
+                            {
+                                key: 'notify_comps' as const,
+                                title: 'Comps',
+                                detail: 'A round opens, a demo of yours is being held for an answer, your run counts or does not, results are up.',
+                            },
+                            {
+                                key: 'notify_records' as const,
+                                title: 'Your records',
+                                detail: 'Somebody beats one of your times, or takes a world record.',
+                            },
+                            {
+                                key: 'notify_system' as const,
+                                title: 'Everything else from the site',
+                                detail: 'New maps, announcements, a finished render. The least urgent of the three, so it starts off.',
+                            },
+                        ]"
+                        :key="opt.key"
+                        class="flex items-center justify-between gap-3"
+                    >
+                        <div class="min-w-0">
+                            <div class="text-sm font-medium">{{ opt.title }}</div>
+                            <div class="text-xs text-neutral-500 mt-0.5">{{ opt.detail }}</div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                            <input
+                                type="checkbox"
+                                class="sr-only peer"
+                                :checked="config.config[opt.key]"
+                                @change="config.save({ [opt.key]: ($event.target as HTMLInputElement).checked })"
+                            />
+                            <div class="w-10 h-5 bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors"></div>
+                            <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+                        </label>
+                    </div>
+                </div>
+            </section>
+
             <!-- Auto-update is intentionally not user-toggleable. Security
                  fixes (token leak protection, signed-update bypasses, MSI
                  cleanup bugs that wipe user data, etc.) have to reach

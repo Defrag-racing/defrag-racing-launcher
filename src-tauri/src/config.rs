@@ -54,6 +54,29 @@ pub struct Config {
     #[serde(default)]
     pub folders: Vec<crate::folders::WatchedFolder>,
 
+    /// Desktop notifications master switch. On by default: the launcher spends
+    /// its life minimised behind a fullscreen game, and everything it has to
+    /// say is time-sensitive - a round that just opened, a demo waiting for an
+    /// answer, somebody taking your record. A message nobody sees until they
+    /// alt-tab is a message that arrived too late.
+    #[serde(default = "default_true")]
+    pub notify_enabled: bool,
+
+    /// Comps: a round opening, a demo held for an answer, an entry settling,
+    /// results landing.
+    #[serde(default = "default_true")]
+    pub notify_comps: bool,
+
+    /// Somebody beat one of your times, or took a world record.
+    #[serde(default = "default_true")]
+    pub notify_records: bool,
+
+    /// Everything else the site sends: new maps, announcements, a finished
+    /// YouTube render. Off by default - it is the least urgent of the three and
+    /// the easiest to turn into noise.
+    #[serde(default)]
+    pub notify_system: bool,
+
     /// Auto-update opt-in. On by default - security fixes need to reach
     /// users without them having to remember to check Releases. Users
     /// can flip it off in Settings if they want manual control over
@@ -159,6 +182,10 @@ impl Default for Config {
             auto_upload_enabled: false,
             include_subfolders: false,
             folders: Vec::new(),
+            notify_enabled: true,
+            notify_comps: true,
+            notify_records: true,
+            notify_system: false,
             auto_update_enabled: true,
             cpu_throttle_pct: DEFAULT_CPU_THROTTLE_PCT,
             deep_link_auto_connect: false,

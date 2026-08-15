@@ -10,6 +10,7 @@
     import { useUpdaterStore } from './stores/updater';
     import UpdateBanner from './components/UpdateBanner.vue';
     import { openExternal } from './lib/open';
+    import { loadSeen, notify, saveSeen, type NotifyCategory } from './lib/notify';
 
     const router = useRouter();
     const route = useRoute();
@@ -273,6 +274,217 @@
     const countHeld = (items: { status: string }[]) =>
         items.filter((i) => i.status === 'held_for_comps').length;
 
+    // ---- desktop notifications --------------------------------------
+    // Everything below is about somebody who is not looking at this window.
+    // The launcher lives minimised behind a fullscreen game, so a round that
+    // opened, a demo waiting for an answer and a record taken off you all have
+    // to travel out of the app or they arrive after they mattered.
+
+    /** One place where the master switch and the per-category switch are both
+     *  checked, so no caller can forget one of them. */
+    const announce = (category: NotifyCategory, title: string, body: string) => {
+        if (! config.config.notify_enabled) return;
+        if (category === 'comps' && ! config.config.notify_comps) return;
+        if (category === 'records' && ! config.config.notify_records) return;
+        if (category === 'system' && ! config.config.notify_system) return;
+        void notify(title, body);
+    };
+
+    const notifyWanted = () =>
+        config.config.notify_enabled
+        && (config.config.notify_comps || config.config.notify_records || config.config.notify_system);
+
+    /** Strip Q3 colour codes - a notification is plain text and `^1neyo` in a
+     *  system toast reads as a typo. */
+    const plain = (s: string | null | undefined) =>
+        (s ?? '').replace(/\^\d|\^x[\da-fA-F]{2}|\^[\da-fA-F]{6}/g, '').trim();
+
+    /** Times arrive as milliseconds. */
+    const asTime = (ms: number | null | undefined) => {
+        if (ms == null || ms <= 0) return '';
+        const total = Math.floor(ms / 1000);
+        const m = Math.floor(total / 60);
+        const s = total % 60;
+        const mmm = (ms % 1000).toString().padStart(3, '0');
+        return m > 0 ? `${m}:${s.toString().padStart(2, '0')}.${mmm}` : `${s}.${mmm}`;
+    };
+
+    /** A demo held by the comps guard is the one message the user cannot act on
+     *  from inside the game, and the one they are least likely to be watching
+     *  for: they finished a run and assume the launcher dealt with it.
+     *
+     *  Only the arrival is announced. A demo the user themselves entered or
+     *  released does not need a toast - they were looking at the app when they
+     *  did it. */
+    type QueueRow = { status: string; path: string; filename: string };
+    let heldPaths: Set<string> | null = null;
+
+    const onQueueSnapshot = (items: QueueRow[]) => {
+        heldForComps.value = countHeld(items);
+        const held = items.filter((i) => i.status === 'held_for_comps');
+        const paths = new Set(held.map((i) => i.path));
+
+        // The first snapshot is the state at startup, not news. Announcing it
+        // would replay every demo held before the launcher was even opened.
+        if (heldPaths === null) {
+            heldPaths = paths;
+            return;
+        }
+        for (const row of held) {
+            if (! heldPaths.has(row.path)) {
+                announce(
+                    'comps',
+                    'A demo is waiting for you',
+                    `${row.filename} looks like a run of this week's map. It is being held until you say whether it goes into the round.`,
+                );
+            }
+        }
+        heldPaths = paths;
+    };
+
+    /** The site's own feed: records taken, and everything else it sends.
+     *
+     *  Only ever announces what is newer than the highest id already seen, and
+     *  a source whose id is still zero is seeded silently. Without that, a
+     *  fresh install would open with every unread notification the account has
+     *  ever collected arriving at once. */
+    const checkSiteNotifications = async () => {
+        if (! config.hasToken || ! notifyWanted()) return;
+        let feed;
+        try {
+            feed = await tauri.getNotifications();
+        } catch {
+            return; // offline, or the token went away. Next tick.
+        }
+        const seen = await loadSeen();
+        const newestRecord = feed.records[0]?.id ?? 0;
+        const newestSystem = feed.system[0]?.id ?? 0;
+
+        if (seen.record > 0) {
+            // Oldest first, so a burst reads in the order it happened. Capped:
+            // three toasts is a report, ten is an assault.
+            const fresh = feed.records.filter((r) => r.id > seen.record).reverse();
+            for (const r of fresh.slice(0, 3)) {
+                const who = plain(r.name) || 'Someone';
+                const map = r.mapname ?? 'a map';
+                const time = asTime(r.time);
+                announce(
+                    'records',
+                    r.worldrecord ? 'World record taken' : 'Your time was beaten',
+                    time ? `${who} on ${map} - ${time}` : `${who} on ${map}`,
+                );
+            }
+            if (fresh.length > 3) {
+                announce('records', 'More records', `${fresh.length - 3} more of your times were beaten.`);
+            }
+        }
+
+        if (seen.system > 0) {
+            const fresh = feed.system.filter((s) => s.id > seen.system).reverse();
+            for (const s of fresh.slice(0, 3)) {
+                const line = [s.before, s.headline, s.after].map(plain).filter(Boolean).join(' ');
+                announce('system', 'defrag.racing', line || 'You have a new notification.');
+            }
+            if (fresh.length > 3) {
+                announce('system', 'defrag.racing', `${fresh.length - 3} more notifications.`);
+            }
+        }
+
+        await saveSeen({ record: newestRecord, system: newestSystem });
+    };
+
+    /** Comps: a round opening, an entry settling, and results landing.
+     *
+     *  Served from the launcher's cached copy, which the backend refreshes on
+     *  its own every few minutes, so this costs nothing on most ticks. */
+    const checkComps = async () => {
+        if (! config.hasToken || ! config.config.notify_enabled || ! config.config.notify_comps) return;
+        let payload;
+        try {
+            payload = await tauri.getComps();
+        } catch {
+            return;
+        }
+        const seen = await loadSeen();
+        const playing = payload.playing;
+        const roundId = playing?.round_id ?? 0;
+
+        // The round you had a run in is gone, so it is over and the times are
+        // public. Announced before the new round, because that is the order it
+        // happened in.
+        if (seen.enteredRound > 0 && roundId !== seen.enteredRound) {
+            announce(
+                'comps',
+                'The round you entered is over',
+                'Results are up on defrag.racing.',
+            );
+            await saveSeen({ enteredRound: 0 });
+        }
+
+        if (roundId > 0 && roundId !== seen.round) {
+            if (seen.round > 0) {
+                const maps = Object.entries(playing?.maps ?? {})
+                    .filter(([, m]) => !!m)
+                    .map(([physics, m]) => `${physics.toUpperCase()}: ${m}`)
+                    .join(' · ');
+                announce(
+                    'comps',
+                    `Week ${playing?.comp_number ?? ''} is open`.replace(/\s+$/, ''),
+                    maps || 'A new round has started.',
+                );
+            }
+            await saveSeen({ round: roundId });
+        }
+
+        const entries = playing?.my_entries ?? [];
+        if (entries.length && roundId > 0) {
+            await saveSeen({ enteredRound: roundId });
+        }
+
+        // A verdict on a run you put in. Pending says nothing - it is the
+        // state a run sits in while nothing has happened to it.
+        const settled = (await loadSeen()).settled;
+        const fresh = entries.filter((e) => e.status !== 'pending' && ! settled.includes(e.id));
+        if (fresh.length && seen.round > 0) {
+            for (const e of fresh) {
+                const where = e.physics ? ` (${e.physics.toUpperCase()})` : '';
+                if (e.status === 'valid') {
+                    announce('comps', 'Your run is in', `${e.time ?? 'Your time'}${where} counts for this round.`);
+                } else {
+                    announce(
+                        'comps',
+                        'Your run did not count',
+                        e.invalid_reason || `The run${where} was rejected.`,
+                    );
+                }
+            }
+        }
+        if (fresh.length) {
+            await saveSeen({ settled: [...settled, ...fresh.map((e) => e.id)] });
+        }
+    };
+
+    /** Unread total at the last tick, so the feed is only re-read when
+     *  something about it changed. `null` means "not asked yet". */
+    let prevUnread: number | null = null;
+
+    const notifTick = async () => {
+        const wanted = notifyWanted() && config.hasToken;
+        // The badge poll used to skip a hidden window, on the grounds that
+        // nobody was looking at the badge. Notifications exist for exactly that
+        // case, so with them on the tick runs regardless.
+        if (! document.hidden || wanted) await notifStore.refresh();
+        if (! wanted) {
+            prevUnread = null;
+            return;
+        }
+        if (prevUnread === null || notifStore.total !== prevUnread) {
+            prevUnread = notifStore.total;
+            await checkSiteNotifications();
+        }
+        await checkComps();
+    };
+
     onMounted(async () => {
         await config.refresh();
 
@@ -282,10 +494,8 @@
         // poll skips ticks when the window is hidden (launcher in tray)
         // - we still refresh once on `visibilitychange` -> visible so
         // returning users see fresh counts without waiting up to 3min.
-        await notifStore.refresh();
-        notifPollTimer = window.setInterval(() => {
-            if (!document.hidden) notifStore.refresh();
-        }, 180_000);
+        await notifTick();
+        notifPollTimer = window.setInterval(() => { void notifTick(); }, 180_000);
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) notifStore.refresh();
         });
@@ -316,13 +526,13 @@
                 }
             },
         );
-        unlistenQueue = await listen<{ items: { status: string }[] }>(
+        unlistenQueue = await listen<{ items: QueueRow[] }>(
             'upload_state_changed',
-            (ev) => { heldForComps.value = countHeld(ev.payload.items); },
+            (ev) => { onQueueSnapshot(ev.payload.items); },
         );
         try {
             const snapshot = await tauri.getUploadState();
-            heldForComps.value = countHeld(snapshot.items);
+            onQueueSnapshot(snapshot.items);
         } catch { /* no queue yet */ }
 
         unlistenDrop = await getCurrentWebview().onDragDropEvent((ev) => {
