@@ -9,6 +9,7 @@
     import { useRouter, useRoute } from 'vue-router';
     import { tauri } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
+    import { t } from '../lib/i18n';
 
     const router = useRouter();
     const route = useRoute();
@@ -30,7 +31,7 @@
     };
 
     const startFresh = async () => {
-        if (! confirm('Clear all settings and the stored token? Demos on your PC are not affected.')) return;
+        if (! confirm(t('Clear all settings and the stored token? Demos on your PC are not affected.'))) return;
         busy.value = true;
         try {
             await tauri.resetLauncher();
@@ -46,25 +47,23 @@
     <div class="min-h-full flex items-center justify-center p-6">
         <div class="max-w-md w-full bg-neutral-900 border border-white/10 rounded-xl p-6 space-y-5">
             <div>
-                <h1 class="text-xl font-bold">Launcher updated</h1>
+                <h1 class="text-xl font-bold">{{ $t('Launcher updated') }}</h1>
                 <p class="text-sm text-neutral-400 mt-2 leading-relaxed">
-                    You were on version <code class="text-xs bg-black/40 px-1 rounded">{{ previous }}</code>
-                    and are now on <code class="text-xs bg-black/40 px-1 rounded">{{ current }}</code>.
-                    Do you want to keep your settings or start fresh?
+                    {{ $t('You were on version :previous and are now on :current. Do you want to keep your settings or start fresh?', { previous, current }) }}
                 </p>
             </div>
 
             <div class="space-y-2">
                 <button class="w-full btn-primary" :disabled="busy" @click="keep">
-                    Keep settings
+                    {{ $t('Keep settings') }}
                 </button>
                 <button class="w-full btn-danger" :disabled="busy" @click="startFresh">
-                    Start fresh (wipe settings + token)
+                    {{ $t('Start fresh (wipe settings and token)') }}
                 </button>
             </div>
 
             <p class="text-xs text-neutral-500 text-center">
-                "Keep settings" is the right choice for a normal upgrade. Pick "Start fresh" only if you want to redo the whole setup.
+                {{ $t('Keeping your settings is the right choice for a normal upgrade. Start fresh only if you want to redo the whole setup.') }}
             </p>
         </div>
     </div>

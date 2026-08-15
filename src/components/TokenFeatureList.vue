@@ -7,13 +7,13 @@
      green block doesn't pull the eye away from everything a token unlocks).
      History is absent: the History tab is the local defrag:// join log. -->
 <template>
-    <li>• Play demos instantly in the launcher - embedded player, no separate game launch</li>
-    <li>• Compare two demos side by side - two synced engines, run vs run</li>
-    <li>• Auto-backup of recorded demos</li>
-    <li>• YouTube renders straight from the Demos list</li>
-    <li>• Server browser with your PB and rank per map</li>
-    <li>• Records and Maps tabs (times + your rank)</li>
-    <li>• Maps tab: online map list with weapon/item/function icons and per-map info</li>
-    <li>• Map history - which maps played on the servers you joined</li>
-    <li>• Record + system notifications from defrag.racing</li>
+    <li>• {{ $t('Play demos instantly in the launcher - embedded player, no separate game launch') }}</li>
+    <li>• {{ $t('Compare two demos side by side - two synced engines, run vs run') }}</li>
+    <li>• {{ $t('Auto-backup of recorded demos') }}</li>
+    <li>• {{ $t('YouTube renders straight from the Demos list') }}</li>
+    <li>• {{ $t('Server browser with your PB and rank per map') }}</li>
+    <li>• {{ $t('Records and Maps tabs (times and your rank)') }}</li>
+    <li>• {{ $t('Maps tab: online map list with weapon, item and function icons and per-map info') }}</li>
+    <li>• {{ $t('Map history - which maps played on the servers you joined') }}</li>
+    <li>• {{ $t('Record and system notifications from defrag.racing') }}</li>
 </template>

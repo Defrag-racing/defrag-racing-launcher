@@ -11,6 +11,8 @@
     import UpdateBanner from './components/UpdateBanner.vue';
     import { openExternal } from './lib/open';
     import { loadSeen, notify, saveSeen, type NotifyCategory } from './lib/notify';
+    import { resolveLocale, setLocale, t } from './lib/i18n';
+    import { locale as osLocale } from '@tauri-apps/plugin-os';
 
     const router = useRouter();
     const route = useRoute();
@@ -78,7 +80,7 @@
             if (extra) await tauri.launchEngineArgs(extra);
             else await tauri.launchEngine();
         } catch (e: any) {
-            launchError.value = e?.toString?.() ?? 'Failed to launch';
+            launchError.value = e?.toString?.() ?? t('Failed to launch');
         } finally {
             launching.value = false;
         }
@@ -91,7 +93,7 @@
         try {
             await tauri.launchEngineArgs((args ?? '').trim());
         } catch (e: any) {
-            launchError.value = e?.toString?.() ?? 'Failed to launch';
+            launchError.value = e?.toString?.() ?? t('Failed to launch');
         } finally {
             launching.value = false;
         }
@@ -249,21 +251,21 @@
         return config.hasToken ? Math.min(n, MAX_DROP_COMPARE) : Math.min(n, 1);
     });
     const dropHeadline = computed(() =>
-        dropTaken.value > 1 ? `Compare these ${dropTaken.value} demos` : 'Play this demo',
+        dropTaken.value > 1
+            ? t('Compare these :count demos', { count: dropTaken.value })
+            : t('Play this demo'),
     );
     const dropDetail = computed(() => {
         const dropped = dropHint.value?.demos ?? 0;
         if (dropTaken.value > 1) {
             return dropped > dropTaken.value
-                ? `Drop anywhere. Four is the most that fit, so the first ${dropTaken.value} open.`
-                : 'Drop anywhere to open them side by side.';
+                ? t('Drop anywhere. Four is the most that fit, so the first :count open.', { count: dropTaken.value })
+                : t('Drop anywhere to open them side by side.');
         }
-        if (dropped > 1) {
-            return config.hasToken
-                ? 'Drop anywhere to open it in the player.'
-                : 'Drop anywhere. Comparing runs needs a linked account, so the first one plays.';
+        if (dropped > 1 && ! config.hasToken) {
+            return t('Drop anywhere. Comparing runs needs a linked account, so the first one plays.');
         }
-        return 'Drop anywhere to open it in the player.';
+        return t('Drop anywhere to open it in the player.');
     });
 
     // Demos the comps guard is holding. Badged on the Comps tab because a
@@ -488,6 +490,13 @@
     onMounted(async () => {
         await config.refresh();
 
+        // Language before anything renders text worth reading. A saved choice
+        // wins; otherwise the OS decides, because somebody on a Czech Windows
+        // did not choose English, they just never opened Settings - and a
+        // launcher that opens in a language you cannot read is a launcher whose
+        // Settings you cannot find.
+        setLocale(resolveLocale(config.config.language, await osLocale().catch(() => null)));
+
         // Bell badge poll. First call goes through immediately so the
         // badge isn't blank on first render; subsequent ticks every
         // 180s hit the lightweight unread-count endpoint (~30B). The
@@ -615,7 +624,7 @@
                     :class="route.name === 'dashboard'
                         ? 'bg-white/10 text-neutral-100 font-semibold'
                         : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
-                >Demos</RouterLink>
+                >{{ $t('Demos') }}</RouterLink>
                 <!-- Comps sits next to Demos on purpose: a held demo is a
                      demo, and the answer to "where did my run go" has to be
                      one tab away from where the user looked first. The dot
@@ -627,11 +636,11 @@
                         ? 'bg-white/10 text-neutral-100 font-semibold'
                         : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
                 >
-                    Comps
+                    {{ $t('Comps') }}
                     <span
                         v-if="heldForComps > 0"
                         class="absolute -top-0.5 -right-0.5 text-[10px] font-bold px-1 min-w-[16px] h-[16px] flex items-center justify-center rounded-full bg-amber-500 text-black"
-                        :title="`${heldForComps} demo(s) waiting for you to choose`"
+                        :title="$t(':count demos are waiting for you to choose', { count: heldForComps })"
                     >{{ heldForComps }}</span>
                 </RouterLink>
                 <RouterLink
@@ -640,28 +649,28 @@
                     :class="route.name === 'servers'
                         ? 'bg-white/10 text-neutral-100 font-semibold'
                         : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
-                >Servers</RouterLink>
+                >{{ $t('Servers') }}</RouterLink>
                 <RouterLink
                     :to="{ name: 'records' }"
                     class="px-3 py-1.5 text-sm rounded transition-colors"
                     :class="route.name === 'records'
                         ? 'bg-white/10 text-neutral-100 font-semibold'
                         : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
-                >Records</RouterLink>
+                >{{ $t('Records') }}</RouterLink>
                 <RouterLink
                     :to="{ name: 'maps' }"
                     class="px-3 py-1.5 text-sm rounded transition-colors"
                     :class="route.name === 'maps'
                         ? 'bg-white/10 text-neutral-100 font-semibold'
                         : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
-                >Maps</RouterLink>
+                >{{ $t('Maps') }}</RouterLink>
                 <RouterLink
                     :to="{ name: 'history' }"
                     class="px-3 py-1.5 text-sm rounded transition-colors"
                     :class="route.name === 'history'
                         ? 'bg-white/10 text-neutral-100 font-semibold'
                         : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
-                >History</RouterLink>
+                >{{ $t('History') }}</RouterLink>
             </div>
 
             <div class="flex items-center gap-2">
@@ -677,18 +686,18 @@
                         :class="hasLaunchMenu ? 'rounded-l' : 'rounded'"
                         :disabled="!config.config.engine_path || launching"
                         :title="!config.config.engine_path
-                            ? 'Pick an engine in Settings first'
-                            : `Quick launch ${config.config.engine_path}`"
+                            ? $t('Pick an engine in Settings first')
+                            : $t('Quick launch :path', { path: config.config.engine_path })"
                         @click="launchGame"
                     >
                         <span>▶</span>
-                        <span>{{ launching ? 'Launching…' : 'Quick launch' }}</span>
+                        <span>{{ launching ? $t('Launching…') : $t('Quick launch') }}</span>
                     </button>
                     <button
                         v-if="hasLaunchMenu"
                         class="px-1.5 py-1.5 rounded-r border-l border-emerald-300/20 text-sm bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed"
                         :disabled="!config.config.engine_path || launching"
-                        title="Launch a profile"
+                        :title="$t('Launch a profile')"
                         @click="showLaunchMenu = !showLaunchMenu"
                     >▾</button>
 
@@ -702,7 +711,7 @@
                             class="w-full text-left px-3 py-1.5 text-sm text-emerald-300 hover:bg-white/5 flex items-center gap-2"
                             @click="launchGame"
                         >
-                            <span>▶</span><span>Quick launch</span>
+                            <span>▶</span><span>{{ $t('Quick launch') }}</span>
                         </button>
                         <div class="my-1 border-t border-white/[0.06]"></div>
                         <button
@@ -711,7 +720,7 @@
                             class="w-full text-left px-3 py-1.5 text-sm text-neutral-200 hover:bg-white/5 truncate"
                             :title="p.args"
                             @click="launchProfile(p.args)"
-                        >{{ p.name || '(unnamed profile)' }}</button>
+                        >{{ p.name || $t('(unnamed profile)') }}</button>
                     </div>
                 </div>
 
@@ -724,7 +733,7 @@
                     :class="route.name === 'notifications'
                         ? 'bg-white/10 text-neutral-100 font-semibold'
                         : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
-                    title="Notifications"
+                    :title="$t('Notifications')"
                 >
                     <span>🔔</span>
                     <span
@@ -742,17 +751,17 @@
                     class="px-3 py-1.5 rounded text-sm transition-colors text-neutral-400 hover:text-neutral-200 hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed"
                     :disabled="!config.me?.mdd_id"
                     :title="config.me?.mdd_id
-                        ? `Open profile of ${config.me?.plain_name || config.me?.name} on defrag.racing`
-                        : 'Profile link unavailable - paste a token in Settings'"
+                        ? $t('Open :name on defrag.racing', { name: config.me?.plain_name || config.me?.name || '' })
+                        : $t('Profile link unavailable - paste a token in Settings')"
                     @click="openProfile"
-                >Profile</button>
+                >{{ $t('Profile') }}</button>
                 <RouterLink
                     :to="{ name: 'settings' }"
                     class="px-3 py-1.5 rounded text-sm transition-colors"
                     :class="route.name === 'settings'
                         ? 'bg-white/10 text-neutral-100 font-semibold'
                         : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'"
-                >Settings</RouterLink>
+                >{{ $t('Settings') }}</RouterLink>
             </div>
         </nav>
 
@@ -783,7 +792,7 @@
             </KeepAlive>
         </RouterView>
         <div v-else class="flex-1 flex items-center justify-center text-sm text-neutral-500">
-            Loading…
+            {{ $t('Loading…') }}
         </div>
 
         <!-- Drop a demo anywhere on the window. Above every tab because the
@@ -800,10 +809,9 @@
                     : 'border-brand-500 bg-brand-500/10'"
             >
                 <template v-if="dropRefusal">
-                    <p class="text-base font-semibold text-neutral-200">That is not a demo</p>
+                    <p class="text-base font-semibold text-neutral-200">{{ $t('That is not a demo') }}</p>
                     <p class="mt-2 text-sm text-neutral-400">
-                        Drop a Quake&nbsp;3 demo file here - the ones ending in
-                        <span class="font-mono text-neutral-300">.dm_68</span>.
+                        {{ $t('Drop a Quake 3 demo file here - the ones ending in :extension.', { extension: '.dm_68' }) }}
                     </p>
                 </template>
                 <template v-else-if="dropHint">
@@ -827,7 +835,7 @@
             <div class="w-full max-w-xl my-auto bg-neutral-900 border border-brand-500/30 rounded-lg shadow-2xl overflow-hidden">
                 <div class="px-5 py-3 border-b border-white/10 flex items-center gap-2">
                     <span class="text-brand-400">🎮</span>
-                    <div class="font-semibold text-neutral-100">Join server?</div>
+                    <div class="font-semibold text-neutral-100">{{ $t('Join server?') }}</div>
                 </div>
 
                 <div class="p-5 space-y-3">
@@ -835,7 +843,7 @@
                     <div v-if="pendingServer" class="flex items-start gap-4">
                         <button
                             class="w-36 h-24 rounded bg-black/40 border border-white/10 overflow-hidden flex-shrink-0 hover:border-brand-500/40"
-                            :title="`Open ${pendingServer.map} on defrag.racing`"
+                            :title="$t('Open :map on defrag.racing', { map: pendingServer.map })"
                             @click="openServerMap(pendingServer.map)"
                         >
                             <img
@@ -846,7 +854,7 @@
                                 loading="lazy"
                             />
                             <div v-else class="w-full h-full flex items-center justify-center text-[10px] text-neutral-600 uppercase">
-                                no map
+                                {{ $t('no map') }}
                             </div>
                         </button>
 
@@ -882,14 +890,14 @@
                                 <span class="font-mono">{{ pendingServer.ip }}:{{ pendingServer.port }}</span>
                                 <span class="text-neutral-600">·</span>
                                 <span class="text-neutral-300 font-semibold">{{ playerCountOf(pendingServer) }}</span>
-                                <span>player{{ playerCountOf(pendingServer) === 1 ? '' : 's' }}</span>
+                                <span>{{ playerCountOf(pendingServer) === 1 ? $t('player') : $t('players') }}</span>
                             </div>
 
                             <!-- Your PB on this map, if any. -->
                             <div v-if="pendingServer.mytime_time" class="text-xs text-emerald-300/85">
-                                Your PB: <strong class="font-mono">{{ formatTimeMs(pendingServer.mytime_time) }}</strong>
+                                {{ $t('Your PB:') }} <strong class="font-mono">{{ formatTimeMs(pendingServer.mytime_time) }}</strong>
                                 <span v-if="pendingServer.myrank_position && pendingServer.myrank_total" class="text-emerald-300/60 ml-1">
-                                    (rank {{ pendingServer.myrank_position }} / {{ pendingServer.myrank_total }})
+                                    {{ $t('(rank :position of :total)', { position: pendingServer.myrank_position, total: pendingServer.myrank_total }) }}
                                 </span>
                             </div>
 
@@ -900,7 +908,7 @@
                             >
                                 <span class="text-yellow-500">★</span>
                                 <span class="font-mono">{{ formatTimeMs(pendingServer.besttime_time) }}</span>
-                                <span class="text-neutral-500">by</span>
+                                <span class="text-neutral-500">{{ $t('by') }}</span>
                                 <img
                                     v-if="flagUrlOf(pendingServer.besttime_country)"
                                     :src="flagUrlOf(pendingServer.besttime_country)!"
@@ -924,7 +932,7 @@
                         v-if="pendingServer && (pendingServer.online_players?.length ?? 0) > 0"
                         class="flex flex-wrap gap-x-3 gap-y-1 text-xs pt-1 border-t border-white/[0.04]"
                     >
-                        <span class="text-neutral-500 uppercase text-[10px] tracking-wider w-full">Players online</span>
+                        <span class="text-neutral-500 uppercase text-[10px] tracking-wider w-full">{{ $t('Players online') }}</span>
                         <span
                             v-for="(p, idx) in (pendingServer.online_players ?? [])"
                             :key="`pending-player-${idx}`"
@@ -947,10 +955,10 @@
 
                     <!-- Fallback: server not in live list. -->
                     <div v-if="!pendingServer" class="text-sm">
-                        <div class="text-neutral-300 mb-1">Connect to</div>
+                        <div class="text-neutral-300 mb-1">{{ $t('Connect to') }}</div>
                         <div class="font-mono text-brand-300 text-base">{{ pendingDeepLink.address }}</div>
                         <div class="text-xs text-neutral-500 mt-1">
-                            Server isn't in the live list - private, off-list, or your token can't reach the server browser.
+                            {{ $t("Server isn't in the live list - private, off-list, or your token can't reach the server browser.") }}
                         </div>
                     </div>
 
@@ -958,7 +966,7 @@
                         <button
                             class="hover:underline text-neutral-400 hover:text-neutral-200"
                             @click="openAutoConnectSetting"
-                        >Skip this confirmation next time →</button>
+                        >{{ $t('Skip this confirmation next time →') }}</button>
                     </div>
 
                     <p v-if="connectError" class="text-xs text-red-300">{{ connectError }}</p>
@@ -968,12 +976,12 @@
                     <button
                         class="px-3 py-1.5 rounded bg-white/5 hover:bg-white/10 text-neutral-300 text-sm"
                         @click="cancelConnect"
-                    >Dismiss</button>
+                    >{{ $t('Dismiss') }}</button>
                     <button
                         class="px-4 py-1.5 rounded bg-brand-500/30 hover:bg-brand-500/40 text-brand-200 font-semibold text-sm disabled:opacity-50"
                         :disabled="connecting"
                         @click="confirmConnect"
-                    >{{ connecting ? 'Launching…' : 'Connect' }}</button>
+                    >{{ connecting ? $t('Launching…') : $t('Connect') }}</button>
                 </div>
             </div>
         </div>
@@ -986,7 +994,7 @@
             class="fixed bottom-4 left-1/2 -translate-x-1/2 z-[90] max-w-md w-[calc(100%-2rem)] px-4 py-3 rounded-lg bg-red-500/15 border border-red-500/30 text-xs text-red-200 flex items-center gap-2 shadow-xl backdrop-blur"
         >
             <span class="flex-1">
-                Couldn't open <code class="font-mono">{{ deepLinkError.url }}</code> - {{ deepLinkError.error }}
+                {{ $t("Couldn't open :url", { url: deepLinkError.url }) }} - {{ deepLinkError.error }}
             </span>
             <button class="text-neutral-300 hover:text-neutral-100" @click="dismissDeepLinkError">×</button>
         </div>

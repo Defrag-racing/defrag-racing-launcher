@@ -21,6 +21,10 @@ export interface LauncherConfig {
      *  without anything being rewritten. Written through `setDemoFolder`, not
      *  by hand. */
     folders: WatchedFolder[];
+    /** Interface language as a two-letter code, or null to follow the system.
+     *  Null rather than 'en': somebody on a Czech Windows did not choose
+     *  English, they just never opened Settings. */
+    language: string | null;
     /** Master switch for desktop notifications. On by default: the launcher
      *  lives minimised behind a fullscreen game, and a message nobody sees
      *  until the next alt-tab arrived too late. */

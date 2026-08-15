@@ -14,6 +14,7 @@ export const useConfigStore = defineStore('config', () => {
         auto_upload_enabled: false,
         include_subfolders: false,
         folders: [],
+        language: null,
         notify_enabled: true,
         notify_comps: true,
         notify_records: true,

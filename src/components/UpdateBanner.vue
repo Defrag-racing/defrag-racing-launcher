@@ -15,6 +15,7 @@
     import { getVersion } from '@tauri-apps/api/app';
     import { useUpdaterStore } from '../stores/updater';
     import { fetchChangelogSince, renderMarkdown, type ChangelogSection } from '../lib/changelog';
+    import { t } from '../lib/i18n';
 
     const updater = useUpdaterStore();
 
@@ -36,7 +37,7 @@
             whatsNewInstalled.value = installed;
             whatsNewSections.value = await fetchChangelogSince(installed);
         } catch (e: any) {
-            whatsNewError.value = e?.toString?.() ?? 'Failed to load changelog';
+            whatsNewError.value = e?.toString?.() ?? t('Failed to load changelog');
         } finally {
             whatsNewLoading.value = false;
         }
@@ -51,19 +52,19 @@
         class="border-b border-brand-500/20 bg-brand-500/10 text-xs text-brand-300 flex-shrink-0"
     >
         <div class="px-5 py-2 flex items-center gap-3">
-            <span>Update <strong>v{{ updater.state.version }}</strong> is available.</span>
+            <span>{{ $t('Update :version is available.', { version: `v${updater.state.version}` }) }}</span>
             <button class="ml-auto px-2 py-0.5 rounded bg-white/5 hover:bg-white/10" @click="toggleWhatsNew">
-                {{ whatsNewOpen ? 'Hide changes' : 'View changes' }}
+                {{ whatsNewOpen ? $t('Hide changes') : $t('View changes') }}
             </button>
             <button class="px-2 py-0.5 rounded bg-brand-500/20 hover:bg-brand-500/30 font-semibold" @click="installUpdate">
-                Install &amp; restart
+                {{ $t('Install and restart') }}
             </button>
         </div>
         <div v-if="whatsNewOpen" class="px-5 py-3 border-t border-brand-500/20 bg-black/30 max-h-72 overflow-y-auto">
-            <div v-if="whatsNewLoading" class="text-neutral-400">Loading changelog…</div>
+            <div v-if="whatsNewLoading" class="text-neutral-400">{{ $t('Loading changelog…') }}</div>
             <div v-else-if="whatsNewError" class="text-red-300">{{ whatsNewError }}</div>
             <div v-else-if="whatsNewSections.length === 0" class="text-neutral-400">
-                Nothing newer than v{{ whatsNewInstalled }} in the changelog yet.
+                {{ $t('Nothing newer than :version in the changelog yet.', { version: `v${whatsNewInstalled}` }) }}
             </div>
             <div v-else class="space-y-4">
                 <section v-for="s in whatsNewSections" :key="s.version">
@@ -74,12 +75,12 @@
         </div>
     </div>
     <div v-else-if="updater.state.kind === 'downloading'" class="px-5 py-2 border-b border-brand-500/20 bg-brand-500/10 text-xs text-brand-300 flex-shrink-0">
-        Downloading update… {{ updater.state.percent }}%
+        {{ $t('Downloading update…') }} {{ updater.state.percent }}%
     </div>
     <div v-else-if="updater.state.kind === 'installing'" class="px-5 py-2 border-b border-brand-500/20 bg-brand-500/10 text-xs text-brand-300 flex-shrink-0">
-        Installing… the launcher will restart in a moment.
+        {{ $t('Installing… the launcher will restart in a moment.') }}
     </div>
     <div v-else-if="updater.state.kind === 'error'" class="px-5 py-2 border-b border-red-500/20 bg-red-500/10 text-xs text-red-300 flex-shrink-0">
-        Update failed: {{ updater.state.message }}
+        {{ $t('Update failed:') }} {{ updater.state.message }}
     </div>
 </template>

@@ -54,6 +54,14 @@ pub struct Config {
     #[serde(default)]
     pub folders: Vec<crate::folders::WatchedFolder>,
 
+    /// Interface language as a two-letter code, or `None` to follow the
+    /// system. `None` rather than a default of "en": somebody on a Czech
+    /// Windows did not choose English, they just never opened Settings, and a
+    /// launcher that opens in a language you cannot read is a launcher whose
+    /// Settings you cannot find.
+    #[serde(default)]
+    pub language: Option<String>,
+
     /// Desktop notifications master switch. On by default: the launcher spends
     /// its life minimised behind a fullscreen game, and everything it has to
     /// say is time-sensitive - a round that just opened, a demo waiting for an
@@ -182,6 +190,7 @@ impl Default for Config {
             auto_upload_enabled: false,
             include_subfolders: false,
             folders: Vec::new(),
+            language: None,
             notify_enabled: true,
             notify_comps: true,
             notify_records: true,

@@ -31,11 +31,11 @@
             class="bg-black/40 px-1.5 py-0.5 rounded text-neutral-300 truncate max-w-[220px]"
             :title="full"
         >{{ snippet }}</code>
-        <span v-else class="text-amber-300/90 flex-shrink-0">folder not set</span>
+        <span v-else class="text-amber-300/90 flex-shrink-0">{{ $t('folder not set') }}</span>
         <button
             class="flex-shrink-0 text-brand-400 hover:text-brand-300 hover:underline"
-            :title="isSet ? `Watching ${full} - click to change it in Settings` : 'Set your demos folder in Settings'"
+            :title="isSet ? $t('Watching :folder - click to change it in Settings', { folder: full }) : $t('Set your demos folder in Settings')"
             @click="openSettings"
-        >{{ isSet ? 'Change in Settings →' : 'Set folder →' }}</button>
+        >{{ isSet ? $t('Change in Settings →') : $t('Set folder →') }}</button>
     </div>
 </template>

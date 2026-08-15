@@ -10,6 +10,8 @@
     import { useConfigStore } from '../stores/config';
     import { useUpdaterStore } from '../stores/updater';
     import { displayPath } from '../lib/path';
+    import { LANGUAGES, locale, resolveLocale, setLocale } from '../lib/i18n';
+    import { locale as osLocale } from '@tauri-apps/plugin-os';
 
     const router = useRouter();
     const route = useRoute();
@@ -218,6 +220,19 @@
         }
     };
 
+    // ---- language ---------------------------------------------------
+    // 'system' is a real choice, not a blank: it means "keep following this
+    // PC", which is different from having picked English and different again
+    // from never having looked. Stored as null so a machine that changes its
+    // system language later follows it.
+    const languageChoice = computed(() => config.config.language ?? 'system');
+
+    const setLanguage = async (code: string) => {
+        const saved = code === 'system' ? null : code;
+        await config.save({ language: saved });
+        setLocale(resolveLocale(saved, await osLocale().catch(() => null)));
+    };
+
     const pickDemos = async () => {
         const picked = await openDialog({ multiple: false, directory: true });
         if (typeof picked === 'string') {
@@ -409,6 +424,30 @@
         </header>
 
         <div class="flex-1 overflow-auto p-5 space-y-4 max-w-2xl w-full">
+            <!-- Language. First on the page, because it decides how everything
+                 below it reads. -->
+            <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
+                <div class="flex items-start justify-between gap-3">
+                    <div>
+                        <div class="font-semibold">{{ $t('Language') }}</div>
+                        <div class="text-xs text-neutral-500 mt-0.5">
+                            {{ $t('The launcher follows your system language unless you pick one here.') }}
+                        </div>
+                    </div>
+                    <select
+                        class="bg-black/60 border border-white/10 rounded px-2 py-1.5 text-sm text-neutral-200 focus:border-brand-500/60 focus:outline-none"
+                        :value="languageChoice"
+                        @change="setLanguage(($event.target as HTMLSelectElement).value)"
+                    >
+                        <option value="system">{{ $t('Same as my system') }}</option>
+                        <option v-for="l in LANGUAGES" :key="l.code" :value="l.code">{{ l.label }}</option>
+                    </select>
+                </div>
+                <p v-if="locale !== 'en'" class="text-xs text-neutral-500">
+                    {{ $t('Anything not translated yet stays in English.') }}
+                </p>
+            </section>
+
             <!-- Engine -->
             <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
                 <div class="flex items-start justify-between gap-3">
