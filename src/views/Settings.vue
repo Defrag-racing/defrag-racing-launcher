@@ -3,7 +3,7 @@
     import { useRoute, useRouter } from 'vue-router';
     import { open as openDialog } from '@tauri-apps/plugin-dialog';
     import { openExternal } from '../lib/open';
-    import { tauri, type CompsMode, type DemoAssocStatus, type EngineCandidate, type HealthItem, type LaunchProfile } from '../lib/tauri';
+    import { tauri, type CompsMode, type DemoAssocStatus, type DemoFolderEntry, type EngineCandidate, type HealthItem, type LaunchProfile } from '../lib/tauri';
     import TokenFeatureList from '../components/TokenFeatureList.vue';
     import TokenFreeFeatures from '../components/TokenFreeFeatures.vue';
     import UpdateBanner from '../components/UpdateBanner.vue';
@@ -32,6 +32,9 @@
         // Re-mirror developer-mode fields from the store on every entry so
         // an external change (e.g. a Reset) is reflected.
         syncDevFromConfig();
+        // Folders are read off disk, so re-entering Settings after making one
+        // in Explorer shows it without a restart.
+        void loadFolders();
         const target = route.query.highlight;
         if (target !== 'demos' && target !== 'token') return;
         // Same one-shot pulse + scroll for the token card - the Servers /
@@ -131,6 +134,7 @@
         // catches the case where the user removed the registration
         // manually (Task Manager → Startup) outside the launcher.
         autostart.value = await tauri.isAutostartEnabled();
+        void loadFolders();
     });
 
     // --- developer mode: custom launch args + named launch profiles -----
@@ -218,7 +222,61 @@
         const picked = await openDialog({ multiple: false, directory: true });
         if (typeof picked === 'string') {
             await config.save({ demos_path: picked });
+            void loadFolders();
         }
+    };
+
+    // ---- per-folder backup / visibility -----------------------------
+    // The list is walked off disk on demand rather than kept in the config:
+    // folders appear and disappear without telling us, and the config holds
+    // only the answers that differ from the default.
+    const folders = ref<DemoFolderEntry[]>([]);
+    const foldersLoading = ref(false);
+    const foldersError = ref<string | null>(null);
+    /** Which folder is mid-write, so its two switches can't be double-clicked. */
+    const folderBusy = ref<string | null>(null);
+
+    const loadFolders = async () => {
+        if (! config.config.include_subfolders || ! config.config.demos_path) {
+            folders.value = [];
+            return;
+        }
+        foldersLoading.value = true;
+        foldersError.value = null;
+        try {
+            folders.value = await tauri.listDemoFolders();
+        } catch (e: any) {
+            foldersError.value = e?.toString?.() ?? 'Could not read your demos folder';
+            folders.value = [];
+        } finally {
+            foldersLoading.value = false;
+        }
+    };
+
+    const setFolder = async (f: DemoFolderEntry, patch: { sync?: boolean; visible?: boolean }) => {
+        if (folderBusy.value) return;
+        folderBusy.value = f.path;
+        foldersError.value = null;
+        try {
+            // The whole list comes back: switching a parent off moves every
+            // child that was inheriting from it, and those rows have to
+            // redraw too.
+            folders.value = await tauri.setDemoFolder(
+                f.path,
+                patch.sync ?? f.sync,
+                patch.visible ?? f.visible,
+            );
+            await config.refresh();
+        } catch (e: any) {
+            foldersError.value = e?.toString?.() ?? 'Could not save that';
+        } finally {
+            folderBusy.value = null;
+        }
+    };
+
+    const toggleSubfolders = async (on: boolean) => {
+        await config.save({ include_subfolders: on });
+        await loadFolders();
     };
 
     const saveToken = async () => {
@@ -426,11 +484,79 @@
                             type="checkbox"
                             class="sr-only peer"
                             :checked="config.config.include_subfolders"
-                            @change="config.save({ include_subfolders: ($event.target as HTMLInputElement).checked })"
+                            @change="toggleSubfolders(($event.target as HTMLInputElement).checked)"
                         />
                         <div class="w-10 h-5 bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors"></div>
                         <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
                     </label>
+                </div>
+
+                <!-- Per-folder answers. Only when subfolders are watched at
+                     all - with that switch off there is nothing here to
+                     decide, and an empty list would just look broken. -->
+                <div v-if="config.config.include_subfolders" class="pt-3 border-t border-white/[0.05]">
+                    <div class="text-sm font-medium">Your folders</div>
+                    <div class="text-xs text-neutral-500 mt-0.5">
+                        Everything is backed up and listed unless you say otherwise here. A folder of
+                        somebody else's demos can stay off your account; an archive can stay backed up
+                        and out of the way. Subfolders follow their parent unless you change them too.
+                    </div>
+
+                    <p v-if="foldersError" class="mt-2 text-xs text-red-300">{{ foldersError }}</p>
+                    <p v-else-if="foldersLoading && !folders.length" class="mt-3 text-xs text-neutral-500">
+                        Reading your demos folder…
+                    </p>
+                    <p v-else-if="!folders.length" class="mt-3 text-xs text-neutral-500">
+                        No subfolders in <span class="text-neutral-400">{{ displayPath(config.config.demos_path) }}</span>.
+                    </p>
+
+                    <div v-else class="mt-3 space-y-1">
+                        <div class="flex items-center gap-3 px-1 text-[11px] uppercase tracking-wide text-neutral-500">
+                            <span class="flex-1">Folder</span>
+                            <span class="w-16 text-center">Back up</span>
+                            <span class="w-16 text-center">Show</span>
+                        </div>
+                        <div
+                            v-for="f in folders"
+                            :key="f.path"
+                            class="flex items-center gap-3 py-1.5 px-1 rounded hover:bg-white/[0.03]"
+                            :class="{ 'opacity-60': !f.visible && !f.sync }"
+                        >
+                            <div class="flex-1 min-w-0" :style="{ paddingLeft: `${(f.depth - 1) * 14}px` }">
+                                <div class="text-sm text-neutral-200 truncate" :title="f.path">
+                                    <span class="text-neutral-600">{{ f.depth > 1 ? '└ ' : '' }}</span>{{ f.name }}
+                                </div>
+                                <div class="text-[11px] text-neutral-500">
+                                    {{ f.demos === 1 ? '1 demo' : `${f.demos} demos` }}
+                                    <span v-if="f.inherited && (!f.sync || !f.visible)" class="text-neutral-600">
+                                        · following its parent
+                                    </span>
+                                </div>
+                            </div>
+                            <label class="w-16 relative inline-flex items-center justify-center cursor-pointer" :title="f.sync ? 'Backed up to defrag.racing' : 'Not backed up'">
+                                <input
+                                    type="checkbox"
+                                    class="sr-only peer"
+                                    :checked="f.sync"
+                                    :disabled="folderBusy !== null"
+                                    @change="setFolder(f, { sync: ($event.target as HTMLInputElement).checked })"
+                                />
+                                <span class="w-9 h-[18px] bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors block"></span>
+                                <span class="absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform peer-checked:translate-x-[18px]"></span>
+                            </label>
+                            <label class="w-16 relative inline-flex items-center justify-center cursor-pointer" :title="f.visible ? 'Shown in the Demos list' : 'Hidden from the Demos list'">
+                                <input
+                                    type="checkbox"
+                                    class="sr-only peer"
+                                    :checked="f.visible"
+                                    :disabled="folderBusy !== null"
+                                    @change="setFolder(f, { visible: ($event.target as HTMLInputElement).checked })"
+                                />
+                                <span class="w-9 h-[18px] bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors block"></span>
+                                <span class="absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform peer-checked:translate-x-[18px]"></span>
+                            </label>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- CPU throttle -->

@@ -16,6 +16,11 @@ export interface LauncherConfig {
     demos_path: string | null;
     auto_upload_enabled: boolean;
     include_subfolders: boolean;
+    /** Subfolders whose answer differs from what they would inherit. Only the
+     *  exceptions are stored, so a folder created next month is included
+     *  without anything being rewritten. Written through `setDemoFolder`, not
+     *  by hand. */
+    folders: WatchedFolder[];
     auto_update_enabled: boolean;
     /** Target CPU% for the hashing worker. 0 = no throttle. */
     cpu_throttle_pct: number;
@@ -45,6 +50,31 @@ export interface LauncherConfig {
 }
 
 export type CompsMode = 'ask' | 'auto' | 'off';
+
+/** A subfolder of the demos folder the user has changed something about. */
+export interface WatchedFolder {
+    /** Relative to the demos folder, `/`-separated. */
+    path: string;
+    /** Back its demos up to defrag.racing. */
+    sync: boolean;
+    /** Show its demos in the Demos list. */
+    visible: boolean;
+}
+
+/** A subfolder as it exists on disk right now, with the answer in force. */
+export interface DemoFolderEntry {
+    path: string;
+    /** The folder's own name - the UI indents rather than repeating parents. */
+    name: string;
+    /** 1 for a direct child of the demos folder. */
+    depth: number;
+    /** Demos directly in this folder, not counting deeper ones. */
+    demos: number;
+    sync: boolean;
+    visible: boolean;
+    /** True when the folder is following its parent rather than its own rule. */
+    inherited: boolean;
+}
 
 export interface EngineCandidate {
     kind: 'odfe' | 'idfe' | 'other';
@@ -352,6 +382,16 @@ export const tauri = {
      *  with its known hash + demo_id from uploaded.json when
      *  available. Reads FS directly, no server call. */
     listDemos: () => invoke<DemoLibraryEntry[]>('list_demos'),
+
+    /** Every subfolder under the demos folder, with whether it is backed up
+     *  and whether it is listed. Walked off disk on each call - folders come
+     *  and go without telling us. */
+    listDemoFolders: () => invoke<DemoFolderEntry[]>('list_demo_folders'),
+
+    /** Set one folder's answer. Returns the whole list, because one change can
+     *  move several rows: a parent switched off carries its children with it. */
+    setDemoFolder: (path: string, sync: boolean, visible: boolean) =>
+        invoke<DemoFolderEntry[]>('set_demo_folder', { path, sync, visible }),
 
     /** Notifications feed for the bell badge + Notifications tab.
      *  Records (PB beats / WR takes) + system (render done, etc.)

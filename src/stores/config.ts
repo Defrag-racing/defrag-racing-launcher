@@ -13,6 +13,7 @@ export const useConfigStore = defineStore('config', () => {
         demos_path: null,
         auto_upload_enabled: false,
         include_subfolders: false,
+        folders: [],
         auto_update_enabled: true,
         cpu_throttle_pct: 15,
         deep_link_auto_connect: false,

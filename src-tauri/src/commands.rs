@@ -53,6 +53,10 @@ pub struct AppState {
     /// so the Comps tab works with the watcher stopped, and so a held demo
     /// keeps its round across a Stop+Start.
     pub comps: Arc<CompsState>,
+    /// Which subfolders of the demos folder are backed up and which are listed.
+    /// Shared rather than handed to the watcher at start, so switching a folder
+    /// off takes effect on the next demo instead of on the next Stop+Start.
+    pub folders: Arc<crate::folders::FolderState>,
     /// A demo file the OS handed us - "Play in Defrag Launcher" from the
     /// context menu, or a double-click when we are the default program.
     ///
@@ -82,6 +86,8 @@ impl Default for AppState {
         if let Ok(cfg) = Config::load() {
             comps.set_mode(cfg.comps_mode);
         }
+        let folders = Arc::new(crate::folders::FolderState::default());
+        folders.reload();
         Self {
             watcher: Mutex::new(None),
             upload_state,
@@ -91,6 +97,7 @@ impl Default for AppState {
             session_tracker,
             demo_player: crate::demo_player::DemoPlayer::default(),
             comps,
+            folders,
             pending_open_demo: Mutex::new(None),
         }
     }
@@ -119,7 +126,12 @@ pub fn save_config(app: AppHandle, cfg: Config) -> Result<(), String> {
     use tauri::Manager;
     let state: State<AppState> = app.state();
     state.comps.set_mode(cfg.comps_mode);
-    cfg.save().map_err(err_to_string)
+    let saved = cfg.save().map_err(err_to_string);
+    // After the write, so the shared copy can never be ahead of the file. A
+    // changed demos folder or subfolder switch has to reach the watcher, and
+    // this is the one place every config change passes through.
+    state.folders.reload();
+    saved
 }
 
 #[tauri::command]
@@ -820,6 +832,12 @@ pub fn list_demos(state: State<'_, AppState>) -> Result<Vec<DemoLibraryEntry>, S
         if in_temp {
             continue;
         }
+        // A folder the user has hidden. Its demos are still on disk and, unless
+        // they also turned sync off, still backed up - hidden means out of this
+        // list, not out of the launcher.
+        if !state.folders.allows_listing(&p) {
+            continue;
+        }
         let meta = match std::fs::metadata(&p) {
             Ok(m) => m,
             Err(_) => continue,
@@ -876,6 +894,133 @@ pub fn list_demos(state: State<'_, AppState>) -> Result<Vec<DemoLibraryEntry>, S
 
     entries.sort_by(|a, b| b.mtime.cmp(&a.mtime));
     Ok(entries)
+}
+
+/// One subfolder of the demos folder, with what the launcher currently does
+/// about it.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DemoFolderEntry {
+    /// Relative to the demos folder, `/`-separated, in its real spelling on
+    /// disk. The rule it maps to is keyed off a lowercased form of this.
+    pub path: String,
+    /// Just the folder's own name, so the UI can indent a tree instead of
+    /// repeating every parent on every row.
+    pub name: String,
+    /// 1 for a direct child of the demos folder.
+    pub depth: usize,
+    /// Demos sitting directly in this folder, not counting deeper ones.
+    pub demos: usize,
+    pub sync: bool,
+    pub visible: bool,
+    /// False when this folder is simply following its parent. Lets the UI say
+    /// "off because `old` is off" rather than showing a switch the user does
+    /// not remember touching.
+    pub inherited: bool,
+}
+
+/// Every subfolder under the demos folder, with its sync/visible answer.
+///
+/// Walked fresh rather than remembered: folders appear and disappear without
+/// telling us, and the config deliberately holds only the exceptions, so it is
+/// not a list of what exists.
+#[tauri::command]
+pub fn list_demo_folders() -> Result<Vec<DemoFolderEntry>, String> {
+    use std::collections::BTreeMap;
+
+    let cfg = Config::load().map_err(err_to_string)?;
+    let root = cfg
+        .demos_path
+        .clone()
+        .ok_or_else(|| "Demos path is not set".to_string())?;
+    if !root.is_dir() {
+        return Err(format!("Demos path {:?} does not exist", root));
+    }
+    let root = crate::cache::normalize(&root);
+
+    // Quake writes the demo it is recording into `temp/` and renames it out on
+    // stop-record, so that folder is machinery rather than something the user
+    // organised. Never offered as a choice - see watcher::is_in_temp_subfolder.
+    let in_temp = |rel: &str| {
+        rel.split(['/', '\\'])
+            .any(|s| s.eq_ignore_ascii_case("temp"))
+    };
+
+    // Every folder that exists, plus how many demos sit directly in each. Both
+    // come out of one walk - a second pass per folder would open the same
+    // directories again for no reason.
+    let mut found: BTreeMap<String, String> = BTreeMap::new(); // key -> real spelling
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+
+    for entry in walkdir::WalkDir::new(&root)
+        .follow_links(false)
+        .min_depth(1)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        let Some(rel) = crate::folders::relative_to(&root, entry.path()) else { continue };
+        let rel = rel.replace('\\', "/");
+        if rel.is_empty() || in_temp(&rel) {
+            continue;
+        }
+        if entry.file_type().is_dir() {
+            found.insert(crate::folders::key(&rel), rel);
+        } else if entry.file_type().is_file() {
+            let is_demo = entry
+                .path()
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|s| s.to_ascii_lowercase().starts_with("dm_"))
+                .unwrap_or(false);
+            if !is_demo {
+                continue;
+            }
+            let folder = match rel.rfind('/') {
+                Some(i) => &rel[..i],
+                None => continue, // a demo in the root folder belongs to no subfolder
+            };
+            *counts.entry(crate::folders::key(folder)).or_insert(0) += 1;
+        }
+    }
+
+    Ok(found
+        .into_iter()
+        .map(|(k, rel)| {
+            let (sync, visible, explicit) = crate::folders::effective(&cfg.folders, &k);
+            DemoFolderEntry {
+                name: rel.rsplit('/').next().unwrap_or(&rel).to_string(),
+                depth: crate::folders::depth(&rel),
+                demos: counts.get(&k).copied().unwrap_or(0),
+                sync,
+                visible,
+                inherited: !explicit,
+                path: rel,
+            }
+        })
+        .collect())
+}
+
+/// Set one folder's answer and return the whole list as it now stands.
+///
+/// The list comes back rather than the caller re-fetching, because one change
+/// can move several rows: switching a parent off follows through to every
+/// child that was inheriting from it.
+#[tauri::command]
+pub fn set_demo_folder(
+    app: AppHandle,
+    path: String,
+    sync: bool,
+    visible: bool,
+) -> Result<Vec<DemoFolderEntry>, String> {
+    use tauri::Manager;
+
+    let mut cfg = Config::load().map_err(err_to_string)?;
+    crate::folders::apply(&mut cfg.folders, &path, sync, visible);
+    cfg.save().map_err(err_to_string)?;
+
+    let state: State<AppState> = app.state();
+    state.folders.reload();
+
+    list_demo_folders()
 }
 
 #[tauri::command]

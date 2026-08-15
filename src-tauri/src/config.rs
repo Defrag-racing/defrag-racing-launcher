@@ -47,6 +47,13 @@ pub struct Config {
     #[serde(default)]
     pub include_subfolders: bool,
 
+    /// Subfolders the user has changed something about: not backed up, not
+    /// listed, or both. Only exceptions are stored - see `folders.rs` for why
+    /// that, rather than a full inventory, is the shape that survives a folder
+    /// being created next month. Ignored while `include_subfolders` is off.
+    #[serde(default)]
+    pub folders: Vec<crate::folders::WatchedFolder>,
+
     /// Auto-update opt-in. On by default - security fixes need to reach
     /// users without them having to remember to check Releases. Users
     /// can flip it off in Settings if they want manual control over
@@ -151,6 +158,7 @@ impl Default for Config {
             demos_path: None,
             auto_upload_enabled: false,
             include_subfolders: false,
+            folders: Vec::new(),
             auto_update_enabled: true,
             cpu_throttle_pct: DEFAULT_CPU_THROTTLE_PCT,
             deep_link_auto_connect: false,

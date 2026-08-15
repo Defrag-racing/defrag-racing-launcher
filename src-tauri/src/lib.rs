@@ -6,8 +6,9 @@ mod config;
 mod demo_meta;
 mod demo_player;
 mod engine;
-mod file_assoc;
 mod engine_video;
+mod file_assoc;
+mod folders;
 mod hashing;
 mod history;
 mod offline_maps;
@@ -316,6 +317,8 @@ pub fn run() {
             commands::get_maps,
             commands::get_me,
             commands::list_demos,
+            commands::list_demo_folders,
+            commands::set_demo_folder,
             commands::get_notifications,
             commands::get_notifications_unread_count,
             commands::request_render,

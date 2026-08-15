@@ -1125,6 +1125,22 @@ async fn handle_file(
     // answers a held demo, that answer is about this file specifically and has
     // to reach the server even though the file has been seen before.
     if decision == CompsDecision::Guard {
+        // A folder the user turned backup off for. Read from the shared state
+        // rather than from the config on disk: this runs per file, and the
+        // answer has to change the moment the switch is flipped, not on the
+        // next Stop+Start.
+        //
+        // Only on the automatic pass. The other decisions come from the user
+        // answering a held demo about that one file, and a folder rule is not
+        // an argument against something they just asked for.
+        {
+            use tauri::Manager;
+            let app_state: tauri::State<crate::commands::AppState> = app.state();
+            if !app_state.folders.allows_sync(&path) {
+                return;
+            }
+        }
+
         // Skip files already confirmed backed up earlier THIS session. The
         // session-wide `handled` set (unlike the QUEUE_CAP-bounded visible
         // queue) doesn't forget a file once it scrolls out of view, so the
