@@ -1,6 +1,6 @@
 [package]
 name = "defrag-launcher"
-version = "0.1.48"
+version = "0.1.49"
 description = "Demo backup + defrag:// launcher for defrag.racing"
 authors = ["defrag.racing"]
 edition = "2021"

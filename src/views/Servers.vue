@@ -45,10 +45,11 @@
     const hideEmpty = ref<boolean>(stored.hideEmpty ?? false);
     const sortKey = ref<SortKey>(stored.sortKey ?? 'popularity');
     const sortOrder = ref<SortOrder>(stored.sortOrder ?? 'desc');
-    // Rows read densely and fit more servers on screen; cards put the map
-    // picture first, which is how the website's /servers page reads and how
-    // most people pick a server when they are browsing rather than hunting.
-    const layout = ref<Layout>(stored.layout ?? 'rows');
+    // Cards by default: the map picture first, which is how the website's
+    // /servers page reads and how people pick a server when they are browsing
+    // rather than hunting for one they already know. Rows stay a click away
+    // for reading densely, and whichever you switch to is remembered.
+    const layout = ref<Layout>(stored.layout ?? 'cards');
 
     watch([search, gametype, physics, hideEmpty, sortKey, sortOrder, layout], () => {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({

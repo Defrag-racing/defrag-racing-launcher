@@ -4,6 +4,11 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.49
+
+- **Fixed: a demo opened from outside your Quake folder started plain Quake and asked for a CD key.** The launcher worked out which mod to run from the demo's own path - the first folder called `demos` above the file, and the folder above that is the mod. A demo archive kept in something like `D:\enterdemos\demos\...` therefore told the engine to run a mod called "enterdemos", which does not exist, so it ran none at all and sat on the stock menu. Which mod to run and where to find it now come from the engine you picked in Settings, and a demo that is not inside that install is copied where the install can see it before it plays. Right-click Open with, double-click and drag and drop all go through the same path, so all three were affected.
+- **The demo player writes what it launched to the log.** `startup.log` now gets a line per demo with the mod, the demo argument and the full command line, so a report of "it opened the wrong thing" can be answered from the file instead of guesswork.
+
 ## 0.1.48
 
 - **The launcher speaks your language.** Every screen, in Czech, German, Spanish, French, Dutch, Polish, Russian, Swedish and Ukrainian. It follows whatever your system is set to, and there is a language picker at the top of Settings if you want a different one. The only thing still in English is the text of notifications the website sends, which arrive already written.
