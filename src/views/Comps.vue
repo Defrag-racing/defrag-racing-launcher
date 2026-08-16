@@ -40,6 +40,10 @@
         error.value = null;
         try {
             data.value = force ? await tauri.refreshComps() : await tauri.getComps();
+            // Fill in any map the feed named without describing. Not awaited:
+            // the panel is already worth showing, and the pictures arrive into
+            // it as each answer comes back.
+            fillInMaps();
         } catch (e: any) {
             error.value = e?.toString?.() ?? t('Could not load comps');
         } finally {
@@ -107,8 +111,7 @@
             .map((p) => ({
                 physics: p,
                 map: maps[p] as string,
-                author: cards[p]?.author ?? null,
-                thumbnail: thumbnailUrl(cards[p]?.thumbnail),
+                ...describe(maps[p] as string, cards[p]?.author, cards[p]?.thumbnail),
                 entrants: playing.value?.entrants?.[p] ?? 0,
             }));
     });
@@ -147,8 +150,7 @@
             .map((p) => ({
                 physics: p,
                 map: decided[p].map as string,
-                author: decided[p].author,
-                thumbnail: thumbnailUrl(decided[p].thumbnail),
+                ...describe(decided[p].map as string, decided[p].author, decided[p].thumbnail),
                 votes: decided[p].votes ?? null,
                 byWildcard: decided[p].decided_by === 'wildcard',
             }));
@@ -161,8 +163,7 @@
         if (cards.length) {
             return cards.map((c) => ({
                 map: c.map ?? '',
-                author: c.author,
-                thumbnail: thumbnailUrl(c.thumbnail),
+                ...describe(c.map ?? '', c.author, c.thumbnail),
                 // One line per physics, minus any this map is barred from -
                 // a count under a physics it cannot win reads as a race it is
                 // losing.
@@ -171,10 +172,11 @@
                     .map((p) => ({ physics: p, count: c.votes?.[p] ?? 0 })),
             }));
         }
+        // A site too old to send the ballot as cards still names the maps,
+        // and the map list fills in the rest.
         return (voting.value?.candidates ?? []).map((map) => ({
             map,
-            author: null,
-            thumbnail: null,
+            ...describe(map),
             votes: [] as { physics: string; count: number }[],
         }));
     });
@@ -185,6 +187,69 @@
         if (!t) return null;
         if (t.startsWith('http://') || t.startsWith('https://')) return t;
         return `https://defrag.racing/storage/${t}`;
+    };
+
+    // ---- maps looked up by name -------------------------------------
+    // The comps feed only started carrying pictures and authors in August
+    // 2026, and a launcher is not much use waiting for a site to be updated -
+    // the map list has had both all along and is one request away. Anything
+    // the payload does not describe is looked up by name and remembered for
+    // the session, so a tab that is refreshed every minute asks once.
+    const lookedUp = ref<Record<string, { author: string | null; thumbnail: string | null }>>({});
+    const lookingUp = new Set<string>();
+
+    const lookUpMap = async (name: string) => {
+        const key = name.toLowerCase();
+        if (!name || lookingUp.has(key) || lookedUp.value[key]) return;
+        lookingUp.add(key);
+        try {
+            // The search is a substring match, so the exact name has to be
+            // picked back out of the page it comes in.
+            const page = await tauri.getMaps(1, name);
+            const hit = (page?.data ?? []).find((m) => m.name?.toLowerCase() === key);
+            if (hit) {
+                lookedUp.value = {
+                    ...lookedUp.value,
+                    [key]: { author: hit.author ?? null, thumbnail: hit.thumbnail ?? null },
+                };
+            }
+        } catch {
+            /* leave it undescribed - the row still shows the name */
+        } finally {
+            lookingUp.delete(key);
+        }
+    };
+
+    /** Whatever the payload knows, filled in from the map list where it does
+     *  not. */
+    const describe = (name: string, author?: string | null, thumbnail?: string | null) => {
+        const found = lookedUp.value[name?.toLowerCase() ?? ''];
+        return {
+            author: author ?? found?.author ?? null,
+            thumbnail: thumbnailUrl(thumbnail ?? found?.thumbnail),
+        };
+    };
+
+    /** Every map named anywhere in the payload, so the ones the site did not
+     *  describe can be filled in. */
+    const fillInMaps = () => {
+        const names: string[] = [];
+        const playingMaps = playing.value?.maps ?? {};
+        const cards = playing.value?.map_cards ?? {};
+        for (const p of physicsOrder) {
+            if (playingMaps[p] && !cards[p]?.thumbnail) names.push(playingMaps[p] as string);
+        }
+        const decided = voting.value?.decided ?? {};
+        for (const p of physicsOrder) {
+            if (decided[p]?.map && !decided[p]?.thumbnail) names.push(decided[p].map as string);
+        }
+        const ballot = voting.value?.candidate_maps ?? [];
+        if (ballot.length) {
+            for (const c of ballot) if (c.map && !c.thumbnail) names.push(c.map);
+        } else {
+            names.push(...(voting.value?.candidates ?? []));
+        }
+        for (const n of names) void lookUpMap(n);
     };
 
     const startsAtLocal = computed(() => {
