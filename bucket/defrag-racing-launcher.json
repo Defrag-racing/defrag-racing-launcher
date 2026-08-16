@@ -1,12 +1,12 @@
 {
-    "version": "0.1.57",
+    "version": "0.1.58",
     "description": "Tray companion for defrag.racing: backs up Quake 3 DeFRaG demos and opens defrag:// links in your engine",
     "homepage": "https://github.com/Defrag-racing/defrag-racing-launcher",
     "license": "MIT",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/Defrag-racing/defrag-racing-launcher/releases/download/launcher-v0.1.57/Defrag.Racing.Launcher_0.1.57_x64-setup.exe#/setup.exe",
-            "hash": "58ccd2d2f0b35f685537d82302d9a60340e665ed431cf8f5d18aadde26403719"
+            "url": "https://github.com/Defrag-racing/defrag-racing-launcher/releases/download/launcher-v0.1.58/Defrag.Racing.Launcher_0.1.58_x64-setup.exe#/setup.exe",
+            "hash": "c08925bed7a270448f8b5a9e7b8e57b844de5a5e3695ee6f2d9133caf012b112"
         }
     },
     "installer": {
