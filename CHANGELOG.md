@@ -4,7 +4,7 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 0.1.54
+## 0.1.55
 
 - **Settings > Demos now lists every folder you have, and you tick what gets backed up.** The old page had a single "Include subfolders" switch and, with it off, no list at all - so there was nothing to tick and no way to see what the launcher would take. Every subfolder is listed now whether it is watched or not, with its own two switches and how many demos are in it, and **nothing below the top of a folder is backed up until you tick it**. Someone with an `old/` of eight thousand runs is not publishing them by accident, and a folder made next month starts off too. If you had "Include subfolders" on, everything stays exactly as it was.
 - **Turning backup on for a folder asks first, and says how many demos that is.** A backed-up demo is public on defrag.racing the moment it lands, and unticking the box afterwards does not take it back, so the box now asks before it moves - for one folder, for a whole drive, and for "all of them". Turning backup off asks nothing.

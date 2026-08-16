@@ -181,6 +181,16 @@
         }));
     });
 
+    /** What the site puts where a map has no levelshot. A grey "no image" panel
+     *  among four screenshots reads as a broken card rather than a map nobody
+     *  has photographed. */
+    const FALLBACK_THUMBNAIL = 'https://defrag.racing/images/unknown.jpg';
+
+    const onThumbnailError = (e: Event) => {
+        const img = e.target as HTMLImageElement;
+        if (img.src !== FALLBACK_THUMBNAIL) img.src = FALLBACK_THUMBNAIL;
+    };
+
     /** The site stores a `/storage`-relative path or an absolute URL. Same rule
      *  as the server browser, so both read one way. */
     const thumbnailUrl = (t: string | null | undefined): string | null => {
@@ -490,20 +500,17 @@
                             class="bg-black/25 border border-white/5 rounded-lg overflow-hidden flex items-stretch gap-3"
                         >
                             <button
-                                class="w-24 flex-shrink-0 bg-black/40 relative"
+                                class="m-2.5 w-32 h-24 flex-shrink-0 bg-black/40 rounded-lg overflow-hidden relative"
                                 :title="$t('Open :map on defrag.racing', { map: row.map })"
                                 @click="openMap(row.map)"
                             >
                                 <img
-                                    v-if="row.thumbnail"
-                                    :src="row.thumbnail"
+                                    :src="row.thumbnail || FALLBACK_THUMBNAIL"
                                     :alt="row.map"
-                                    class="w-full h-full object-cover"
+                                    class="w-full h-full object-cover object-center"
                                     loading="lazy"
+                                    @error="onThumbnailError"
                                 />
-                                <div v-else class="w-full h-full min-h-[4rem] flex items-center justify-center text-[10px] text-neutral-600">
-                                    {{ $t('no thumbnail') }}
-                                </div>
                                 <span class="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/70 text-[10px] uppercase font-semibold text-neutral-200">
                                     {{ row.physics }}
                                 </span>
@@ -664,20 +671,17 @@
                             class="bg-black/25 border border-white/5 rounded-lg overflow-hidden flex"
                         >
                             <button
-                                class="w-28 flex-shrink-0 bg-black/40 relative"
+                                class="m-2.5 w-32 h-24 flex-shrink-0 bg-black/40 rounded-lg overflow-hidden relative"
                                 :title="$t('Open :map on defrag.racing', { map: row.map })"
                                 @click="openMap(row.map)"
                             >
                                 <img
-                                    v-if="row.thumbnail"
-                                    :src="row.thumbnail"
+                                    :src="row.thumbnail || FALLBACK_THUMBNAIL"
                                     :alt="row.map"
-                                    class="w-full h-full object-cover"
+                                    class="w-full h-full object-cover object-center"
                                     loading="lazy"
+                                    @error="onThumbnailError"
                                 />
-                                <div v-else class="w-full h-full min-h-[4.5rem] flex items-center justify-center text-[10px] text-neutral-600">
-                                    {{ $t('no thumbnail') }}
-                                </div>
                                 <span class="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/70 text-[10px] uppercase font-semibold text-neutral-200">
                                     {{ row.physics }}
                                 </span>
@@ -714,15 +718,21 @@
                                 :title="$t('Open :map on defrag.racing', { map: c.map })"
                                 @click="openMap(c.map)"
                             >
-                                <img
-                                    v-if="c.thumbnail"
-                                    :src="c.thumbnail"
-                                    :alt="c.map"
-                                    class="w-full h-16 object-cover"
-                                    loading="lazy"
-                                />
-                                <div v-else class="w-full h-16 flex items-center justify-center text-[10px] text-neutral-600 bg-black/40">
-                                    {{ $t('no thumbnail') }}
+                                <!-- One fixed 16:9 box, centre-cropped, and the
+                                     site's own stand-in when a map has no
+                                     levelshot. Levelshots come in whatever
+                                     shape their author saved them in - 4:3
+                                     mostly, some square - so they are zoomed to
+                                     fill rather than squashed to fit, which is
+                                     what made these read as the wrong picture. -->
+                                <div class="aspect-video bg-black/40">
+                                    <img
+                                        :src="c.thumbnail || FALLBACK_THUMBNAIL"
+                                        :alt="c.map"
+                                        class="w-full h-full object-cover object-center"
+                                        loading="lazy"
+                                        @error="onThumbnailError"
+                                    />
                                 </div>
                                 <div class="px-2 py-1.5 min-w-0">
                                     <div class="text-xs text-brand-300 truncate">{{ c.map }}</div>
