@@ -4,6 +4,11 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.61
+
+- **The "open .dm_68 demos here?" question is where you can see it.** It used to sit inside the demo list under the backup panel, so on a short window it was below the fold and on every other tab it was not there at all - a question asked once could be missed once and never come back. It now sits at the top of whatever tab you are on, next to the update notice. Settings still has its own card for the same thing.
+- **Fixed on Linux: playing a demo could fail with a permission error.** An AppImage unpacked by hand, or copied across a filesystem that does not carry permissions, leaves the bundled engine without its executable bit. The launcher sets it back itself now.
+
 ## 0.1.60
 
 - **Fixed: the first second of a run played twice when a demo opened.** To draw the transport bar the player has to know how long the demo is, and the only way it had was to play it to the end and jump back to the start - and a jump restarts the run at that point, so you saw the beginning, then the beginning again. The length is now read straight out of the demo file before anything plays, so a demo opens once and runs from there.
