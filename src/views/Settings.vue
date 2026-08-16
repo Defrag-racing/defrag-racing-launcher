@@ -264,7 +264,6 @@
         foldersError.value = null;
         try {
             folders.value = await tauri.listDemoFolders();
-            collapseLongTrees();
         } catch (e: any) {
             foldersError.value = e?.toString?.() ?? t('Could not read your demos folder');
             folders.value = [];
@@ -391,21 +390,15 @@
         else await setRoot(ask.root, { sync: true });
     };
 
-    /** Folders whose subfolder list is folded away. A tree of thirty starts
-     *  folded so the page stays readable; once opened by hand it stays open,
-     *  including across a reload of the list. */
+    /** Folders whose subfolder list has been folded away by hand. Everything
+     *  starts open: the list is the thing this page is for, and one that has
+     *  to be unfolded first is the old "Include subfolders" switch wearing a
+     *  different hat. */
     const collapsed = ref<Set<string>>(new Set());
-    const opened = new Set<string>();
     const isCollapsed = (root: DemoFolderRoot) => collapsed.value.has(root.path);
     const toggleCollapsed = (root: DemoFolderRoot) => {
         const next = new Set(collapsed.value);
-        if (next.has(root.path)) {
-            next.delete(root.path);
-            opened.add(root.path);
-        } else {
-            next.add(root.path);
-            opened.delete(root.path);
-        }
+        next.has(root.path) ? next.delete(root.path) : next.add(root.path);
         collapsed.value = next;
     };
 
@@ -441,14 +434,6 @@
         }
     };
 
-    /** Fold anything with more than a handful of subfolders on first sight. */
-    const collapseLongTrees = () => {
-        const next = new Set(collapsed.value);
-        for (const root of folders.value) {
-            if (root.folders.length > 8 && ! opened.has(root.path)) next.add(root.path);
-        }
-        collapsed.value = next;
-    };
 
     const saveToken = async () => {
         if (! tokenInput.value.trim()) return;
@@ -952,22 +937,26 @@
                                         <span class="w-16 text-center">{{ $t('Back up') }}</span>
                                         <span class="w-16 text-center">{{ $t('Show') }}</span>
                                     </div>
+                                    <!-- One line per folder: the name, what is in
+                                         it, and the two answers. Two lines put
+                                         the count under the name and made a
+                                         list of thirty twice as tall for
+                                         nothing. -->
                                     <div
                                         v-for="f in root.folders"
                                         :key="f.path"
-                                        class="flex items-center gap-3 py-1.5 px-1 rounded hover:bg-white/[0.03]"
-                                        :class="{ 'opacity-60': !f.visible && !f.sync }"
+                                        class="flex items-center gap-3 py-2 px-2 rounded-lg hover:bg-white/[0.04] border-b border-white/[0.03] last:border-0"
+                                        :class="{ 'opacity-50': !f.visible && !f.sync }"
                                     >
-                                        <div class="flex-1 min-w-0" :style="{ paddingLeft: `${(f.depth - 1) * 14}px` }">
-                                            <div class="text-sm text-neutral-200 truncate" :title="f.path">
-                                                <span class="text-neutral-600">{{ f.depth > 1 ? '└ ' : '' }}</span>{{ f.name }}
-                                            </div>
-                                            <div class="text-[11px] text-neutral-500">
+                                        <div class="flex-1 min-w-0 flex items-baseline gap-2" :style="{ paddingLeft: `${(f.depth - 1) * 16}px` }">
+                                            <span v-if="f.depth > 1" class="text-neutral-700 flex-shrink-0">└</span>
+                                            <span class="text-[15px] text-neutral-100 truncate" :title="f.path">{{ f.name }}</span>
+                                            <span class="text-xs text-neutral-500 flex-shrink-0">
                                                 {{ f.demos === 1 ? $t('1 demo') : $t(':count demos', { count: f.demos }) }}
-                                                <span v-if="f.inherited && f.depth > 1" class="text-neutral-600">
-                                                    · {{ $t('following its parent') }}
-                                                </span>
-                                            </div>
+                                            </span>
+                                            <span v-if="f.inherited && f.depth > 1" class="text-[11px] text-neutral-600 flex-shrink-0 truncate">
+                                                · {{ $t('following its parent') }}
+                                            </span>
                                         </div>
                                         <!-- .prevent so the box does not flip
                                              before the question is answered:

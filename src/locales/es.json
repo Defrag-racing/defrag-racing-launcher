@@ -610,7 +610,7 @@
     "paused": "en pausa",
     "pick at least one more demo, same map first": "elige al menos una demo más, mejor del mismo mapa",
     "pick up to :max demos, same map first": "elige hasta :max demos, mejor del mismo mapa",
-    "picked with a wildcard": "elegida con un comodín",
+    "picked with a wildcard for :physics": "elegida con un comodín para :physics",
     "player": "jugador",
     "players": "jugadores",
     "reset": "poner a cero",
@@ -627,7 +627,7 @@
     "voting closes :when": "la votación cierra :when",
     "where your game records": "aquí graba tu juego",
     "with": "con",
-    "won the vote": "ganó la votación",
+    "won the vote for :physics": "ganó la votación de :physics",
     "← Back": "← Atrás",
     "← Go back and paste a token instead": "← Volver y pegar un token",
     "← Prev": "← Anterior"

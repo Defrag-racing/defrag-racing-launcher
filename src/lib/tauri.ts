@@ -175,6 +175,15 @@ export interface CompsEntry {
     file_hash: string | null;
 }
 
+/** A map as something to look at: the name, who made it, and its picture.
+ *  `thumbnail` is stored the way the server browser stores one - a
+ *  `/storage`-relative path or an absolute URL. */
+export interface CompsMapCard {
+    map: string | null;
+    author: string | null;
+    thumbnail: string | null;
+}
+
 export interface CompsPlaying {
     round_id: number;
     comp_number: number;
@@ -186,6 +195,9 @@ export interface CompsPlaying {
     prize_eur: number;
     /** physics -> map name. */
     maps: Record<string, string | null>;
+    /** The same maps with their author and picture. Optional: older servers
+     *  send only the names above. */
+    map_cards?: Record<string, CompsMapCard>;
     /** How many people are in, per physics. A count, never a list. */
     entrants: Record<string, number>;
     my_entries: CompsEntry[];
@@ -203,9 +215,12 @@ export interface CompsVoting {
     ends_at?: string | null;
     is_open: boolean;
     candidates: string[];
-    /** What won, once the ballot has closed: physics -> map and how it won.
-     *  Empty while voting is open. */
-    decided?: Record<string, { map: string | null; decided_by: string | null }>;
+    /** What won, once the ballot has closed: physics -> the map, who made it,
+     *  its picture and how it won. Empty while voting is open. */
+    decided?: Record<string, CompsMapCard & { decided_by: string | null }>;
+    /** The ballot with authors and pictures. `candidates` above stays a list
+     *  of names for launchers built before this existed. */
+    candidate_maps?: CompsMapCard[];
     next_category: string | null;
     /** What next week pays per physics. Optional: older servers omit it. */
     prize_eur?: number;

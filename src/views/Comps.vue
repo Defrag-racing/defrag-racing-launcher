@@ -101,11 +101,14 @@
     const physicsOrder = ['cpm', 'vq3'];
     const mapRows = computed(() => {
         const maps = playing.value?.maps ?? {};
+        const cards = playing.value?.map_cards ?? {};
         return physicsOrder
             .filter((p) => maps[p])
             .map((p) => ({
                 physics: p,
                 map: maps[p] as string,
+                author: cards[p]?.author ?? null,
+                thumbnail: thumbnailUrl(cards[p]?.thumbnail),
                 entrants: playing.value?.entrants?.[p] ?? 0,
             }));
     });
@@ -144,9 +147,33 @@
             .map((p) => ({
                 physics: p,
                 map: decided[p].map as string,
+                author: decided[p].author,
+                thumbnail: thumbnailUrl(decided[p].thumbnail),
                 byWildcard: decided[p].decided_by === 'wildcard',
             }));
     });
+
+    /** The ballot as pictures rather than a row of words. Falls back to the
+     *  names a server too old to send the rest still provides. */
+    const candidateCards = computed(() => {
+        const cards = voting.value?.candidate_maps ?? [];
+        if (cards.length) {
+            return cards.map((c) => ({
+                map: c.map ?? '',
+                author: c.author,
+                thumbnail: thumbnailUrl(c.thumbnail),
+            }));
+        }
+        return (voting.value?.candidates ?? []).map((map) => ({ map, author: null, thumbnail: null }));
+    });
+
+    /** The site stores a `/storage`-relative path or an absolute URL. Same rule
+     *  as the server browser, so both read one way. */
+    const thumbnailUrl = (t: string | null | undefined): string | null => {
+        if (!t) return null;
+        if (t.startsWith('http://') || t.startsWith('https://')) return t;
+        return `https://defrag.racing/storage/${t}`;
+    };
 
     const startsAtLocal = computed(() => {
         const starts = voting.value?.starts_at;
@@ -379,25 +406,46 @@
                         </div>
                     </header>
 
-                    <div class="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div class="p-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div
                             v-for="row in mapRows"
                             :key="row.physics"
-                            class="bg-black/20 border border-white/5 rounded px-3 py-2 flex items-center justify-between gap-3"
+                            class="bg-black/25 border border-white/5 rounded-lg overflow-hidden flex items-stretch gap-3"
                         >
-                            <div class="min-w-0">
-                                <div class="text-[10px] uppercase text-neutral-500">{{ row.physics }}</div>
+                            <button
+                                class="w-24 flex-shrink-0 bg-black/40 relative"
+                                :title="$t('Open :map on defrag.racing', { map: row.map })"
+                                @click="openMap(row.map)"
+                            >
+                                <img
+                                    v-if="row.thumbnail"
+                                    :src="row.thumbnail"
+                                    :alt="row.map"
+                                    class="w-full h-full object-cover"
+                                    loading="lazy"
+                                />
+                                <div v-else class="w-full h-full min-h-[4rem] flex items-center justify-center text-[10px] text-neutral-600">
+                                    {{ $t('no thumbnail') }}
+                                </div>
+                                <span class="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/70 text-[10px] uppercase font-semibold text-neutral-200">
+                                    {{ row.physics }}
+                                </span>
+                            </button>
+                            <div class="min-w-0 py-2 flex-1">
                                 <button
-                                    class="text-sm text-brand-400 hover:underline truncate max-w-full text-left"
+                                    class="text-base font-semibold text-brand-300 hover:underline truncate max-w-full text-left block"
                                     :title="$t('Open :map on defrag.racing', { map: row.map })"
                                     @click="openMap(row.map)"
                                 >{{ row.map }}</button>
-                                <div class="text-[11px] text-neutral-500">
+                                <div v-if="row.author" class="text-xs text-neutral-400 truncate">
+                                    {{ $t('by :author', { author: row.author }) }}
+                                </div>
+                                <div class="text-[11px] text-neutral-500 mt-0.5">
                                     {{ row.entrants === 1 ? $t('1 player entered') : $t(':count players entered', { count: row.entrants }) }}
                                 </div>
                             </div>
                             <button
-                                class="px-2.5 py-1 rounded text-xs font-semibold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 disabled:opacity-40 flex-shrink-0"
+                                class="my-2 mr-2 px-2.5 py-1 self-center rounded text-xs font-semibold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 disabled:opacity-40 flex-shrink-0"
                                 :disabled="!config.config.engine_path"
                                 :title="config.config.engine_path ? $t('Play :map in :physics', { map: row.map, physics: row.physics.toUpperCase() }) : $t('Pick an engine in Settings first')"
                                 @click="playMap(row.map, row.physics)"
@@ -529,35 +577,82 @@
                         </div>
                     </header>
 
-                    <!-- What won -->
-                    <div v-if="decidedRows.length" class="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <!-- What won. The map, who made it and what it looks like:
+                         a name on its own is not what anybody came here to
+                         find out. -->
+                    <div v-if="decidedRows.length" class="p-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div
                             v-for="row in decidedRows"
                             :key="row.physics"
-                            class="bg-black/20 border border-white/5 rounded px-3 py-2"
+                            class="bg-black/25 border border-white/5 rounded-lg overflow-hidden flex"
                         >
-                            <div class="text-[10px] uppercase text-neutral-500">{{ row.physics }}</div>
                             <button
-                                class="text-sm text-brand-400 hover:underline truncate max-w-full text-left"
+                                class="w-28 flex-shrink-0 bg-black/40 relative"
                                 :title="$t('Open :map on defrag.racing', { map: row.map })"
                                 @click="openMap(row.map)"
-                            >{{ row.map }}</button>
-                            <div class="text-[11px]" :class="row.byWildcard ? 'text-amber-300/80' : 'text-emerald-300/80'">
-                                {{ row.byWildcard ? $t('picked with a wildcard') : $t('won the vote') }}
+                            >
+                                <img
+                                    v-if="row.thumbnail"
+                                    :src="row.thumbnail"
+                                    :alt="row.map"
+                                    class="w-full h-full object-cover"
+                                    loading="lazy"
+                                />
+                                <div v-else class="w-full h-full min-h-[4.5rem] flex items-center justify-center text-[10px] text-neutral-600">
+                                    {{ $t('no thumbnail') }}
+                                </div>
+                                <span class="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/70 text-[10px] uppercase font-semibold text-neutral-200">
+                                    {{ row.physics }}
+                                </span>
+                            </button>
+                            <div class="p-2.5 min-w-0 flex-1">
+                                <button
+                                    class="text-base font-semibold text-brand-300 hover:underline truncate max-w-full text-left block"
+                                    :title="$t('Open :map on defrag.racing', { map: row.map })"
+                                    @click="openMap(row.map)"
+                                >{{ row.map }}</button>
+                                <div v-if="row.author" class="text-xs text-neutral-400 truncate">
+                                    {{ $t('by :author', { author: row.author }) }}
+                                </div>
+                                <div class="text-[11px] mt-1" :class="row.byWildcard ? 'text-amber-300/90' : 'text-emerald-300/90'">
+                                    {{ row.byWildcard
+                                        ? $t('picked with a wildcard for :physics', { physics: row.physics.toUpperCase() })
+                                        : $t('won the vote for :physics', { physics: row.physics.toUpperCase() }) }}
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- The ballot itself, while it is open (or on a server too
-                         old to tell us what won). -->
-                    <div v-else class="p-3 flex flex-wrap gap-1.5">
-                        <button
-                            v-for="c in voting.candidates"
-                            :key="c"
-                            class="px-2 py-1 rounded bg-black/20 border border-white/5 text-xs text-brand-400 hover:underline"
-                            @click="openMap(c)"
-                        >{{ c }}</button>
-                        <span v-if="!voting.candidates.length" class="text-xs text-neutral-500">
+                    <!-- The ballot itself, while it is open. Pictures too: this
+                         is the list somebody is choosing from. -->
+                    <div v-else class="p-3">
+                        <div v-if="candidateCards.length" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                            <button
+                                v-for="c in candidateCards"
+                                :key="c.map"
+                                class="bg-black/25 border border-white/5 rounded-lg overflow-hidden text-left hover:border-white/20 transition-colors"
+                                :title="$t('Open :map on defrag.racing', { map: c.map })"
+                                @click="openMap(c.map)"
+                            >
+                                <img
+                                    v-if="c.thumbnail"
+                                    :src="c.thumbnail"
+                                    :alt="c.map"
+                                    class="w-full h-16 object-cover"
+                                    loading="lazy"
+                                />
+                                <div v-else class="w-full h-16 flex items-center justify-center text-[10px] text-neutral-600 bg-black/40">
+                                    {{ $t('no thumbnail') }}
+                                </div>
+                                <div class="px-2 py-1.5 min-w-0">
+                                    <div class="text-xs text-brand-300 truncate">{{ c.map }}</div>
+                                    <div v-if="c.author" class="text-[10px] text-neutral-500 truncate">
+                                        {{ $t('by :author', { author: c.author }) }}
+                                    </div>
+                                </div>
+                            </button>
+                        </div>
+                        <span v-else class="text-xs text-neutral-500">
                             {{ $t('The ballot is not drawn yet.') }}
                         </span>
                     </div>

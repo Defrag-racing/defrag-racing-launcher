@@ -610,7 +610,7 @@
     "paused": "pozastaveno",
     "pick at least one more demo, same map first": "vyber aspoň ještě jedno demo, nejlíp ze stejné mapy",
     "pick up to :max demos, same map first": "vyber až :max dem, nejlíp ze stejné mapy",
-    "picked with a wildcard": "vybraná wildcardem",
+    "picked with a wildcard for :physics": "vybraná wildcardem pro :physics",
     "player": "hráč",
     "players": "hráčů",
     "reset": "vynulovat",
@@ -627,7 +627,7 @@
     "voting closes :when": "hlasování končí :when",
     "where your game records": "sem hra nahrává",
     "with": "časem",
-    "won the vote": "vyhrála hlasování",
+    "won the vote for :physics": "vyhrála hlasování pro :physics",
     "← Back": "← Zpět",
     "← Go back and paste a token instead": "← Vrátit se a vložit token",
     "← Prev": "← Předchozí"

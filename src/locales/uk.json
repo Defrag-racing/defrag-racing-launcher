@@ -610,7 +610,7 @@
     "paused": "на паузі",
     "pick at least one more demo, same map first": "виберіть щонайменше ще одне демо, краще з тієї самої карти",
     "pick up to :max demos, same map first": "виберіть до :max демо, краще з тієї самої карти",
-    "picked with a wildcard": "обрана вайлдкартом",
+    "picked with a wildcard for :physics": "обрана вайлдкартом для :physics",
     "player": "гравець",
     "players": "гравців",
     "reset": "обнулити",
@@ -627,7 +627,7 @@
     "voting closes :when": "голосування закривається :when",
     "where your game records": "сюди пише гра",
     "with": "з часом",
-    "won the vote": "перемогла в голосуванні",
+    "won the vote for :physics": "перемогла в голосуванні для :physics",
     "← Back": "← Назад",
     "← Go back and paste a token instead": "← Повернутися і вставити токен",
     "← Prev": "← Попередня"

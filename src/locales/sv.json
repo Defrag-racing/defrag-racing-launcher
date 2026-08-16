@@ -610,7 +610,7 @@
     "paused": "pausad",
     "pick at least one more demo, same map first": "välj minst en demo till, helst samma bana",
     "pick up to :max demos, same map first": "välj upp till :max demos, helst samma bana",
-    "picked with a wildcard": "vald med ett wildcard",
+    "picked with a wildcard for :physics": "vald med ett wildcard för :physics",
     "player": "spelare",
     "players": "spelare",
     "reset": "nollställ",
@@ -627,7 +627,7 @@
     "voting closes :when": "omröstningen stänger :when",
     "where your game records": "hit spelar ditt spel in",
     "with": "med",
-    "won the vote": "vann omröstningen",
+    "won the vote for :physics": "vann omröstningen för :physics",
     "← Back": "← Tillbaka",
     "← Go back and paste a token instead": "← Gå tillbaka och klistra in en token i stället",
     "← Prev": "← Föregående"

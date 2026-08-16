@@ -4,11 +4,12 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 0.1.51
+## 0.1.52
 
 - **Settings > Demos now lists every folder you have, and you tick what gets backed up.** The old page had a single "Include subfolders" switch and, with it off, no list at all - so there was nothing to tick and no way to see what the launcher would take. Every subfolder is listed now whether it is watched or not, with its own two switches and how many demos are in it, and **nothing below the top of a folder is backed up until you tick it**. Someone with an `old/` of eight thousand runs is not publishing them by accident, and a folder made next month starts off too. If you had "Include subfolders" on, everything stays exactly as it was.
 - **Turning backup on for a folder asks first, and says how many demos that is.** A backed-up demo is public on defrag.racing the moment it lands, and unticking the box afterwards does not take it back, so the box now asks before it moves - for one folder, for a whole drive, and for "all of them". Turning backup off asks nothing.
-- **Comps says what won the vote.** Once voting closes, the panel used to say "closed" and list the five candidates it had already chosen between. It now shows the map that won in each physics, whether it won on votes or on somebody's wildcard, when the week starts and what it pays.
+- **Comps says what won the vote, as a map and not a word.** Once voting closes, the panel used to say "closed" and go on listing the five candidates it had already chosen between. It now shows the map that won in each physics - picture, name, who made it, and which physics it won for - whether it won on votes or on somebody's wildcard, when the week starts and what it pays. The open ballot and the round being played show their maps the same way. (The site has to be updated for this too; until it is, the launcher shows the candidate list as before.)
+- **The folder list opens ready to read.** Long lists no longer start folded, and each folder is one line: name, how many demos are in it, and its two switches.
 - **The settings pages are wider and easier to read.** Cards had been squeezed into a narrow column against the rail whatever the size of the window.
 - **Settings > Account was empty.** The whole group was, because of a stray comment in the page: the account card had been swallowed by it and was rendering inside Notifications instead. Account now opens with who this launcher is signed in as, the profile it backs up to and a button to open it, above the token it uses.
 - **"Change in Settings" from the demos folder chip landed on the wrong group.** It scrolled to a card that was not on screen, so it looked like it had gone nowhere. It opens the Demos group now and pulses the folder list. Same for the "Add token" and "Token required" links, which open Account.

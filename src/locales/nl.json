@@ -610,7 +610,7 @@
     "paused": "gepauzeerd",
     "pick at least one more demo, same map first": "kies er minstens nog één, het liefst dezelfde map",
     "pick up to :max demos, same map first": "kies er tot :max, het liefst dezelfde map",
-    "picked with a wildcard": "gekozen met een wildcard",
+    "picked with a wildcard for :physics": "gekozen met een wildcard voor :physics",
     "player": "speler",
     "players": "spelers",
     "reset": "op nul zetten",
@@ -627,7 +627,7 @@
     "voting closes :when": "stemming sluit :when",
     "where your game records": "hier neemt je spel op",
     "with": "met",
-    "won the vote": "won de stemming",
+    "won the vote for :physics": "won de stemming voor :physics",
     "← Back": "← Terug",
     "← Go back and paste a token instead": "← Terug en toch een token plakken",
     "← Prev": "← Vorige"
