@@ -364,6 +364,7 @@ pub async fn clear_upload_cache(state: State<'_, AppState>) -> Result<(), String
         // BEFORE the rescan) so the rescan re-verifies instead of replaying
         // stale hits and saving the old statuses back over our reset.
         let _ = h.tx.send(watcher::Message::ResetCacheStatuses);
+        let recursive = cfg.watches_subfolders();
         if let Some(demos) = cfg.demos_path {
             // Coalesced: if a rescan is already queued (periodic pump, or the
             // user hammering Force re-check), don't stack another full
@@ -373,7 +374,7 @@ pub async fn clear_upload_cache(state: State<'_, AppState>) -> Result<(), String
             if h.state.try_queue_rescan() {
                 let _ = h.tx.send(watcher::Message::RescanFolder {
                     folder: demos,
-                    recursive: cfg.include_subfolders,
+                    recursive,
                 });
             }
         }
@@ -590,8 +591,8 @@ pub fn start_auto_upload(
     crate::log_startup("start_auto_upload: entry");
     let cfg = Config::load().map_err(err_to_string)?;
     crate::log_startup(&format!(
-        "start_auto_upload: cfg loaded demos_path={:?} include_subfolders={}",
-        cfg.demos_path, cfg.include_subfolders
+        "start_auto_upload: cfg loaded demos_path={:?} subfolders={}",
+        cfg.demos_path, cfg.watches_subfolders()
     ));
     let demos = cfg
         .demos_path
@@ -617,7 +618,7 @@ pub fn start_auto_upload(
         state.upload_state.clone(),
         state.comps.clone(),
         demo_paths,
-        cfg.include_subfolders,
+        cfg.watches_subfolders(),
         config::api_base_url(),
         token,
         cfg.cpu_throttle_pct,
@@ -800,12 +801,13 @@ pub fn list_demos(state: State<'_, AppState>) -> Result<Vec<DemoLibraryEntry>, S
     // Every watched folder, not just the game's own. A root that is not there
     // right now is skipped rather than fatal: the whole point of adding a
     // second drive is that it is a second drive, and it can be unplugged.
+    let recursive = cfg.watches_subfolders();
     let mut candidates: Vec<PathBuf> = Vec::new();
     for root in &roots {
         if !root.path.is_dir() {
             continue;
         }
-        if cfg.include_subfolders {
+        if recursive {
             candidates.extend(
                 walkdir::WalkDir::new(&root.path)
                     .follow_links(false)
@@ -941,6 +943,10 @@ pub struct DemoFolderRoot {
     pub exists: bool,
     pub sync: bool,
     pub visible: bool,
+    /// What a subfolder with no answer of its own does. The UI shows it as the
+    /// state of "all of them", and it is what a folder made tomorrow will do.
+    pub sub_sync: bool,
+    pub sub_visible: bool,
     /// Demos directly in the folder, not counting the ones in subfolders.
     pub demos: usize,
     pub folders: Vec<DemoFolderEntry>,
@@ -974,6 +980,8 @@ fn describe_root(root: &crate::folders::DemoRoot, primary: bool) -> DemoFolderRo
             exists: false,
             sync: root.sync,
             visible: root.visible,
+            sub_sync: root.sub_sync,
+            sub_visible: root.sub_visible,
             demos: 0,
             folders: Vec::new(),
         };
@@ -1027,7 +1035,8 @@ fn describe_root(root: &crate::folders::DemoRoot, primary: bool) -> DemoFolderRo
     let folders = found
         .into_iter()
         .map(|(k, rel)| {
-            let (sync, visible, explicit) = crate::folders::effective(&root.folders, &k);
+            let (sync, visible, explicit) =
+                crate::folders::effective(&root.folders, &k, (root.sub_sync, root.sub_visible));
             DemoFolderEntry {
                 name: rel.rsplit('/').next().unwrap_or(&rel).to_string(),
                 depth: crate::folders::depth(&rel),
@@ -1046,6 +1055,8 @@ fn describe_root(root: &crate::folders::DemoRoot, primary: bool) -> DemoFolderRo
         exists: true,
         sync: root.sync,
         visible: root.visible,
+        sub_sync: root.sub_sync,
+        sub_visible: root.sub_visible,
         demos: loose,
         folders,
     }
@@ -1064,16 +1075,16 @@ pub fn set_demo_folder(
     sync: bool,
     visible: bool,
 ) -> Result<Vec<DemoFolderRoot>, String> {
-    use tauri::Manager;
-
     let mut cfg = Config::load().map_err(err_to_string)?;
     let target = crate::cache::normalize(std::path::Path::new(&root));
+    let was_recursive = cfg.watches_subfolders();
 
     // Which root's rules is this? The game's own live in `folders`, for no
     // better reason than that they were there before any other root existed
     // and moving them would have rewritten everybody's config for nothing.
     if same_root(cfg.demos_path.as_deref(), &target) {
-        crate::folders::apply(&mut cfg.folders, &path, sync, visible);
+        let sub = cfg.subfolder_defaults();
+        crate::folders::apply(&mut cfg.folders, &path, sync, visible, sub);
     } else {
         let Some(extra) = cfg
             .extra_demo_roots
@@ -1082,13 +1093,46 @@ pub fn set_demo_folder(
         else {
             return Err("That folder is not one of the watched folders.".to_string());
         };
-        crate::folders::apply(&mut extra.folders, &path, sync, visible);
+        let sub = (extra.sub_sync, extra.sub_visible);
+        crate::folders::apply(&mut extra.folders, &path, sync, visible, sub);
     }
+
+    save_folders(&mut cfg, &app, was_recursive)
+}
+
+/// Write the folder rules and let everything that reads them catch up.
+///
+/// The watcher is only restarted when the answer to "is there anything below
+/// the top worth opening" changed, because that is the one thing it decides at
+/// start and cannot revise; every other rule is read per demo.
+fn save_folders(
+    cfg: &mut Config,
+    app: &AppHandle,
+    was_recursive: bool,
+) -> Result<Vec<DemoFolderRoot>, String> {
+    use tauri::Manager;
+
+    // Write the default down before touching the switch it used to be read
+    // from, or the mirror below feeds back into it: ticking one subfolder on
+    // would raise `include_subfolders`, and every other subfolder would follow
+    // it on without anybody asking for that.
+    let (sub_sync, sub_visible) = cfg.subfolder_defaults();
+    cfg.subfolder_sync = Some(sub_sync);
+    cfg.subfolder_visible = Some(sub_visible);
+
+    // Kept in step for an older launcher reading this file after a downgrade:
+    // it knows only this switch, and off with folders ticked on would leave it
+    // watching nothing.
+    cfg.include_subfolders = cfg.watches_subfolders();
 
     cfg.save().map_err(err_to_string)?;
 
     let state: State<AppState> = app.state();
     state.folders.reload();
+
+    if cfg.watches_subfolders() != was_recursive {
+        restart_watcher_if_running(app);
+    }
 
     list_demo_folders()
 }
@@ -1116,10 +1160,16 @@ pub fn add_demo_root(app: AppHandle, path: String) -> Result<Vec<DemoFolderRoot>
         }
     }
 
+    // Its own demos, yes - that is what adding it was for. What is under it,
+    // not until asked: a folder somebody points at can have an archive of ten
+    // thousand runs below it, and backing that up is not a thing to decide on
+    // their behalf.
     cfg.extra_demo_roots.push(crate::folders::DemoRoot {
         path: candidate,
         sync: true,
         visible: true,
+        sub_sync: false,
+        sub_visible: false,
         folders: Vec::new(),
     });
     cfg.save().map_err(err_to_string)?;
@@ -1161,35 +1211,57 @@ pub fn remove_demo_root(app: AppHandle, path: String) -> Result<Vec<DemoFolderRo
     list_demo_folders()
 }
 
-/// Back this folder up, or show it in the list, or neither.
+/// Change a watched folder's own answers, or what its subfolders do by
+/// default. Every argument is optional and only what is passed is touched, so
+/// one switch on the page is one field here.
+///
+/// The game's own folder accepts the subfolder defaults but not its own two
+/// answers: turning backup off for it is what the button on the Demos tab
+/// does, and the same choice in two places is how one of them ends up lying.
 #[tauri::command]
 pub fn set_demo_root(
     app: AppHandle,
     path: String,
-    sync: bool,
-    visible: bool,
+    sync: Option<bool>,
+    visible: Option<bool>,
+    sub_sync: Option<bool>,
+    sub_visible: Option<bool>,
 ) -> Result<Vec<DemoFolderRoot>, String> {
-    use tauri::Manager;
-
     let target = crate::cache::normalize(std::path::Path::new(&path));
     let mut cfg = Config::load().map_err(err_to_string)?;
+    let was_recursive = cfg.watches_subfolders();
 
-    let Some(root) = cfg
-        .extra_demo_roots
-        .iter_mut()
-        .find(|r| same_root(Some(&r.path), &target))
-    else {
-        return Err("That folder is not one you added.".to_string());
-    };
+    if same_root(cfg.demos_path.as_deref(), &target) {
+        if sync.is_some() || visible.is_some() {
+            return Err("The folder your game records into is always backed up and always listed.".to_string());
+        }
+        let (mut s, mut v) = cfg.subfolder_defaults();
+        s = sub_sync.unwrap_or(s);
+        v = sub_visible.unwrap_or(v);
+        cfg.subfolder_sync = Some(s);
+        cfg.subfolder_visible = Some(v);
+        // The records that were saying one at a time what the default now says
+        // are noise, and leaving them would strand those folders if the
+        // default were switched back.
+        crate::folders::prune(&mut cfg.folders, (s, v));
+    } else {
+        let Some(root) = cfg
+            .extra_demo_roots
+            .iter_mut()
+            .find(|r| same_root(Some(&r.path), &target))
+        else {
+            return Err("That folder is not one you added.".to_string());
+        };
 
-    root.sync = sync;
-    root.visible = visible;
-    cfg.save().map_err(err_to_string)?;
+        root.sync = sync.unwrap_or(root.sync);
+        root.visible = visible.unwrap_or(root.visible);
+        root.sub_sync = sub_sync.unwrap_or(root.sub_sync);
+        root.sub_visible = sub_visible.unwrap_or(root.sub_visible);
+        let sub = (root.sub_sync, root.sub_visible);
+        crate::folders::prune(&mut root.folders, sub);
+    }
 
-    let state: State<AppState> = app.state();
-    state.folders.reload();
-
-    list_demo_folders()
+    save_folders(&mut cfg, &app, was_recursive)
 }
 
 fn same_root(a: Option<&std::path::Path>, b: &std::path::Path) -> bool {

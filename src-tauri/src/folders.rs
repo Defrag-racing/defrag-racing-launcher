@@ -16,7 +16,8 @@
 //! ## Only the exceptions are stored
 //!
 //! The config keeps a record for a folder **only once its answer differs from
-//! what it would inherit anyway**. Everything else is synced and visible,
+//! what it would inherit anyway**. Everything else follows the folder it sits
+//! in, and the folders at the top follow the watched folder's own default -
 //! including folders that do not exist yet.
 //!
 //! The alternative - writing down every subfolder with both answers - looks
@@ -25,6 +26,19 @@
 //! "deliberately absent, so do not". Storing exceptions makes the default
 //! automatic and the config small. It also means the file does not rot when a
 //! folder is renamed or deleted; a stale record simply never matches anything.
+//!
+//! ## Subfolders start off
+//!
+//! A new watched folder backs up and shows what is directly in it, and nothing
+//! deeper, until somebody ticks a subfolder. Pointing the launcher at a folder
+//! is not consent to publish the archive underneath it - an `old/` with eight
+//! thousand runs in it is somebody's history, not tonight's session - so the
+//! answer for anything below the top is off until it is asked for.
+//!
+//! That default is per watched folder (`sub_sync` / `sub_visible`), which is
+//! also how the old single "include subfolders" switch survives: a config that
+//! had it on keeps every subfolder on, because for that person they always
+//! were.
 //!
 //! ## Deeper folders inherit
 //!
@@ -74,6 +88,13 @@ pub struct DemoRoot {
     /// Show its demos in the Demos list.
     #[serde(default = "default_true")]
     pub visible: bool,
+    /// What a subfolder with no record of its own does. Off, so that adding a
+    /// folder never quietly publishes an archive nobody asked about, and so a
+    /// folder made next month is off too rather than the code having to guess.
+    #[serde(default)]
+    pub sub_sync: bool,
+    #[serde(default)]
+    pub sub_visible: bool,
     /// Exceptions for the folders inside it, exactly as for the main one.
     #[serde(default)]
     pub folders: Vec<WatchedFolder>,
@@ -132,7 +153,10 @@ pub fn depth(rel: &str) -> usize {
 /// What `rel` would resolve to from the records ABOVE it, ignoring any record
 /// on `rel` itself. This is what a record has to differ from to be worth
 /// keeping.
-pub fn inherited(folders: &[WatchedFolder], rel: &str) -> (bool, bool) {
+///
+/// `sub` is the watched folder's own default, which is what a folder at the
+/// top inherits when no record above it says otherwise.
+pub fn inherited(folders: &[WatchedFolder], rel: &str, sub: (bool, bool)) -> (bool, bool) {
     let k = key(rel);
     let mut cur = match k.rfind('/') {
         Some(i) => k[..i].to_string(),
@@ -140,27 +164,31 @@ pub fn inherited(folders: &[WatchedFolder], rel: &str) -> (bool, bool) {
     };
     loop {
         if cur.is_empty() {
-            return (true, true); // the demos folder itself is always both
+            return sub;
         }
         if let Some(f) = folders.iter().find(|f| key(&f.path) == cur) {
             return (f.sync, f.visible);
         }
         match cur.rfind('/') {
             Some(i) => cur.truncate(i),
-            None => return (true, true),
+            None => return sub,
         }
     }
 }
 
 /// `(sync, visible, has_a_record_of_its_own)` for a folder.
-pub fn effective(folders: &[WatchedFolder], rel: &str) -> (bool, bool, bool) {
+///
+/// The watched folder itself (an empty `rel`) is not a subfolder and has no
+/// default to fall back on - its own two answers are the caller's, and it asks
+/// about them directly.
+pub fn effective(folders: &[WatchedFolder], rel: &str, sub: (bool, bool)) -> (bool, bool, bool) {
     let k = key(rel);
     if !k.is_empty() {
         if let Some(f) = folders.iter().find(|x| key(&x.path) == k) {
             return (f.sync, f.visible, true);
         }
     }
-    let (s, v) = inherited(folders, rel);
+    let (s, v) = inherited(folders, rel, sub);
     (s, v, false)
 }
 
@@ -170,23 +198,32 @@ pub fn effective(folders: &[WatchedFolder], rel: &str) -> (bool, bool, bool) {
 /// The pruning is why this is a function rather than a push: turning a whole
 /// tree off would otherwise leave a record per folder, and turning the parent
 /// back on later would leave every child stuck off with no visible cause.
-pub fn apply(folders: &mut Vec<WatchedFolder>, rel: &str, sync: bool, visible: bool) {
+pub fn apply(
+    folders: &mut Vec<WatchedFolder>,
+    rel: &str,
+    sync: bool,
+    visible: bool,
+    sub: (bool, bool),
+) {
     let k = key(rel);
     if k.is_empty() {
         return; // the demos folder itself is not a rule
     }
     folders.retain(|f| key(&f.path) != k);
     folders.push(WatchedFolder { path: k, sync, visible });
-    prune(folders);
+    prune(folders, sub);
 }
 
-fn prune(folders: &mut Vec<WatchedFolder>) {
+/// Drop every record that says nothing its parent does not already say. Also
+/// what makes a changed default tidy up after itself: switch a whole folder's
+/// subfolders on and the records that were saying "on" one at a time go.
+pub fn prune(folders: &mut Vec<WatchedFolder>, sub: (bool, bool)) {
     // Shallowest first, so a parent is decided before the children that
     // inherit from it.
     folders.sort_by_key(|f| (depth(&f.path), key(&f.path)));
     let mut kept: Vec<WatchedFolder> = Vec::new();
     for f in folders.iter() {
-        if (f.sync, f.visible) != inherited(&kept, &f.path) {
+        if (f.sync, f.visible) != inherited(&kept, &f.path, sub) {
             kept.push(f.clone());
         }
     }
@@ -236,9 +273,6 @@ pub fn relative_to(base: &Path, child: &Path) -> Option<String> {
 struct Rules {
     /// Every watched folder, the game's own first.
     roots: Vec<DemoRoot>,
-    /// Only meaningful when subfolders are watched at all; with that switch off
-    /// there are no subfolders in play and every rule is moot.
-    subfolders: bool,
 }
 
 /// Shared, cheap to read, refreshed whenever the config is saved.
@@ -258,7 +292,6 @@ impl FolderState {
         if let Ok(cfg) = crate::config::Config::load() {
             *self.inner.lock().unwrap() = Rules {
                 roots: cfg.demo_roots(),
-                subfolders: cfg.include_subfolders,
             };
         }
     }
@@ -287,13 +320,13 @@ impl FolderState {
             return false;
         }
 
-        if !rules.subfolders || root.folders.is_empty() {
-            return true;
-        }
-
         match key_for_file(&root.path, file) {
+            // Sitting directly in the watched folder, which has already said
+            // yes. Subfolder defaults are not about this file.
+            Some(k) if k.is_empty() => true,
             Some(k) => {
-                let (sync, visible, _) = effective(&root.folders, &k);
+                let (sync, visible, _) =
+                    effective(&root.folders, &k, (root.sub_sync, root.sub_visible));
                 if which == 0 { sync } else { visible }
             }
             None => true,
@@ -316,27 +349,43 @@ mod tests {
             .collect()
     }
 
+    /// Every subfolder on, which is what a config that had the old "include
+    /// subfolders" switch turned on carries forward.
+    const ON: (bool, bool) = (true, true);
+    /// The default for anything new: what is in the folder itself, and nothing
+    /// deeper until it is asked for.
+    const OFF: (bool, bool) = (false, false);
+
     #[test]
-    fn a_folder_with_no_record_is_synced_and_visible() {
+    fn a_folder_with_no_record_follows_the_watched_folders_default() {
         let f = set(&[("old", false, false)]);
-        assert_eq!(effective(&f, "tonight"), (true, true, false));
-        assert_eq!(effective(&f, ""), (true, true, false));
+        assert_eq!(effective(&f, "tonight", ON), (true, true, false));
+        assert_eq!(effective(&f, "tonight", OFF), (false, false, false));
+    }
+
+    #[test]
+    fn a_subfolder_ticked_on_is_on_though_the_rest_stay_off() {
+        let mut f = Vec::new();
+        apply(&mut f, "tonight", true, true, OFF);
+        assert_eq!(effective(&f, "tonight", OFF), (true, true, true));
+        assert_eq!(effective(&f, "tonight/deeper", OFF), (true, true, false));
+        assert_eq!(effective(&f, "old", OFF), (false, false, false));
     }
 
     #[test]
     fn deeper_folders_inherit_the_nearest_record() {
         let f = set(&[("old", false, false), ("old/keep", true, true)]);
-        assert_eq!(effective(&f, "old"), (false, false, true));
-        assert_eq!(effective(&f, "old/2019/january"), (false, false, false));
-        assert_eq!(effective(&f, "old/keep"), (true, true, true));
-        assert_eq!(effective(&f, "old/keep/deeper"), (true, true, false));
+        assert_eq!(effective(&f, "old", ON), (false, false, true));
+        assert_eq!(effective(&f, "old/2019/january", ON), (false, false, false));
+        assert_eq!(effective(&f, "old/keep", ON), (true, true, true));
+        assert_eq!(effective(&f, "old/keep/deeper", ON), (true, true, false));
     }
 
     #[test]
     fn sync_and_visible_are_answered_separately() {
         let f = set(&[("archive", true, false), ("friends", false, true)]);
-        assert_eq!(effective(&f, "archive"), (true, false, true));
-        assert_eq!(effective(&f, "friends"), (false, true, true));
+        assert_eq!(effective(&f, "archive", ON), (true, false, true));
+        assert_eq!(effective(&f, "friends", ON), (false, true, true));
     }
 
     #[test]
@@ -344,33 +393,43 @@ mod tests {
         assert_eq!(key("Old\\2019\\"), "old/2019");
         assert_eq!(key("/old//2019"), "old/2019");
         let f = set(&[("Old\\2019", false, true)]);
-        assert_eq!(effective(&f, "old/2019"), (false, true, true));
+        assert_eq!(effective(&f, "old/2019", ON), (false, true, true));
     }
 
     #[test]
     fn a_record_that_matches_its_parent_is_not_kept() {
         let mut f = set(&[("old", false, false)]);
-        apply(&mut f, "old/2019", false, false);
+        apply(&mut f, "old/2019", false, false, ON);
         assert_eq!(f.len(), 1, "the child says nothing new");
-        assert_eq!(effective(&f, "old/2019"), (false, false, false));
+        assert_eq!(effective(&f, "old/2019", ON), (false, false, false));
     }
 
     #[test]
     fn a_child_can_be_turned_back_on_under_a_parent_that_is_off() {
         let mut f = set(&[("old", false, false)]);
-        apply(&mut f, "old/keep", true, true);
-        assert_eq!(effective(&f, "old/keep"), (true, true, true));
-        assert_eq!(effective(&f, "old/other"), (false, false, false));
+        apply(&mut f, "old/keep", true, true, ON);
+        assert_eq!(effective(&f, "old/keep", ON), (true, true, true));
+        assert_eq!(effective(&f, "old/other", ON), (false, false, false));
     }
 
     #[test]
     fn turning_a_parent_back_on_does_not_strand_its_children() {
         let mut f = Vec::new();
-        apply(&mut f, "old", false, false);
-        apply(&mut f, "old/2019", false, false); // redundant, dropped
-        apply(&mut f, "old", true, true);
+        apply(&mut f, "old", false, false, ON);
+        apply(&mut f, "old/2019", false, false, ON); // redundant, dropped
+        apply(&mut f, "old", true, true, ON);
         assert!(f.is_empty(), "nothing differs from the default any more");
-        assert_eq!(effective(&f, "old/2019"), (true, true, false));
+        assert_eq!(effective(&f, "old/2019", ON), (true, true, false));
+    }
+
+    #[test]
+    fn switching_the_default_on_clears_the_records_that_said_so_one_by_one() {
+        let mut f = Vec::new();
+        apply(&mut f, "tonight", true, true, OFF);
+        apply(&mut f, "check", true, true, OFF);
+        assert_eq!(f.len(), 2);
+        prune(&mut f, ON);
+        assert!(f.is_empty(), "they all say what the default now says");
     }
 
     #[test]
@@ -378,7 +437,28 @@ mod tests {
         let f = set(&[("old", false, false)]);
         let k = key_for_file(Path::new("/demos"), Path::new("/demos/run.dm_68")).unwrap();
         assert_eq!(k, "");
-        assert_eq!(effective(&f, &k), (true, true, false));
+        assert_eq!(effective(&f, &k, ON), (true, true, false));
+    }
+
+    /// The watched folder's own demos are its own business: a default of "not
+    /// the subfolders" must not be read as "not this folder either".
+    #[test]
+    fn the_watched_folders_own_demos_survive_a_default_of_off() {
+        let state = FolderState::default();
+        *state.inner.lock().unwrap() = Rules {
+            roots: vec![DemoRoot {
+                path: PathBuf::from("/demos"),
+                sync: true,
+                visible: true,
+                sub_sync: false,
+                sub_visible: false,
+                folders: Vec::new(),
+            }],
+        };
+        assert!(state.allows_sync(Path::new("/demos/run.dm_68")));
+        assert!(!state.allows_sync(Path::new("/demos/old/run.dm_68")));
+        assert!(state.allows_listing(Path::new("/demos/run.dm_68")));
+        assert!(!state.allows_listing(Path::new("/demos/old/run.dm_68")));
     }
 
     #[test]

@@ -88,6 +88,14 @@ export interface DemoFolderRoot {
     exists: boolean;
     sync: boolean;
     visible: boolean;
+    /**
+     * What a subfolder with no answer of its own does - the state of "all of
+     * them", and what a folder made tomorrow will do. Off on a folder that was
+     * just added: pointing the launcher at a drive is not consent to publish
+     * the archive underneath it.
+     */
+    sub_sync: boolean;
+    sub_visible: boolean;
     /** Demos directly in the folder, not counting subfolders. */
     demos: number;
     folders: DemoFolderEntry[];
@@ -430,9 +438,14 @@ export const tauri = {
     /** Stop watching a folder. Nothing on disk is touched. */
     removeDemoRoot: (path: string) => invoke<DemoFolderRoot[]>('remove_demo_root', { path }),
 
-    /** Back a whole added folder up, or show it, or neither. */
-    setDemoRoot: (path: string, sync: boolean, visible: boolean) =>
-        invoke<DemoFolderRoot[]>('set_demo_root', { path, sync, visible }),
+    /** Change a watched folder's own answers, or what its subfolders do by
+     *  default. Only what is passed is touched. The game's own folder takes the
+     *  subfolder defaults but not its own two answers - it is always backed up
+     *  and always listed. */
+    setDemoRoot: (
+        path: string,
+        patch: { sync?: boolean; visible?: boolean; subSync?: boolean; subVisible?: boolean },
+    ) => invoke<DemoFolderRoot[]>('set_demo_root', { path, ...patch }),
 
     /** Notifications feed for the bell badge + Notifications tab.
      *  Records (PB beats / WR takes) + system (render done, etc.)

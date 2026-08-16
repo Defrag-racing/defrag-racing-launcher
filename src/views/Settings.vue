@@ -10,6 +10,7 @@
     import { useConfigStore } from '../stores/config';
     import { useUpdaterStore } from '../stores/updater';
     import { displayPath } from '../lib/path';
+    import { q3ToHtml } from '../lib/q3color';
     import { LANGUAGES, locale, resolveLocale, setLocale, t } from '../lib/i18n';
     import { locale as osLocale } from '@tauri-apps/plugin-os';
 
@@ -39,6 +40,10 @@
         void loadFolders();
         const target = route.query.highlight;
         if (target !== 'demos' && target !== 'token') return;
+        // The card is in a group, and a group that is not open is not on the
+        // page: scrolling to it did nothing and the click looked like it had
+        // gone somewhere else entirely. Open the group first, then pulse.
+        setTab(target === 'token' ? 'account' : 'demos');
         // Same one-shot pulse + scroll for the token card - the Servers /
         // Records / Maps "Token required" empty states deep-link here with
         // ?highlight=token so the user lands on the field to paste into.
@@ -259,6 +264,7 @@
         foldersError.value = null;
         try {
             folders.value = await tauri.listDemoFolders();
+            collapseLongTrees();
         } catch (e: any) {
             foldersError.value = e?.toString?.() ?? t('Could not read your demos folder');
             folders.value = [];
@@ -276,15 +282,16 @@
         folderBusy.value = `${root.path}::${f.path}`;
         foldersError.value = null;
         try {
+            const sync = patch.sync ?? f.sync;
+            // Backing a folder up also puts it in your list. A folder that is
+            // uploaded but nowhere to be seen is a real setting - an archive
+            // kept out of the way - but it is not what one click on Back up
+            // means, and hiding it again is the next switch along.
+            const visible = patch.visible ?? (patch.sync === true ? true : f.visible);
             // Every folder comes back: switching a parent off moves every
             // child that was inheriting from it, and those rows have to
             // redraw too.
-            folders.value = await tauri.setDemoFolder(
-                root.path,
-                f.path,
-                patch.sync ?? f.sync,
-                patch.visible ?? f.visible,
-            );
+            folders.value = await tauri.setDemoFolder(root.path, f.path, sync, visible);
             await config.refresh();
         } catch (e: any) {
             foldersError.value = e?.toString?.() ?? t('Could not save that');
@@ -293,23 +300,47 @@
         }
     };
 
-    /** Back a whole added folder up, or show it, or neither. */
-    const setRoot = async (root: DemoFolderRoot, patch: { sync?: boolean; visible?: boolean }) => {
+    /** Back a whole watched folder up, show it, or decide what its subfolders
+     *  do when nobody has said anything about them. */
+    const setRoot = async (
+        root: DemoFolderRoot,
+        patch: { sync?: boolean; visible?: boolean; subSync?: boolean; subVisible?: boolean },
+    ) => {
         if (folderBusy.value) return;
         folderBusy.value = root.path;
         foldersError.value = null;
         try {
-            folders.value = await tauri.setDemoRoot(
-                root.path,
-                patch.sync ?? root.sync,
-                patch.visible ?? root.visible,
-            );
+            folders.value = await tauri.setDemoRoot(root.path, patch);
             await config.refresh();
         } catch (e: any) {
             foldersError.value = e?.toString?.() ?? t('Could not save that');
         } finally {
             folderBusy.value = null;
         }
+    };
+
+    /** Tick or untick every subfolder of one watched folder at once. Written as
+     *  the folder's default rather than a record each, so a folder made
+     *  tomorrow does the same thing as the ones made today. */
+    const setAllFolders = (root: DemoFolderRoot, patch: { subSync?: boolean; subVisible?: boolean }) =>
+        setRoot(root, patch);
+
+    /** Folders whose subfolder list is folded away. A tree of thirty starts
+     *  folded so the page stays readable; once opened by hand it stays open,
+     *  including across a reload of the list. */
+    const collapsed = ref<Set<string>>(new Set());
+    const opened = new Set<string>();
+    const isCollapsed = (root: DemoFolderRoot) => collapsed.value.has(root.path);
+    const toggleCollapsed = (root: DemoFolderRoot) => {
+        const next = new Set(collapsed.value);
+        if (next.has(root.path)) {
+            next.delete(root.path);
+            opened.add(root.path);
+        } else {
+            next.add(root.path);
+            opened.delete(root.path);
+        }
+        collapsed.value = next;
     };
 
     /** Add a demos folder from anywhere - another drive, an archive. */
@@ -344,9 +375,13 @@
         }
     };
 
-    const toggleSubfolders = async (on: boolean) => {
-        await config.save({ include_subfolders: on });
-        await loadFolders();
+    /** Fold anything with more than a handful of subfolders on first sight. */
+    const collapseLongTrees = () => {
+        const next = new Set(collapsed.value);
+        for (const root of folders.value) {
+            if (root.folders.length > 8 && ! opened.has(root.path)) next.add(root.path);
+        }
+        collapsed.value = next;
     };
 
     const saveToken = async () => {
@@ -472,13 +507,13 @@
     // last one is remembered so coming back lands where you left rather than
     // at the top.
     const SECTIONS = [
-        { key: 'general',  label: 'General' },
-        { key: 'game',     label: 'Game' },
-        { key: 'demos',    label: 'Demos' },
-        { key: 'comps',    label: 'Comps' },
-        { key: 'notify',   label: 'Notifications' },
-        { key: 'account',  label: 'Account' },
-        { key: 'advanced', label: 'Advanced' },
+        { key: 'general',  icon: '⚙️', label: 'General',       blurb: 'Language, starting with the system, updates.' },
+        { key: 'game',     icon: '🎮', label: 'Game',          blurb: 'The engine to launch, join links, and what opens a demo file.' },
+        { key: 'demos',    icon: '📁', label: 'Demos',         blurb: 'Which folders are watched, what is backed up, what is listed.' },
+        { key: 'comps',    icon: '🏁', label: 'Comps',         blurb: 'What happens to a run you record on the map being played.' },
+        { key: 'notify',   icon: '🔔', label: 'Notifications', blurb: 'What the launcher may tell you while you are in a game.' },
+        { key: 'account',  icon: '👤', label: 'Account',       blurb: 'Who this launcher is signed in as, and the token it uses.' },
+        { key: 'advanced', icon: '🛠️', label: 'Advanced',      blurb: 'Launch arguments, repairs, and starting over.' },
     ] as const;
 
     const TAB_KEY = 'launcher.settings.tab.v1';
@@ -491,6 +526,7 @@
         tab.value = key;
         localStorage.setItem(TAB_KEY, key);
     };
+    const section = computed(() => SECTIONS.find(s => s.key === tab.value) ?? SECTIONS[0]);
 
     const healthDot = (status: string) =>
         status === 'ok' ? 'bg-emerald-400' : status === 'warn' ? 'bg-amber-400' : 'bg-red-400';
@@ -511,13 +547,20 @@
                 <button
                     v-for="s in SECTIONS"
                     :key="s.key"
-                    class="w-full text-left px-3 py-2 rounded text-sm transition-colors"
+                    class="w-full text-left px-3 py-2 rounded text-sm transition-colors flex items-center gap-2"
                     :class="tab === s.key ? 'bg-brand-500/20 text-brand-200 font-semibold' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/[0.04]'"
                     @click="setTab(s.key)"
-                >{{ $t(s.label) }}</button>
+                ><span class="text-xs opacity-80">{{ s.icon }}</span>{{ $t(s.label) }}</button>
             </nav>
 
             <div class="flex-1 overflow-auto p-5 space-y-4 max-w-2xl w-full">
+            <!-- What this group is, so a page of switches has a sentence in
+                 front of it instead of starting mid-thought. -->
+            <div class="pb-1">
+                <div class="text-lg font-semibold">{{ $t(section.label) }}</div>
+                <div class="text-xs text-neutral-500 mt-0.5">{{ $t(section.blurb) }}</div>
+            </div>
+
             <div v-show="tab === 'general'" class="space-y-4">
                 <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
                     <div class="flex items-start justify-between gap-3">
@@ -541,7 +584,6 @@
                     </p>
                 </section>
 
-                <!-- Engine -->
                 <!-- Autostart -->
                 <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 flex items-center justify-between gap-3">
                     <div>
@@ -562,31 +604,9 @@
                     </label>
                 </section>
 
-                <!-- Desktop notifications. The launcher spends its life minimised
-                     behind a fullscreen game, so anything worth saying has to
-                     leave the window or it arrives after it mattered. -->
-                <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 flex items-center justify-between gap-3">
-                    <div>
-                        <div class="font-semibold">Automatic updates</div>
-                        <div class="text-xs text-neutral-500 mt-0.5">
-                            Checks `defrag.racing` and GitHub on startup for a newer signed release.
-                            Off = check Releases manually.
-                        </div>
-                    </div>
-                    <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
-                        <input
-                            type="checkbox"
-                            class="sr-only peer"
-                            :checked="config.config.auto_update_enabled"
-                            @change="config.save({ auto_update_enabled: ($event.target as HTMLInputElement).checked })"
-                        />
-                        <div class="w-10 h-5 bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors"></div>
-                        <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
-                    </label>
-                </section>
-                -->
-                <!-- Auto-update status (read-only, informational) -->
-                <!-- Auto-update status (read-only, informational) -->
+                <!-- Auto-update status (read-only, informational). The switch
+                     that used to sit here is gone on purpose - see the note in
+                     the Notifications group. -->
                 <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
                     <div class="flex items-center gap-2">
                         <span class="text-emerald-400">●</span>
@@ -632,10 +652,6 @@
                         <UpdateBanner />
                     </div>
                 </section>
-
-                <!-- Developer mode. Toggle reveals the advanced launch surface:
-                     custom args appended to Quick launch + named launch
-                     profiles that show as extra launch buttons in the top nav. -->
             </div>
 
             <div v-show="tab === 'game'" class="space-y-4">
@@ -679,7 +695,6 @@
                     </div>
                 </section>
 
-                <!-- Demos path -->
                 <section v-if="assoc?.supported" class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
                     <div>
                         <div class="font-semibold">{{ $t('Demo files (.dm_68)') }}</div>
@@ -712,11 +727,18 @@
                     </p>
                 </section>
 
-                <!-- Token -->
             </div>
 
             <div v-show="tab === 'demos'" class="space-y-4">
-                <!-- Demos path -->
+                <!-- Every folder the launcher watches, and every folder inside
+                     each of them. One list: the question "is this demo backed
+                     up" is answered in one place, at the folder it is in.
+
+                     Subfolders are listed whether they are watched or not,
+                     because a list that only shows what is already on cannot
+                     be used to turn anything on - which is exactly how the
+                     page read before, as a folder switch with nothing behind
+                     it. -->
                 <section
                     ref="demosSection"
                     class="bg-neutral-900 border rounded-lg p-4 space-y-3 transition-all duration-500"
@@ -726,117 +748,134 @@
                 >
                     <div class="flex items-start justify-between gap-3">
                         <div>
-                            <div class="font-semibold">{{ $t('Demos folder') }}</div>
-                            <div class="text-xs text-neutral-500 mt-0.5">{{ $t('The launcher watches this folder for new demos.') }}</div>
-                            <div class="text-[11px] text-brand-400/80 mt-1">
-                                {{ $t('Drives the Demos tab: auto-backup, the list of demos on disk, and YouTube renders.') }}
-                            </div>
-                        </div>
-                        <button class="btn-ghost" @click="pickDemos">{{ $t('Change') }}</button>
-                    </div>
-                    <div class="text-sm text-neutral-300 break-all" :title="config.config.demos_path || ''">
-                        {{ displayPath(config.config.demos_path) || '(not set)' }}
-                    </div>
-                    <div class="flex items-center justify-between gap-3 pt-2 border-t border-white/[0.05]">
-                        <div>
-                            <div class="text-sm font-medium">{{ $t('Include subfolders') }}</div>
+                            <div class="font-semibold">{{ $t('Your demos folders') }}</div>
                             <div class="text-xs text-neutral-500 mt-0.5">
-                                {{ $t('Watch folders inside it too. Takes effect on the next Start.') }}
+                                {{ $t('Demos can live on more than one drive. Every folder here decides on its own whether it is backed up to your account and whether it shows in the Demos list.') }}
                             </div>
                         </div>
-                        <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
-                            <input
-                                type="checkbox"
-                                class="sr-only peer"
-                                :checked="config.config.include_subfolders"
-                                @change="toggleSubfolders(($event.target as HTMLInputElement).checked)"
-                            />
-                            <div class="w-10 h-5 bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors"></div>
-                            <div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
-                        </label>
+                        <button class="btn-ghost flex-shrink-0" :disabled="folderBusy !== null" @click="addRoot">
+                            + {{ $t('Add a folder') }}
+                        </button>
                     </div>
 
-                    <!-- Every folder the launcher watches. The game's own is
-                         first and cannot be removed; the rest are wherever the
-                         person keeps demos - another drive, an archive, a
-                         collection that predates the launcher. -->
-                    <div class="pt-3 border-t border-white/[0.05]">
-                        <div class="flex items-start justify-between gap-3">
-                            <div>
-                                <div class="text-sm font-medium">{{ $t('Your folders') }}</div>
-                                <div class="text-xs text-neutral-500 mt-0.5">
-                                    {{ $t('Demos can live on more than one drive. Add every folder you keep them in - each one decides on its own whether it is backed up to your account and whether it shows in the Demos list.') }}
-                                </div>
-                            </div>
-                            <button class="btn-ghost flex-shrink-0" :disabled="folderBusy !== null" @click="addRoot">
-                                {{ $t('Add a folder') }}
-                            </button>
-                        </div>
+                    <p v-if="foldersError" class="text-xs text-red-300">{{ foldersError }}</p>
+                    <p v-else-if="foldersLoading && !folders.length" class="text-xs text-neutral-500">
+                        {{ $t('Reading your demos folder…') }}
+                    </p>
+                    <p v-else-if="!config.config.demos_path" class="text-xs text-amber-300">
+                        {{ $t('No demos folder set yet. Run the setup again from Advanced, or add one here.') }}
+                    </p>
 
-                        <p v-if="foldersError" class="mt-2 text-xs text-red-300">{{ foldersError }}</p>
-                        <p v-else-if="foldersLoading && !folders.length" class="mt-3 text-xs text-neutral-500">
-                            {{ $t('Reading your demos folder…') }}
-                        </p>
-
-                        <div class="mt-3 space-y-3">
-                            <div
-                                v-for="root in folders"
-                                :key="root.path"
-                                class="rounded-lg border border-white/[0.06] bg-black/20 p-3"
-                            >
-                                <div class="flex items-start gap-3">
-                                    <div class="flex-1 min-w-0">
-                                        <div class="text-sm text-neutral-200 break-all" :title="root.path">{{ root.path }}</div>
-                                        <div class="text-[11px] text-neutral-500 mt-0.5">
-                                            <span v-if="root.primary">{{ $t('Where your game records - this one is your demos folder above') }}</span>
-                                            <span v-else-if="!root.exists" class="text-amber-300/80">{{ $t('Not there right now. A drive that is unplugged keeps its place in this list.') }}</span>
-                                            <span v-else>
-                                                {{ root.demos === 1 ? $t('1 demo') : $t(':count demos', { count: root.demos }) }}
-                                                <span v-if="root.folders.length"> · {{ root.folders.length === 1 ? $t('1 subfolder') : $t(':count subfolders', { count: root.folders.length }) }}</span>
+                    <div class="space-y-3">
+                        <div
+                            v-for="root in folders"
+                            :key="root.path"
+                            class="rounded-lg border border-white/[0.06] bg-black/20"
+                        >
+                            <!-- The folder itself -->
+                            <div class="p-3 flex items-start gap-3">
+                                <div class="flex-1 min-w-0">
+                                    <div class="text-sm text-neutral-200 break-all" :title="root.path">{{ root.path }}</div>
+                                    <div class="text-[11px] text-neutral-500 mt-0.5">
+                                        <span v-if="!root.exists" class="text-amber-300/80">
+                                            {{ $t('Not there right now. A drive that is unplugged keeps its place in this list.') }}
+                                        </span>
+                                        <template v-else>
+                                            <span>{{ root.demos === 1 ? $t('1 demo') : $t(':count demos', { count: root.demos }) }}</span>
+                                            <span v-if="root.folders.length">
+                                                · {{ root.folders.length === 1 ? $t('1 subfolder') : $t(':count subfolders', { count: root.folders.length }) }}
                                             </span>
-                                        </div>
+                                            <span v-if="root.primary" class="text-brand-400/80">
+                                                · {{ $t('where your game records') }}
+                                            </span>
+                                        </template>
                                     </div>
-
-                                    <!-- The game's own folder has no switches: turning
-                                         backup off for it is what the button on the
-                                         Demos tab does, and the same choice in two
-                                         places is how one of them ends up lying. -->
-                                    <template v-if="!root.primary">
-                                        <label class="w-16 relative inline-flex items-center justify-center cursor-pointer" :title="root.sync ? $t('Backed up to defrag.racing') : $t('Not backed up')">
-                                            <input
-                                                type="checkbox"
-                                                class="sr-only peer"
-                                                :checked="root.sync"
-                                                :disabled="folderBusy !== null"
-                                                @change="setRoot(root, { sync: ($event.target as HTMLInputElement).checked })"
-                                            />
-                                            <span class="w-9 h-[18px] bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors block"></span>
-                                            <span class="absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform peer-checked:translate-x-[18px]"></span>
-                                        </label>
-                                        <label class="w-16 relative inline-flex items-center justify-center cursor-pointer" :title="root.visible ? $t('Shown in the Demos list') : $t('Hidden from the Demos list')">
-                                            <input
-                                                type="checkbox"
-                                                class="sr-only peer"
-                                                :checked="root.visible"
-                                                :disabled="folderBusy !== null"
-                                                @change="setRoot(root, { visible: ($event.target as HTMLInputElement).checked })"
-                                            />
-                                            <span class="w-9 h-[18px] bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors block"></span>
-                                            <span class="absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform peer-checked:translate-x-[18px]"></span>
-                                        </label>
-                                        <button
-                                            class="text-neutral-500 hover:text-red-300 transition-colors flex-shrink-0"
-                                            :title="$t('Stop watching this folder. Nothing on your disk is touched.')"
-                                            :disabled="folderBusy !== null"
-                                            @click="removeRoot(root)"
-                                        >✕</button>
-                                    </template>
                                 </div>
 
-                                <!-- Subfolders, only when they are watched at all.
-                                     With that switch off there is nothing here to
-                                     decide and an empty list would look broken. -->
-                                <div v-if="config.config.include_subfolders && root.exists && root.folders.length" class="mt-3 pt-2 border-t border-white/[0.05] space-y-1">
+                                <!-- The game's own folder has no switches of its
+                                     own: turning backup off for it is what the
+                                     button on the Demos tab does, and the same
+                                     choice in two places is how one of them ends
+                                     up lying. -->
+                                <div v-if="root.primary" class="flex items-center gap-2 flex-shrink-0">
+                                    <span class="text-[11px] text-neutral-500">{{ $t('always on') }}</span>
+                                    <button class="btn-ghost" @click="pickDemos">{{ $t('Change') }}</button>
+                                </div>
+                                <template v-else>
+                                    <label class="w-16 relative inline-flex items-center justify-center cursor-pointer" :title="root.sync ? $t('Backed up to defrag.racing') : $t('Not backed up')">
+                                        <input
+                                            type="checkbox"
+                                            class="sr-only peer"
+                                            :checked="root.sync"
+                                            :disabled="folderBusy !== null"
+                                            @change="setRoot(root, { sync: ($event.target as HTMLInputElement).checked })"
+                                        />
+                                        <span class="w-9 h-[18px] bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors block"></span>
+                                        <span class="absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform peer-checked:translate-x-[18px]"></span>
+                                    </label>
+                                    <label class="w-16 relative inline-flex items-center justify-center cursor-pointer" :title="root.visible ? $t('Shown in the Demos list') : $t('Hidden from the Demos list')">
+                                        <input
+                                            type="checkbox"
+                                            class="sr-only peer"
+                                            :checked="root.visible"
+                                            :disabled="folderBusy !== null"
+                                            @change="setRoot(root, { visible: ($event.target as HTMLInputElement).checked })"
+                                        />
+                                        <span class="w-9 h-[18px] bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors block"></span>
+                                        <span class="absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform peer-checked:translate-x-[18px]"></span>
+                                    </label>
+                                    <button
+                                        class="text-neutral-500 hover:text-red-300 transition-colors flex-shrink-0"
+                                        :title="$t('Stop watching this folder. Nothing on your disk is touched.')"
+                                        :disabled="folderBusy !== null"
+                                        @click="removeRoot(root)"
+                                    >✕</button>
+                                </template>
+                            </div>
+
+                            <!-- The folders inside it -->
+                            <div v-if="root.exists" class="border-t border-white/[0.05] px-3 py-2">
+                                <div class="flex items-center gap-3 flex-wrap">
+                                    <button
+                                        v-if="root.folders.length"
+                                        class="text-xs text-neutral-400 hover:text-neutral-200 flex items-center gap-1"
+                                        @click="toggleCollapsed(root)"
+                                    >
+                                        <span class="text-neutral-600">{{ isCollapsed(root) ? '▸' : '▾' }}</span>
+                                        {{ root.folders.length === 1
+                                            ? $t('1 folder inside')
+                                            : $t(':count folders inside', { count: root.folders.length }) }}
+                                    </button>
+                                    <span v-else class="text-xs text-neutral-600">{{ $t('Nothing inside this folder.') }}</span>
+
+                                    <!-- The two answers move together here on
+                                         purpose: this is the "what does a
+                                         folder in here do by default" switch,
+                                         and a folder made tomorrow follows it
+                                         too. Anything finer is the two
+                                         switches on the folder's own row. -->
+                                    <div v-if="root.folders.length" class="ml-auto flex items-center gap-2 text-xs">
+                                        <span class="text-neutral-600">{{ $t('Use:') }}</span>
+                                        <button
+                                            class="px-2 py-0.5 rounded border transition-colors"
+                                            :class="root.sub_sync
+                                                ? 'bg-brand-500/20 border-brand-500/60 text-brand-200'
+                                                : 'bg-white/5 border-white/10 text-neutral-400 hover:bg-white/10'"
+                                            :disabled="folderBusy !== null"
+                                            @click="setAllFolders(root, { subSync: true, subVisible: true })"
+                                        >{{ $t('all of them') }}</button>
+                                        <button
+                                            class="px-2 py-0.5 rounded border transition-colors"
+                                            :class="!root.sub_sync
+                                                ? 'bg-brand-500/20 border-brand-500/60 text-brand-200'
+                                                : 'bg-white/5 border-white/10 text-neutral-400 hover:bg-white/10'"
+                                            :disabled="folderBusy !== null"
+                                            @click="setAllFolders(root, { subSync: false, subVisible: false })"
+                                        >{{ $t('only the ones I tick') }}</button>
+                                    </div>
+                                </div>
+
+                                <div v-if="root.folders.length && !isCollapsed(root)" class="mt-2 space-y-1">
                                     <div class="flex items-center gap-3 px-1 text-[11px] uppercase tracking-wide text-neutral-500">
                                         <span class="flex-1">{{ $t('Folder') }}</span>
                                         <span class="w-16 text-center">{{ $t('Back up') }}</span>
@@ -854,7 +893,7 @@
                                             </div>
                                             <div class="text-[11px] text-neutral-500">
                                                 {{ f.demos === 1 ? $t('1 demo') : $t(':count demos', { count: f.demos }) }}
-                                                <span v-if="f.inherited && (!f.sync || !f.visible)" class="text-neutral-600">
+                                                <span v-if="f.inherited && f.depth > 1" class="text-neutral-600">
                                                     · {{ $t('following its parent') }}
                                                 </span>
                                             </div>
@@ -887,41 +926,43 @@
                         </div>
                     </div>
 
-                    <!-- CPU throttle -->
-                    <div class="pt-3 border-t border-white/5">
-                        <div class="mb-2">
-                            <div class="text-sm font-medium">{{ $t('CPU usage while checking demos') }}</div>
-                            <div class="text-xs text-neutral-500 mt-0.5">
-                                {{ $t('How much of one CPU core the launcher may use while going through your demos. Lower is more comfortable while gaming and slower on a big folder. The Speed up button on the Demos tab overrides this while a backlog drains.') }}
-                            </div>
-                        </div>
-                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                            <button
-                                v-for="opt in [
-                                    { label: $t('Background'), sub: '15%', value: 15 },
-                                    { label: $t('Normal'),     sub: '25%', value: 25 },
-                                    { label: $t('Fast'),       sub: '50%', value: 50 },
-                                    { label: $t('No limit'),   sub: $t('max'), value: 0  },
-                                ]"
-                                :key="opt.value"
-                                class="px-3 py-2 rounded text-sm border transition-colors text-left"
-                                :class="config.config.cpu_throttle_pct === opt.value
-                                    ? 'bg-brand-500/20 border-brand-500/60 text-brand-200'
-                                    : 'bg-white/5 border-white/10 hover:bg-white/10 text-neutral-300'"
-                                @click="setThrottlePreference(opt.value)"
-                            >
-                                <div class="font-semibold">{{ opt.label }}</div>
-                                <div class="text-xs text-neutral-500">{{ opt.sub }} CPU</div>
-                            </button>
-                        </div>
-                        <p class="text-xs text-neutral-500 mt-2">
-                            {{ $t('Takes effect straight away, even while a backup is running.') }}
-                        </p>
-                    </div>
+                    <p class="text-xs text-neutral-500">
+                        {{ $t('A folder you tick takes effect from the next demo. Demos already backed up stay backed up whatever you do here.') }}
+                    </p>
                 </section>
 
-                <!-- Comps guard. Lives next to the demos folder because it is a
-                     rule about what happens to demos found in it. -->
+                <!-- CPU throttle. Its own card: it is about the machine, not
+                     about which folder goes where. -->
+                <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
+                    <div>
+                        <div class="font-semibold">{{ $t('CPU usage while checking demos') }}</div>
+                        <div class="text-xs text-neutral-500 mt-0.5">
+                            {{ $t('How much of one CPU core the launcher may use while going through your demos. Lower is more comfortable while gaming and slower on a big folder. The Speed up button on the Demos tab overrides this while a backlog drains.') }}
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <button
+                            v-for="opt in [
+                                { label: $t('Background'), sub: '15%', value: 15 },
+                                { label: $t('Normal'),     sub: '25%', value: 25 },
+                                { label: $t('Fast'),       sub: '50%', value: 50 },
+                                { label: $t('No limit'),   sub: $t('max'), value: 0  },
+                            ]"
+                            :key="opt.value"
+                            class="px-3 py-2 rounded text-sm border transition-colors text-left"
+                            :class="config.config.cpu_throttle_pct === opt.value
+                                ? 'bg-brand-500/20 border-brand-500/60 text-brand-200'
+                                : 'bg-white/5 border-white/10 hover:bg-white/10 text-neutral-300'"
+                            @click="setThrottlePreference(opt.value)"
+                        >
+                            <div class="font-semibold">{{ opt.label }}</div>
+                            <div class="text-xs text-neutral-500">{{ opt.sub }} CPU</div>
+                        </button>
+                    </div>
+                    <p class="text-xs text-neutral-500">
+                        {{ $t('Takes effect straight away, even while a backup is running.') }}
+                    </p>
+                </section>
             </div>
 
             <div v-show="tab === 'comps'" class="space-y-4">
@@ -957,9 +998,6 @@
                         {{ $t('Takes effect straight away, from the next demo onwards.') }}
                     </p>
                 </section>
-
-                <!-- Demo files. Windows only: the section hides itself where the
-                     backend reports the whole idea unsupported. -->
             </div>
 
             <div v-show="tab === 'notify'" class="space-y-4">
@@ -1031,11 +1069,44 @@
                      cleanup bugs that wipe user data, etc.) have to reach
                      every install without depending on the user remembering to
                      check Releases. The config field still exists and defaults
-                     to true; the toggle UI is preserved below in case we ever
-                     want to add an "expert mode" escape hatch.
+                     to true; there is no switch for it anywhere. -->
             </div>
 
             <div v-show="tab === 'account'" class="space-y-4">
+                <!-- Who this launcher is signed in as. It is the first thing
+                     anybody opens this group to find out, and until now the
+                     answer was only visible as an avatar in the corner. -->
+                <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
+                    <div class="font-semibold">{{ $t('Signed in as') }}</div>
+
+                    <div v-if="config.hasToken && config.me" class="flex items-center gap-3">
+                        <div class="min-w-0 flex-1">
+                            <div class="text-lg leading-tight truncate" v-html="q3ToHtml(config.me.name)"></div>
+                            <div class="text-xs text-neutral-500 mt-1">
+                                <span v-if="config.me.mdd_id">{{ $t('Profile :id on defrag.racing', { id: config.me.mdd_id }) }}</span>
+                                <span v-else>{{ $t('No q3df.org profile linked to this account yet.') }}</span>
+                            </div>
+                        </div>
+                        <button
+                            v-if="config.me.mdd_id"
+                            class="btn-ghost flex-shrink-0"
+                            @click="openExternal(`https://defrag.racing/profile/${config.me.mdd_id}`)"
+                        >{{ $t('Open my profile') }}</button>
+                    </div>
+
+                    <div v-else-if="config.hasToken" class="text-sm text-amber-300">
+                        {{ $t('The token is saved, but defrag.racing did not say who it belongs to. Either you are offline, or the token was removed on the site.') }}
+                    </div>
+
+                    <div v-else class="text-sm text-neutral-400">
+                        {{ $t('This launcher is not signed in. Paste a token below and it will say who you are here.') }}
+                    </div>
+
+                    <p class="text-xs text-neutral-500 pt-2 border-t border-white/[0.05]">
+                        {{ $t('Everything the launcher backs up goes to this account. Change it by replacing the token below.') }}
+                    </p>
+                </section>
+
                 <!-- Token -->
                 <section
                     ref="tokenSection"
@@ -1095,7 +1166,6 @@
                     </div>
                 </section>
 
-                <!-- Force re-check uploaded demos -->
             </div>
 
             <div v-show="tab === 'advanced'" class="space-y-4">
@@ -1184,12 +1254,9 @@
                     </div>
                 </section>
 
-                <!-- Reset - wipes every setting and token and drops the user
-                     back into the onboarding wizard. Lives in a red-tinted card
-                     so it reads as destructive at a glance. (Re-run setup used
-                     to be a separate button; it's gone - Reset is the canonical
-                     way to redo setup, and every field is editable above anyway.) -->
-                <!-- Force re-check uploaded demos -->
+                <!-- Force re-check uploaded demos. Re-run setup used to be a
+                     separate button; it is gone - Reset at the bottom is the
+                     way to redo setup, and every field is editable anyway. -->
                 <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 flex items-center justify-between gap-3">
                     <div>
                         <div class="font-semibold">{{ $t('Re-check uploaded demos') }}</div>
@@ -1202,7 +1269,6 @@
                     </button>
                 </section>
 
-                <!-- Check & repair -->
                 <!-- Check & repair -->
                 <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
                     <div class="flex items-center justify-between gap-3">
@@ -1238,7 +1304,7 @@
                     </ul>
                 </section>
 
-                <!-- Autostart -->
+                <!-- Reset. Red-tinted so it reads as destructive at a glance. -->
                 <section class="bg-red-500/5 border border-red-500/30 rounded-lg p-4 flex items-center justify-between">
                     <div>
                         <div class="font-semibold text-red-300">{{ $t('Reset the launcher') }}</div>

@@ -1177,7 +1177,7 @@
             <div class="flex items-center justify-end gap-2">
                 <button
                     class="px-3 py-1 rounded bg-amber-500/30 hover:bg-amber-500/40 text-amber-100 font-semibold flex-shrink-0"
-                    @click="router.push({ name: 'settings' })"
+                    @click="router.push({ name: 'settings', query: { highlight: 'token' } })"
                 >{{ $t('Add token →') }}</button>
             </div>
         </div>

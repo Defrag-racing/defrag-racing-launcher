@@ -4,6 +4,14 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.50
+
+- **Settings > Demos now lists every folder you have, and you tick what gets backed up.** The old page had a single "Include subfolders" switch and, with it off, no list at all - so there was nothing to tick and no way to see what the launcher would take. Every subfolder is listed now whether it is watched or not, with its own two switches and how many demos are in it, and **nothing below the top of a folder is backed up until you tick it**. Someone with an `old/` of eight thousand runs is not publishing them by accident, and a folder made next month starts off too. If you had "Include subfolders" on, everything stays exactly as it was.
+- **Settings > Account was empty.** The whole group was, because of a stray comment in the page: the account card had been swallowed by it and was rendering inside Notifications instead. Account now opens with who this launcher is signed in as, the profile it backs up to and a button to open it, above the token it uses.
+- **"Change in Settings" from the demos folder chip landed on the wrong group.** It scrolled to a card that was not on screen, so it looked like it had gone nowhere. It opens the Demos group now and pulses the folder list. Same for the "Add token" and "Token required" links, which open Account.
+- **The settings groups say what they are.** Each one now has a title and a line under it saying what is inside, and the rail has icons.
+- **Fixed: the General group showed an "Automatic updates" switch that did nothing**, plus a stray `-->` above it. Same broken comment as the Account bug. Automatic updates cannot be switched off - the card below the switch always said so.
+
 ## 0.1.49
 
 - **Fixed: a demo opened from outside your Quake folder started plain Quake and asked for a CD key.** The launcher worked out which mod to run from the demo's own path - the first folder called `demos` above the file, and the folder above that is the mod. A demo archive kept in something like `D:\enterdemos\demos\...` therefore told the engine to run a mod called "enterdemos", which does not exist, so it ran none at all and sat on the stock menu. Which mod to run and where to find it now come from the engine you picked in Settings, and a demo that is not inside that install is copied where the install can see it before it plays. Right-click Open with, double-click and drag and drop all go through the same path, so all three were affected.

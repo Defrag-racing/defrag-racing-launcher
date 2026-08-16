@@ -38,14 +38,25 @@ pub struct Config {
     /// launcher is harmless until the user opts in + provides a token.
     pub auto_upload_enabled: bool,
 
-    /// Recurse into subdirectories of demos_path when watching/scanning.
-    /// Off by default because Defrag itself writes demos to the top level
-    /// and recursive watching would surprise users who archive old demos
-    /// into subfolders specifically to STOP backing them up. Turning it
-    /// on covers organized demos folders ("by date", "by map", etc.)
-    /// without forcing the user to flatten everything.
+    /// What subfolders of the game's demos folder did before they could be
+    /// answered one at a time. Kept because it is the only thing an older
+    /// launcher reads, and because it is where `subfolder_sync` and
+    /// `subfolder_visible` come from when they have never been written: a
+    /// config that had this on keeps every subfolder on, which for that person
+    /// is not a change at all.
+    ///
+    /// Nothing decides anything by this field directly. Read
+    /// `subfolder_defaults()`.
     #[serde(default)]
     pub include_subfolders: bool,
+
+    /// What a subfolder of the game's demos folder does when nothing has been
+    /// said about it. `None` until somebody touches a switch, and then it
+    /// stops following `include_subfolders` for good.
+    #[serde(default)]
+    pub subfolder_sync: Option<bool>,
+    #[serde(default)]
+    pub subfolder_visible: Option<bool>,
 
     /// Demos folders outside the game's own one - other drives, archives,
     /// somebody else's collection. The game's folder stays `demos_path`
@@ -54,10 +65,10 @@ pub struct Config {
     #[serde(default)]
     pub extra_demo_roots: Vec<crate::folders::DemoRoot>,
 
-    /// Subfolders the user has changed something about: not backed up, not
-    /// listed, or both. Only exceptions are stored - see `folders.rs` for why
+    /// Subfolders of the game's demos folder whose answer differs from the
+    /// default above. Only exceptions are stored - see `folders.rs` for why
     /// that, rather than a full inventory, is the shape that survives a folder
-    /// being created next month. Ignored while `include_subfolders` is off.
+    /// being created next month.
     #[serde(default)]
     pub folders: Vec<crate::folders::WatchedFolder>,
 
@@ -197,6 +208,8 @@ impl Default for Config {
             extra_demo_roots: Vec::new(),
             auto_upload_enabled: false,
             include_subfolders: false,
+            subfolder_sync: None,
+            subfolder_visible: None,
             folders: Vec::new(),
             language: None,
             notify_enabled: true,
@@ -229,16 +242,44 @@ impl Config {
         let mut roots = Vec::new();
 
         if let Some(path) = self.demos_path.clone() {
+            let (sub_sync, sub_visible) = self.subfolder_defaults();
             roots.push(crate::folders::DemoRoot {
                 path,
                 sync: true,
                 visible: true,
+                sub_sync,
+                sub_visible,
                 folders: self.folders.clone(),
             });
         }
 
         roots.extend(self.extra_demo_roots.iter().cloned());
         roots
+    }
+
+    /// What a subfolder of the game's demos folder does when it has no record
+    /// of its own. Falls back to the old single switch until somebody answers
+    /// it for the first time.
+    pub fn subfolder_defaults(&self) -> (bool, bool) {
+        (
+            self.subfolder_sync.unwrap_or(self.include_subfolders),
+            self.subfolder_visible.unwrap_or(self.include_subfolders),
+        )
+    }
+
+    /// Is there anything below the top of a watched folder worth opening?
+    ///
+    /// Walking a folder recursively costs real time on an archive of ten
+    /// thousand demos, so it is done when some folder in it is actually wanted
+    /// and not otherwise. A record that turns a folder OFF is not a reason:
+    /// it is the default that would have brought us in there, and it already
+    /// counted.
+    pub fn watches_subfolders(&self) -> bool {
+        self.demo_roots().iter().any(|r| {
+            r.sub_sync
+                || r.sub_visible
+                || r.folders.iter().any(|f| f.sync || f.visible)
+        })
     }
 
     pub fn path() -> Result<PathBuf> {
