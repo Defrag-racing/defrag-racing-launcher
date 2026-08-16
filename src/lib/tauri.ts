@@ -184,6 +184,13 @@ export interface CompsMapCard {
     thumbnail: string | null;
 }
 
+/** One map on the ballot: the card plus what it has been voted, and the
+ *  physics it cannot win if it is barred from one. */
+export interface CompsBallotMap extends CompsMapCard {
+    votes: Record<string, number>;
+    blocked_physics: string | null;
+}
+
 export interface CompsPlaying {
     round_id: number;
     comp_number: number;
@@ -216,11 +223,13 @@ export interface CompsVoting {
     is_open: boolean;
     candidates: string[];
     /** What won, once the ballot has closed: physics -> the map, who made it,
-     *  its picture and how it won. Empty while voting is open. */
-    decided?: Record<string, CompsMapCard & { decided_by: string | null }>;
-    /** The ballot with authors and pictures. `candidates` above stays a list
-     *  of names for launchers built before this existed. */
-    candidate_maps?: CompsMapCard[];
+     *  its picture, how it won and with how many votes (null for a wildcard,
+     *  which nobody voted for). Empty while voting is open. */
+    decided?: Record<string, CompsMapCard & { decided_by: string | null; votes?: number | null }>;
+    /** The ballot with authors, pictures and the count each map has.
+     *  `candidates` above stays a list of names for launchers built before
+     *  this existed. */
+    candidate_maps?: CompsBallotMap[];
     next_category: string | null;
     /** What next week pays per physics. Optional: older servers omit it. */
     prize_eur?: number;

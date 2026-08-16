@@ -149,6 +149,7 @@
                 map: decided[p].map as string,
                 author: decided[p].author,
                 thumbnail: thumbnailUrl(decided[p].thumbnail),
+                votes: decided[p].votes ?? null,
                 byWildcard: decided[p].decided_by === 'wildcard',
             }));
     });
@@ -162,9 +163,20 @@
                 map: c.map ?? '',
                 author: c.author,
                 thumbnail: thumbnailUrl(c.thumbnail),
+                // One line per physics, minus any this map is barred from -
+                // a count under a physics it cannot win reads as a race it is
+                // losing.
+                votes: physicsOrder
+                    .filter((p) => c.blocked_physics !== p)
+                    .map((p) => ({ physics: p, count: c.votes?.[p] ?? 0 })),
             }));
         }
-        return (voting.value?.candidates ?? []).map((map) => ({ map, author: null, thumbnail: null }));
+        return (voting.value?.candidates ?? []).map((map) => ({
+            map,
+            author: null,
+            thumbnail: null,
+            votes: [] as { physics: string; count: number }[],
+        }));
     });
 
     /** The site stores a `/storage`-relative path or an absolute URL. Same rule
@@ -618,6 +630,9 @@
                                     {{ row.byWildcard
                                         ? $t('picked with a wildcard for :physics', { physics: row.physics.toUpperCase() })
                                         : $t('won the vote for :physics', { physics: row.physics.toUpperCase() }) }}
+                                    <span v-if="!row.byWildcard && row.votes !== null" class="text-neutral-500">
+                                        · {{ row.votes === 1 ? $t('1 vote') : $t(':count votes', { count: row.votes }) }}
+                                    </span>
                                 </div>
                             </div>
                         </div>
@@ -648,6 +663,20 @@
                                     <div class="text-xs text-brand-300 truncate">{{ c.map }}</div>
                                     <div v-if="c.author" class="text-[10px] text-neutral-500 truncate">
                                         {{ $t('by :author', { author: c.author }) }}
+                                    </div>
+                                    <!-- What it is polling, per physics. The
+                                         same numbers the site's own ballot
+                                         shows, and the final count once the
+                                         vote is over. -->
+                                    <div v-if="c.votes.length" class="mt-1 flex flex-wrap gap-1">
+                                        <span
+                                            v-for="v in c.votes"
+                                            :key="v.physics"
+                                            class="px-1.5 py-0.5 rounded bg-black/40 text-[10px] text-neutral-300"
+                                        >
+                                            <span class="uppercase text-neutral-500">{{ v.physics }}</span>
+                                            <span class="font-semibold ml-1">{{ v.count }}</span>
+                                        </span>
                                     </div>
                                 </div>
                             </button>
