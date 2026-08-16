@@ -181,6 +181,7 @@ export interface CompsPlaying {
     category: string | null;
     weapon: string | null;
     /** ISO 8601 with offset. Compare as an instant, format as local. */
+    starts_at?: string | null;
     ends_at: string | null;
     prize_eur: number;
     /** physics -> map name. */
@@ -194,9 +195,17 @@ export interface CompsVoting {
     round_id: number;
     comp_number: number;
     category: string | null;
+    weapon?: string | null;
     closes_at: string | null;
+    /** When the week being voted on starts and ends. Optional: older servers
+     *  omit them. */
+    starts_at?: string | null;
+    ends_at?: string | null;
     is_open: boolean;
     candidates: string[];
+    /** What won, once the ballot has closed: physics -> map and how it won.
+     *  Empty while voting is open. */
+    decided?: Record<string, { map: string | null; decided_by: string | null }>;
     next_category: string | null;
     /** What next week pays per physics. Optional: older servers omit it. */
     prize_eur?: number;

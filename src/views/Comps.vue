@@ -134,6 +134,40 @@
         return closes ? new Date(closes).toLocaleString() : '';
     });
 
+    /** What came out of the ballot, once it has closed. Empty while voting is
+     *  open, and empty on a server too old to send it - in both cases the panel
+     *  falls back to listing the candidates. */
+    const decidedRows = computed(() => {
+        const decided = voting.value?.decided ?? {};
+        return physicsOrder
+            .filter((p) => decided[p]?.map)
+            .map((p) => ({
+                physics: p,
+                map: decided[p].map as string,
+                byWildcard: decided[p].decided_by === 'wildcard',
+            }));
+    });
+
+    const startsAtLocal = computed(() => {
+        const starts = voting.value?.starts_at;
+        return starts ? new Date(starts).toLocaleString() : '';
+    });
+
+    /** How long until the next week begins. The same shape as the countdown on
+     *  the round being played, so the two read alike. */
+    const startsIn = computed(() => {
+        const starts = voting.value?.starts_at;
+        if (!starts) return null;
+        const ms = new Date(starts).getTime() - now.value;
+        if (Number.isNaN(ms) || ms <= 0) return null;
+        const d = Math.floor(ms / 86_400_000);
+        const h = Math.floor((ms % 86_400_000) / 3_600_000);
+        const m = Math.floor((ms % 3_600_000) / 60_000);
+        if (d > 0) return t(':days d :hours h', { days: d, hours: h });
+        if (h > 0) return t(':hours h :minutes m', { hours: h, minutes: m });
+        return t(':minutes m', { minutes: m });
+    });
+
     const fetchedAtLabel = computed(() => {
         const ms = data.value?.fetched_at_ms;
         if (!ms) return '';
@@ -466,25 +500,57 @@
                     >{{ $t('Donate →') }}</button>
                 </section>
 
-                <!-- The open ballot: names only. Voting happens on the site,
-                     where the preview videos are. -->
+                <!-- Next week. While the ballot is open it is the five names,
+                     and voting happens on the site where the preview videos
+                     are. Once it has closed the useful thing is not "closed" -
+                     it is what won, when it starts and what it pays. -->
                 <section v-if="voting" class="bg-neutral-900/40 border border-white/10 rounded-lg">
-                    <header class="px-3 py-2 border-b border-white/10 flex items-center justify-between gap-3">
+                    <header class="px-3 py-2 border-b border-white/10 flex items-center justify-between gap-3 flex-wrap">
                         <div class="text-sm font-semibold text-neutral-200">
-                            {{ $t('Voting for weekly #:number', { number: voting.comp_number }) }}
-                            <span v-if="voting.category" class="text-neutral-500 font-normal">· {{ voting.category }}</span>
+                            {{ voting.is_open
+                                ? $t('Voting for weekly #:number', { number: voting.comp_number })
+                                : $t('Next: weekly #:number', { number: voting.comp_number }) }}
+                            <span v-if="voting.category" class="text-neutral-500 font-normal">
+                                · {{ voting.category }}<span v-if="voting.weapon"> ({{ voting.weapon }})</span>
+                            </span>
                             <!-- What next week pays. The reason to go and vote
                                  is usually that the week is worth something. -->
                             <span v-if="voting.prize_eur" class="text-emerald-300 font-normal">
                                 · {{ $t(':amount € per physics', { amount: voting.prize_eur.toFixed(2) }) }}
                             </span>
                         </div>
-                        <div class="text-xs text-neutral-500">
-                            <span v-if="voting.is_open" :title="closesAtLocal">{{ $t('closes :when', { when: closesAtLocal }) }}</span>
-                            <span v-else>{{ $t('closed') }}</span>
+                        <div class="text-xs text-neutral-500 flex items-center gap-3">
+                            <span v-if="voting.is_open" :title="closesAtLocal">{{ $t('voting closes :when', { when: closesAtLocal }) }}</span>
+                            <span v-else-if="startsIn" :title="startsAtLocal" class="text-neutral-400">
+                                {{ $t('starts in :time', { time: startsIn }) }}
+                            </span>
+                            <span v-else-if="startsAtLocal">{{ $t('starts :when', { when: startsAtLocal }) }}</span>
+                            <span v-else>{{ $t('voting closed') }}</span>
                         </div>
                     </header>
-                    <div class="p-3 flex flex-wrap gap-1.5">
+
+                    <!-- What won -->
+                    <div v-if="decidedRows.length" class="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div
+                            v-for="row in decidedRows"
+                            :key="row.physics"
+                            class="bg-black/20 border border-white/5 rounded px-3 py-2"
+                        >
+                            <div class="text-[10px] uppercase text-neutral-500">{{ row.physics }}</div>
+                            <button
+                                class="text-sm text-brand-400 hover:underline truncate max-w-full text-left"
+                                :title="$t('Open :map on defrag.racing', { map: row.map })"
+                                @click="openMap(row.map)"
+                            >{{ row.map }}</button>
+                            <div class="text-[11px]" :class="row.byWildcard ? 'text-amber-300/80' : 'text-emerald-300/80'">
+                                {{ row.byWildcard ? $t('picked with a wildcard') : $t('won the vote') }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- The ballot itself, while it is open (or on a server too
+                         old to tell us what won). -->
+                    <div v-else class="p-3 flex flex-wrap gap-1.5">
                         <button
                             v-for="c in voting.candidates"
                             :key="c"
@@ -495,13 +561,20 @@
                             {{ $t('The ballot is not drawn yet.') }}
                         </span>
                     </div>
-                    <div class="px-3 pb-3">
+
+                    <div class="px-3 pb-3 flex flex-wrap items-center gap-x-2 gap-y-1">
                         <button
                             class="px-3 py-1.5 rounded text-xs font-semibold bg-brand-500/20 hover:bg-brand-500/30 text-brand-300"
                             @click="openComps"
-                        >{{ $t('Vote on defrag.racing →') }}</button>
-                        <span class="text-[11px] text-neutral-500 ml-2">
+                        >{{ voting.is_open ? $t('Vote on defrag.racing →') : $t('Open comps on defrag.racing →') }}</button>
+                        <span v-if="voting.is_open" class="text-[11px] text-neutral-500">
                             {{ $t('Each map has a preview video the launcher cannot play, so voting happens on the site.') }}
+                        </span>
+                        <span v-else-if="startsAtLocal" class="text-[11px] text-neutral-500">
+                            {{ $t('Starts :when.', { when: startsAtLocal }) }}
+                            <span v-if="voting.next_category">
+                                {{ $t('The week after that is :category.', { category: voting.next_category }) }}
+                            </span>
                         </span>
                     </div>
                 </section>

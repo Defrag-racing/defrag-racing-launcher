@@ -325,6 +325,64 @@
     const setAllFolders = (root: DemoFolderRoot, patch: { subSync?: boolean; subVisible?: boolean }) =>
         setRoot(root, patch);
 
+    // ---- asking before backing a folder up ---------------------------
+    // Backing a folder up publishes every demo in it on defrag.racing, and
+    // that cannot be taken back by unticking the box afterwards. A folder
+    // switched OFF asks nothing: stopping is not the dangerous direction.
+    const confirmBackup = ref<null | {
+        /** 'folder' one subfolder, 'all' every subfolder of a folder, 'root' a
+         *  whole added folder. */
+        kind: 'folder' | 'all' | 'root';
+        root: DemoFolderRoot;
+        folder: DemoFolderEntry | null;
+        demos: number;
+    }>(null);
+
+    /** Demos in a folder and everything under it - deeper folders follow it,
+     *  so they are part of what the answer covers. */
+    const subtreeDemos = (root: DemoFolderRoot, f: DemoFolderEntry) =>
+        root.folders
+            .filter((x) => x.path === f.path || x.path.startsWith(`${f.path}/`))
+            .reduce((n, x) => n + x.demos, 0);
+
+    const askBackupFolder = (root: DemoFolderRoot, f: DemoFolderEntry) => {
+        if (folderBusy.value || !root.sync) return;
+        if (f.sync) {
+            void setFolder(root, f, { sync: false });
+            return;
+        }
+        confirmBackup.value = { kind: 'folder', root, folder: f, demos: subtreeDemos(root, f) };
+    };
+
+    const askBackupAll = (root: DemoFolderRoot) => {
+        if (folderBusy.value) return;
+        confirmBackup.value = {
+            kind: 'all',
+            root,
+            folder: null,
+            demos: root.folders.reduce((n, x) => n + x.demos, 0),
+        };
+    };
+
+    /** A whole added folder, from its own switch on the folder's row. */
+    const askBackupRoot = (root: DemoFolderRoot) => {
+        if (folderBusy.value) return;
+        if (root.sync) {
+            void setRoot(root, { sync: false });
+            return;
+        }
+        confirmBackup.value = { kind: 'root', root, folder: null, demos: root.demos };
+    };
+
+    const doBackup = async () => {
+        const ask = confirmBackup.value;
+        confirmBackup.value = null;
+        if (!ask) return;
+        if (ask.kind === 'folder' && ask.folder) await setFolder(ask.root, ask.folder, { sync: true });
+        else if (ask.kind === 'all') await setRoot(ask.root, { subSync: true, subVisible: true });
+        else await setRoot(ask.root, { sync: true });
+    };
+
     /** Folders whose subfolder list is folded away. A tree of thirty starts
      *  folded so the page stays readable; once opened by hand it stays open,
      *  including across a reload of the list. */
@@ -543,29 +601,34 @@
             <!-- One page of fourteen cards was a page nobody could find
                  anything on. The rail names what each group is about and
                  keeps the choice, so coming back lands where you left. -->
-            <nav class="w-44 flex-shrink-0 border-r border-white/[0.06] p-3 space-y-1 overflow-auto">
+            <nav class="w-52 flex-shrink-0 border-r border-white/[0.06] p-3 space-y-0.5 overflow-auto bg-black/20">
                 <button
                     v-for="s in SECTIONS"
                     :key="s.key"
-                    class="w-full text-left px-3 py-2 rounded text-sm transition-colors flex items-center gap-2"
-                    :class="tab === s.key ? 'bg-brand-500/20 text-brand-200 font-semibold' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/[0.04]'"
+                    class="w-full text-left px-3 py-2.5 rounded-lg text-sm transition-colors flex items-center gap-2.5"
+                    :class="tab === s.key
+                        ? 'bg-brand-500/15 text-brand-200 font-semibold shadow-[inset_2px_0_0_0] shadow-brand-500/70'
+                        : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/[0.04]'"
                     @click="setTab(s.key)"
-                ><span class="text-xs opacity-80">{{ s.icon }}</span>{{ $t(s.label) }}</button>
+                ><span class="w-4 text-center text-sm">{{ s.icon }}</span>{{ $t(s.label) }}</button>
             </nav>
 
-            <div class="flex-1 overflow-auto p-5 space-y-4 max-w-2xl w-full">
+            <div class="flex-1 overflow-auto px-8 py-7 w-full">
+            <div class="max-w-3xl mx-auto space-y-5">
             <!-- What this group is, so a page of switches has a sentence in
                  front of it instead of starting mid-thought. -->
-            <div class="pb-1">
-                <div class="text-lg font-semibold">{{ $t(section.label) }}</div>
-                <div class="text-xs text-neutral-500 mt-0.5">{{ $t(section.blurb) }}</div>
+            <div class="pb-2 border-b border-white/[0.06]">
+                <div class="text-xl font-semibold flex items-center gap-2">
+                    <span class="opacity-90">{{ section.icon }}</span>{{ $t(section.label) }}
+                </div>
+                <div class="text-xs text-neutral-500 mt-1">{{ $t(section.blurb) }}</div>
             </div>
 
-            <div v-show="tab === 'general'" class="space-y-4">
-                <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
+            <div v-show="tab === 'general'" class="space-y-5">
+                <section class="bg-neutral-900/70 border border-white/[0.07] rounded-xl p-5 space-y-3">
                     <div class="flex items-start justify-between gap-3">
                         <div>
-                            <div class="font-semibold">{{ $t('Language') }}</div>
+                            <div class="font-semibold text-[15px]">{{ $t('Language') }}</div>
                             <div class="text-xs text-neutral-500 mt-0.5">
                                 {{ $t('The launcher follows your system language unless you pick one here.') }}
                             </div>
@@ -585,9 +648,9 @@
                 </section>
 
                 <!-- Autostart -->
-                <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 flex items-center justify-between gap-3">
+                <section class="bg-neutral-900/70 border border-white/[0.07] rounded-xl p-5 flex items-center justify-between gap-3">
                     <div>
-                        <div class="font-semibold">{{ $t('Start with the system') }}</div>
+                        <div class="font-semibold text-[15px]">{{ $t('Start with the system') }}</div>
                         <div class="text-xs text-neutral-500 mt-0.5">
                             {{ $t('Start quietly into the tray when you log in, so demo backup and server join links keep working without you having to open the launcher yourself.') }}
                         </div>
@@ -607,10 +670,10 @@
                 <!-- Auto-update status (read-only, informational). The switch
                      that used to sit here is gone on purpose - see the note in
                      the Notifications group. -->
-                <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
+                <section class="bg-neutral-900/70 border border-white/[0.07] rounded-xl p-5 space-y-3">
                     <div class="flex items-center gap-2">
                         <span class="text-emerald-400">●</span>
-                        <div class="font-semibold">{{ $t('Automatic updates: on') }}</div>
+                        <div class="font-semibold text-[15px]">{{ $t('Automatic updates: on') }}</div>
                     </div>
                     <div class="text-xs text-neutral-500 leading-relaxed">
                         {{ $t('The launcher checks defrag.racing and GitHub for a newer signed release on every start. This cannot be switched off, because security fixes have to reach everybody. When an update is available a banner appears on every tab, and right here with the full list of changes.') }}
@@ -654,12 +717,12 @@
                 </section>
             </div>
 
-            <div v-show="tab === 'game'" class="space-y-4">
+            <div v-show="tab === 'game'" class="space-y-5">
                 <!-- Engine -->
-                <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
+                <section class="bg-neutral-900/70 border border-white/[0.07] rounded-xl p-5 space-y-3">
                     <div class="flex items-start justify-between gap-3">
                         <div>
-                            <div class="font-semibold">{{ $t('Defrag engine') }}</div>
+                            <div class="font-semibold text-[15px]">{{ $t('Defrag engine') }}</div>
                             <div class="text-xs text-neutral-500 mt-0.5">{{ $t('Used when opening server join links.') }}</div>
                         </div>
                         <button class="btn-ghost" @click="pickEngine">{{ $t('Change') }}</button>
@@ -695,9 +758,9 @@
                     </div>
                 </section>
 
-                <section v-if="assoc?.supported" class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
+                <section v-if="assoc?.supported" class="bg-neutral-900/70 border border-white/[0.07] rounded-xl p-5 space-y-3">
                     <div>
-                        <div class="font-semibold">{{ $t('Demo files (.dm_68)') }}</div>
+                        <div class="font-semibold text-[15px]">{{ $t('Demo files (.dm_68)') }}</div>
                         <div class="text-xs text-neutral-500 mt-0.5">
                             {{ $t('Right-clicking a demo already offers to play it in the launcher. That entry sits next to whatever you already use and changes nothing else - your current program keeps the file type unless you say otherwise here.') }}
                         </div>
@@ -729,7 +792,7 @@
 
             </div>
 
-            <div v-show="tab === 'demos'" class="space-y-4">
+            <div v-show="tab === 'demos'" class="space-y-5">
                 <!-- Every folder the launcher watches, and every folder inside
                      each of them. One list: the question "is this demo backed
                      up" is answered in one place, at the folder it is in.
@@ -741,14 +804,14 @@
                      it. -->
                 <section
                     ref="demosSection"
-                    class="bg-neutral-900 border rounded-lg p-4 space-y-3 transition-all duration-500"
+                    class="bg-neutral-900/70 border rounded-xl p-5 space-y-3 transition-all duration-500"
                     :class="highlightDemos
                         ? 'border-brand-500/70 ring-2 ring-brand-500/40 shadow-lg shadow-brand-500/10'
                         : 'border-white/10'"
                 >
                     <div class="flex items-start justify-between gap-3">
                         <div>
-                            <div class="font-semibold">{{ $t('Your demos folders') }}</div>
+                            <div class="font-semibold text-[15px]">{{ $t('Your demos folders') }}</div>
                             <div class="text-xs text-neutral-500 mt-0.5">
                                 {{ $t('Demos can live on more than one drive. Every folder here decides on its own whether it is backed up to your account and whether it shows in the Demos list.') }}
                             </div>
@@ -808,7 +871,7 @@
                                             class="sr-only peer"
                                             :checked="root.sync"
                                             :disabled="folderBusy !== null"
-                                            @change="setRoot(root, { sync: ($event.target as HTMLInputElement).checked })"
+                                            @click.prevent="askBackupRoot(root)"
                                         />
                                         <span class="w-9 h-[18px] bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors block"></span>
                                         <span class="absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform peer-checked:translate-x-[18px]"></span>
@@ -862,7 +925,7 @@
                                                 ? 'bg-brand-500/20 border-brand-500/60 text-brand-200'
                                                 : 'bg-white/5 border-white/10 text-neutral-400 hover:bg-white/10'"
                                             :disabled="folderBusy !== null"
-                                            @click="setAllFolders(root, { subSync: true, subVisible: true })"
+                                            @click="askBackupAll(root)"
                                         >{{ $t('all of them') }}</button>
                                         <button
                                             class="px-2 py-0.5 rounded border transition-colors"
@@ -898,13 +961,18 @@
                                                 </span>
                                             </div>
                                         </div>
+                                        <!-- .prevent so the box does not flip
+                                             before the question is answered:
+                                             a checkbox that moves and then a
+                                             dialog that can be cancelled leaves
+                                             the two disagreeing. -->
                                         <label class="w-16 relative inline-flex items-center justify-center cursor-pointer" :title="f.sync ? $t('Backed up to defrag.racing') : $t('Not backed up')">
                                             <input
                                                 type="checkbox"
                                                 class="sr-only peer"
                                                 :checked="f.sync"
                                                 :disabled="folderBusy !== null || !root.sync"
-                                                @change="setFolder(root, f, { sync: ($event.target as HTMLInputElement).checked })"
+                                                @click.prevent="askBackupFolder(root, f)"
                                             />
                                             <span class="w-9 h-[18px] bg-neutral-700 peer-checked:bg-brand-500/60 rounded-full transition-colors block"></span>
                                             <span class="absolute left-0.5 top-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform peer-checked:translate-x-[18px]"></span>
@@ -933,9 +1001,9 @@
 
                 <!-- CPU throttle. Its own card: it is about the machine, not
                      about which folder goes where. -->
-                <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
+                <section class="bg-neutral-900/70 border border-white/[0.07] rounded-xl p-5 space-y-3">
                     <div>
-                        <div class="font-semibold">{{ $t('CPU usage while checking demos') }}</div>
+                        <div class="font-semibold text-[15px]">{{ $t('CPU usage while checking demos') }}</div>
                         <div class="text-xs text-neutral-500 mt-0.5">
                             {{ $t('How much of one CPU core the launcher may use while going through your demos. Lower is more comfortable while gaming and slower on a big folder. The Speed up button on the Demos tab overrides this while a backlog drains.') }}
                         </div>
@@ -955,7 +1023,7 @@
                                 : 'bg-white/5 border-white/10 hover:bg-white/10 text-neutral-300'"
                             @click="setThrottlePreference(opt.value)"
                         >
-                            <div class="font-semibold">{{ opt.label }}</div>
+                            <div class="font-semibold text-[15px]">{{ opt.label }}</div>
                             <div class="text-xs text-neutral-500">{{ opt.sub }} CPU</div>
                         </button>
                     </div>
@@ -965,10 +1033,10 @@
                 </section>
             </div>
 
-            <div v-show="tab === 'comps'" class="space-y-4">
-                <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
+            <div v-show="tab === 'comps'" class="space-y-5">
+                <section class="bg-neutral-900/70 border border-white/[0.07] rounded-xl p-5 space-y-3">
                     <div>
-                        <div class="font-semibold">{{ $t('Runs on comps maps') }}</div>
+                        <div class="font-semibold text-[15px]">{{ $t('Runs on comps maps') }}</div>
                         <div class="text-xs text-neutral-500 mt-0.5">
                             {{ $t('Backed-up demos are public straight away. A run on a map being played in comps would therefore publish your time and your route in the middle of the round, and that cannot be taken back - so the launcher treats those demos separately. The map is read from the filename, and the site checks it again after reading the demo: if it was not a run of that map, the entry is withdrawn and it becomes an ordinary upload.') }}
                         </div>
@@ -987,7 +1055,7 @@
                                 : 'bg-white/5 border-white/10 hover:bg-white/10 text-neutral-300'"
                             @click="config.save({ comps_mode: opt.value as CompsMode })"
                         >
-                            <div class="font-semibold">{{ opt.label }}</div>
+                            <div class="font-semibold text-[15px]">{{ opt.label }}</div>
                             <div class="text-xs text-neutral-500">{{ opt.sub }}</div>
                         </button>
                     </div>
@@ -1000,11 +1068,11 @@
                 </section>
             </div>
 
-            <div v-show="tab === 'notify'" class="space-y-4">
-                <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
+            <div v-show="tab === 'notify'" class="space-y-5">
+                <section class="bg-neutral-900/70 border border-white/[0.07] rounded-xl p-5 space-y-3">
                     <div class="flex items-center justify-between gap-3">
                         <div>
-                            <div class="font-semibold">{{ $t('Desktop notifications') }}</div>
+                            <div class="font-semibold text-[15px]">{{ $t('Desktop notifications') }}</div>
                             <div class="text-xs text-neutral-500 mt-0.5">
                                 {{ $t('Your system notifications, so the launcher can reach you while you are in a game. Your PC asks for permission the first time one is sent.') }}
                             </div>
@@ -1072,12 +1140,12 @@
                      to true; there is no switch for it anywhere. -->
             </div>
 
-            <div v-show="tab === 'account'" class="space-y-4">
+            <div v-show="tab === 'account'" class="space-y-5">
                 <!-- Who this launcher is signed in as. It is the first thing
                      anybody opens this group to find out, and until now the
                      answer was only visible as an avatar in the corner. -->
-                <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
-                    <div class="font-semibold">{{ $t('Signed in as') }}</div>
+                <section class="bg-neutral-900/70 border border-white/[0.07] rounded-xl p-5 space-y-3">
+                    <div class="font-semibold text-[15px]">{{ $t('Signed in as') }}</div>
 
                     <div v-if="config.hasToken && config.me" class="flex items-center gap-3">
                         <div class="min-w-0 flex-1">
@@ -1110,14 +1178,14 @@
                 <!-- Token -->
                 <section
                     ref="tokenSection"
-                    class="bg-neutral-900 border rounded-lg p-4 space-y-3 transition-all duration-500"
+                    class="bg-neutral-900/70 border rounded-xl p-5 space-y-3 transition-all duration-500"
                     :class="highlightToken
                         ? 'border-brand-500/70 ring-2 ring-brand-500/40 shadow-lg shadow-brand-500/10'
                         : 'border-white/10'"
                 >
                     <div class="flex items-start justify-between gap-3">
                         <div>
-                            <div class="font-semibold">{{ $t('Account token') }}</div>
+                            <div class="font-semibold text-[15px]">{{ $t('Account token') }}</div>
                             <div class="text-xs text-neutral-500 mt-0.5">
                                 <a href="#" class="text-brand-400 hover:underline"
                                    @click.prevent="openExternal('https://defrag.racing/user/settings?tab=security')">
@@ -1168,8 +1236,8 @@
 
             </div>
 
-            <div v-show="tab === 'advanced'" class="space-y-4">
-                <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
+            <div v-show="tab === 'advanced'" class="space-y-5">
+                <section class="bg-neutral-900/70 border border-white/[0.07] rounded-xl p-5 space-y-3">
                     <div class="flex items-center justify-between gap-3">
                         <div>
                             <div class="font-semibold flex items-center gap-2">
@@ -1257,9 +1325,9 @@
                 <!-- Force re-check uploaded demos. Re-run setup used to be a
                      separate button; it is gone - Reset at the bottom is the
                      way to redo setup, and every field is editable anyway. -->
-                <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 flex items-center justify-between gap-3">
+                <section class="bg-neutral-900/70 border border-white/[0.07] rounded-xl p-5 flex items-center justify-between gap-3">
                     <div>
-                        <div class="font-semibold">{{ $t('Re-check uploaded demos') }}</div>
+                        <div class="font-semibold text-[15px]">{{ $t('Re-check uploaded demos') }}</div>
                         <div class="text-xs text-neutral-500 mt-0.5">
                             {{ $t('Forget what this PC remembers about which demos are already uploaded. The next Start asks the server about every demo again - useful if one was deleted on defrag.racing and you want to send it once more.') }}
                         </div>
@@ -1270,10 +1338,10 @@
                 </section>
 
                 <!-- Check & repair -->
-                <section class="bg-neutral-900 border border-white/10 rounded-lg p-4 space-y-3">
+                <section class="bg-neutral-900/70 border border-white/[0.07] rounded-xl p-5 space-y-3">
                     <div class="flex items-center justify-between gap-3">
                         <div>
-                            <div class="font-semibold">{{ $t('Check and repair') }}</div>
+                            <div class="font-semibold text-[15px]">{{ $t('Check and repair') }}</div>
                             <div class="text-xs text-neutral-500 mt-0.5">
                                 {{ $t('Go through what the launcher keeps on this PC - login, demos folder, backup records, activity list, the watcher - and fix anything broken. Your demos on the server are never touched.') }}
                             </div>
@@ -1305,7 +1373,7 @@
                 </section>
 
                 <!-- Reset. Red-tinted so it reads as destructive at a glance. -->
-                <section class="bg-red-500/5 border border-red-500/30 rounded-lg p-4 flex items-center justify-between">
+                <section class="bg-red-500/[0.07] border border-red-500/25 rounded-xl p-5 flex items-center justify-between">
                     <div>
                         <div class="font-semibold text-red-300">{{ $t('Reset the launcher') }}</div>
                         <div class="text-xs text-neutral-500 mt-0.5">{{ $t('Clear all settings and the stored token, then go through the setup again. Demos on your PC are not touched.') }}</div>
@@ -1317,6 +1385,51 @@
             <div class="text-xs text-neutral-600 text-center pt-4">
                 {{ $t('Defrag Racing Launcher') }} v{{ appVersion || '…' }}
             </div>
+            </div>
+            </div>
+        </div>
+
+        <!-- Asking before a folder starts being backed up. Not a native
+             confirm() - it is unreliable in WebView2 - and worth asking at all
+             because backing a folder up publishes its demos on defrag.racing,
+             which unticking the box afterwards does not undo. -->
+        <div
+            v-if="confirmBackup"
+            class="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+            @click.self="confirmBackup = null"
+        >
+            <div class="bg-neutral-900 border border-white/15 rounded-xl p-5 max-w-md w-full space-y-3">
+                <div class="font-semibold text-lg">
+                    {{ confirmBackup.kind === 'all'
+                        ? $t('Back up every folder inside?')
+                        : $t('Back this folder up?') }}
+                </div>
+
+                <div class="text-sm text-neutral-300 break-all bg-black/30 rounded px-3 py-2">
+                    <span v-if="confirmBackup.kind === 'folder'">{{ confirmBackup.folder?.path }}</span>
+                    <span v-else>{{ confirmBackup.root.path }}</span>
+                </div>
+
+                <p class="text-sm text-neutral-300">
+                    {{ confirmBackup.demos === 1
+                        ? $t('1 demo will be uploaded to your account.')
+                        : $t(':count demos will be uploaded to your account.', { count: confirmBackup.demos }) }}
+                    <span v-if="confirmBackup.kind === 'folder' && (confirmBackup.folder?.demos ?? 0) !== confirmBackup.demos">
+                        {{ $t('That includes the folders inside it, which follow this one.') }}
+                    </span>
+                    <span v-else-if="confirmBackup.kind === 'all'">
+                        {{ $t('Folders you make in here later will be backed up too.') }}
+                    </span>
+                </p>
+
+                <p class="text-xs text-amber-300/90">
+                    {{ $t('A backed-up demo is public on defrag.racing straight away. Unticking this later stops new ones - it does not take back what was sent.') }}
+                </p>
+
+                <div class="flex justify-end gap-2 pt-1">
+                    <button class="btn-ghost" @click="confirmBackup = null">{{ $t('Cancel') }}</button>
+                    <button class="btn-primary" @click="doBackup">{{ $t('Back it up') }}</button>
+                </div>
             </div>
         </div>
 
