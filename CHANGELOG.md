@@ -4,6 +4,10 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.59
+
+- **Fixed: playing a demo could land on stock Quake 3 asking for a CD key instead of the run.** The player worked out which mod to run from the folder your demos are kept in, which is the mod only when they sit inside your Quake folder. With the demos kept somewhere else the engine was asked for a mod that does not exist, so it loaded none at all. The name is now checked against your install first, and falls back to `defrag`.
+
 ## 0.1.58
 
 - **A run on the map comps has already picked for the coming round is held back too.** The ballot closes a day before the round starts, and for that day the launcher backed those runs up like any other demo - which puts the route to next round's map on the site for everyone who has not played it yet. The hold now covers the map from the moment the vote decides it, not only once the round is being played.
