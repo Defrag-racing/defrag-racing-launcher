@@ -1289,6 +1289,25 @@ fn resolve_engine(app: &AppHandle) -> Result<(std::path::PathBuf, std::path::Pat
     if !exe.exists() {
         return Err(format!("Bundled demo-player engine missing at {}", exe.display()));
     }
+
+    // Linux: make sure the bundled engine is executable. It ships with the bit
+    // set, but an AppImage unpacked by hand or copied across a filesystem that
+    // does not carry permissions arrives without it, and the only sign is the
+    // spawn failing with "Permission denied" (os error 13) - which reads like
+    // the launcher's fault rather than a file mode. Best effort: a read-only
+    // install is not ours to change, and the spawn error still says so.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        if let Ok(meta) = std::fs::metadata(&exe) {
+            let mode = meta.permissions().mode();
+
+            if mode & 0o111 == 0 {
+                let _ = std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(mode | 0o755));
+            }
+        }
+    }
     let exe_dir = exe
         .parent()
         .ok_or_else(|| "Bundled engine path has no parent.".to_string())?
