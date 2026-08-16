@@ -374,6 +374,14 @@
         confirmBackup.value = { kind: 'root', root, folder: null, demos: root.demos };
     };
 
+    /** A subfolder written the way the rest of the path is. Rules are keyed
+     *  with forward slashes whatever the platform, so pasting one onto a
+     *  Windows path unchanged reads as `D:\demos\old/mix`. */
+    const under = (root: DemoFolderRoot, rel: string) => {
+        const sep = root.path.includes('\\') ? '\\' : '/';
+        return sep + rel.split('/').join(sep);
+    };
+
     const doBackup = async () => {
         const ask = confirmBackup.value;
         confirmBackup.value = null;
@@ -614,7 +622,7 @@
             </nav>
 
             <div class="flex-1 overflow-auto px-8 py-7 w-full">
-            <div class="max-w-3xl mx-auto space-y-5">
+            <div class="max-w-4xl mx-auto space-y-5">
             <!-- What this group is, so a page of switches has a sentence in
                  front of it instead of starting mid-thought. -->
             <div class="pb-2 border-b border-white/[0.06]">
@@ -1405,9 +1413,12 @@
                         : $t('Back this folder up?') }}
                 </div>
 
+                <!-- The whole path, not the relative one: "old/mix" on its
+                     own does not say which drive it is on, and this dialog is
+                     the last chance to notice it is the wrong one. -->
                 <div class="text-sm text-neutral-300 break-all bg-black/30 rounded px-3 py-2">
-                    <span v-if="confirmBackup.kind === 'folder'">{{ confirmBackup.folder?.path }}</span>
-                    <span v-else>{{ confirmBackup.root.path }}</span>
+                    {{ confirmBackup.root.path
+                        }}<span v-if="confirmBackup.kind === 'folder' && confirmBackup.folder" class="text-brand-300">{{ under(confirmBackup.root, confirmBackup.folder.path) }}</span>
                 </div>
 
                 <p class="text-sm text-neutral-300">
