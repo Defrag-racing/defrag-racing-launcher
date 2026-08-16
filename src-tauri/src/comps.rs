@@ -118,24 +118,47 @@ impl GuardRound {
             return None;
         }
 
-        let playing = raw.get("playing")?;
-        if playing.is_null() {
+        // The round being played, and failing that the one whose ballot has
+        // already closed. Between the vote closing and play starting - a day
+        // for the weekly - the map is decided and public with nothing playing
+        // it yet, and a run made in that window counts for the round exactly
+        // like one from the voting days. Guarding only `playing` meant those
+        // runs were backed up as ordinary demos, which puts next week's route
+        // on the map page for everyone who has not played it.
+        Self::from_round(raw.get("playing"), "maps")
+            .or_else(|| Self::from_round(raw.get("voting"), "decided"))
+    }
+
+    /// Build a guard from one round block, taking its maps from `maps_key`.
+    ///
+    /// The two blocks name the same thing differently and shape it
+    /// differently: `playing.maps` is `{physics: "name"}`, while
+    /// `voting.decided` is `{physics: {map: "name", ...}}` because the site
+    /// also says there how the map won. Both are read here so the caller does
+    /// not have to care which one answered.
+    fn from_round(round: Option<&serde_json::Value>, maps_key: &str) -> Option<Self> {
+        let round = round?;
+        if round.is_null() {
             return None;
         }
-        let round_id = playing.get("round_id")?.as_i64()?;
-        let comp_number = playing.get("comp_number").and_then(|v| v.as_i64()).unwrap_or(0);
-        let ends_at_ms = playing
+        let round_id = round.get("round_id")?.as_i64()?;
+        let comp_number = round.get("comp_number").and_then(|v| v.as_i64()).unwrap_or(0);
+        let ends_at_ms = round
             .get("ends_at")
             .and_then(|v| v.as_str())
             .and_then(parse_iso8601_ms);
 
-        let maps: Vec<(String, String)> = playing
-            .get("maps")
+        let maps: Vec<(String, String)> = round
+            .get(maps_key)
             .and_then(|m| m.as_object())
             .map(|obj| {
                 obj.iter()
-                    .filter_map(|(physics, name)| {
-                        let name = name.as_str()?.trim();
+                    .filter_map(|(physics, value)| {
+                        let name = match value {
+                            serde_json::Value::String(name) => name.as_str(),
+                            other => other.get("map")?.as_str()?,
+                        }
+                        .trim();
                         if name.is_empty() {
                             return None;
                         }

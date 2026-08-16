@@ -4,6 +4,10 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.58
+
+- **A run on the map comps has already picked for the coming round is held back too.** The ballot closes a day before the round starts, and for that day the launcher backed those runs up like any other demo - which puts the route to next round's map on the site for everyone who has not played it yet. The hold now covers the map from the moment the vote decides it, not only once the round is being played.
+
 ## 0.1.57
 
 - **Fixed: an older demo opened, played about a second and quit with "CLIENT/SERVER GAME MISMATCH".** The player seeks once the moment a demo opens, because that is how it learns how long the demo is, and a seek makes the engine start the mod over at the seek point. That restart used to skip the one screen redraw the mod asks for while it loads - the redraw is what tells the mod it is watching a demo rather than sitting on a server, and without it the mod refuses any demo whose recorded game version is not its own. Every run recorded before DeFRaG began reporting itself as "defrag" was affected, which is anything from the game's first years; a 2004 run of run_ra3map12 died one second in. The frame is drawn again now, just not shown, so those demos play and scrubbing still does not flash the loading screen.

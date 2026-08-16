@@ -393,7 +393,7 @@
     const resolveStatus = (d: DemoLibraryEntry): RowStatus => {
         const DUP_HINT = t('This exact run is already on defrag.racing - nothing to upload.');
         const DONE_HINT = t('Safely backed up to your defrag.racing profile.');
-        const HELD_HINT = t('This looks like a run of a map being played in comps this week, so it was NOT backed up - a comps run published mid-round cannot be taken back. Choose what happens to it below.');
+        const HELD_HINT = t('This looks like a run of a map comps is using, so it was NOT backed up - a comps run published mid-round cannot be taken back. Choose what happens to it below.');
         const COMPS_HINT = t('Entered into this week\'s comps round. It is on defrag.racing but stays private until the round ends.');
         const live = queueByPath.value.get(d.path);
         if (live) {
