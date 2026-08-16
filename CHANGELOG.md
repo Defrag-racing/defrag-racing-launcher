@@ -4,6 +4,10 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.60
+
+- **Fixed: the first second of a run played twice when a demo opened.** To draw the transport bar the player has to know how long the demo is, and the only way it had was to play it to the end and jump back to the start - and a jump restarts the run at that point, so you saw the beginning, then the beginning again. The length is now read straight out of the demo file before anything plays, so a demo opens once and runs from there.
+
 ## 0.1.59
 
 - **Fixed: playing a demo could land on stock Quake 3 asking for a CD key instead of the run.** The player worked out which mod to run from the folder your demos are kept in, which is the mod only when they sit inside your Quake folder. With the demos kept somewhere else the engine was asked for a mod that does not exist, so it loaded none at all. The name is now checked against your install first, and falls back to `defrag`.

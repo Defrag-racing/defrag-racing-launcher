@@ -694,9 +694,17 @@
                 const allMeasured = !isCompare.value || paneTimers.value.every((p) => p.lenMs > 0);
                 if (lenMs.value > 0 && allMeasured) {
                     lenSec.value = Math.max(1, Math.round(lenMs.value / 1000));
-                    seekTo(0);
+                    // Rewind only if we got the length by playing the demo to
+                    // its end. A newer engine reads it out of the file and says
+                    // so in the first status line, so nothing has moved and
+                    // there is nothing to undo - seeking anyway restarts the mod
+                    // at the seek point, which is why the first second of a run
+                    // appeared to play twice.
+                    if (measureAttemptAt > 0) {
+                        seekTo(0);
+                        seekHoldUntil = now() + 500;
+                    }
                     measured = true;
-                    seekHoldUntil = now() + 500;
                 } else if (now() - measureAttemptAt > 1200) {
                     measureAttemptAt = now();
                     seekTo(86400000);
