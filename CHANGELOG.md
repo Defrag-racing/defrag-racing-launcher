@@ -4,6 +4,10 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.57
+
+- **Fixed: an older demo opened, played about a second and quit with "CLIENT/SERVER GAME MISMATCH".** The player seeks once the moment a demo opens, because that is how it learns how long the demo is, and a seek makes the engine start the mod over at the seek point. That restart used to skip the one screen redraw the mod asks for while it loads - the redraw is what tells the mod it is watching a demo rather than sitting on a server, and without it the mod refuses any demo whose recorded game version is not its own. Every run recorded before DeFRaG began reporting itself as "defrag" was affected, which is anything from the game's first years; a 2004 run of run_ra3map12 died one second in. The frame is drawn again now, just not shown, so those demos play and scrubbing still does not flash the loading screen.
+
 ## 0.1.56
 
 - **Fixed: a demo downloaded from defrag.racing opened on an empty screen saying it could not load the map.** The launcher works out which map a demo needs so it can fetch it before playing, and it read that from the file name - which works for `wamwig[mdf.vq3]00.34.488(player).dm_68` and not at all for the same run downloaded from the site, where every bracket has been flattened to an underscore. With no name to go on it skipped the whole check, downloaded nothing, and handed the engine a map it did not have. The map name now comes out of the demo itself, so it no longer matters what the file is called. Demos from the site also show their map in the list, link to its map page, and group with the same map in Compare.
