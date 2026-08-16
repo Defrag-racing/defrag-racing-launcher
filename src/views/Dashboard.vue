@@ -67,27 +67,45 @@
     const fmtMB = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 
     /** Ensure every demo's map is installed (downloading missing pk3s). Each
-     *  item carries the demo path (so the backend knows where this demo's
-     *  content lives) and its map name. Deduped by map name. Resolves true on
+     *  item carries the demo path (the backend reads the real map name out of
+     *  it) and whatever the filename claims the map is. Resolves true on
      *  success; on failure sets `mapError` and resolves false so the caller
      *  skips opening the player. */
     const ensureMaps = async (
         items: { path: string; map: string | null }[],
     ): Promise<boolean> => {
-        // One download per distinct map (first demo path wins).
-        const byMap = new Map<string, string>();
-        for (const it of items) if (it.map && !byMap.has(it.map)) byMap.set(it.map, it.path);
-        if (byMap.size === 0) return true; // unknown map name -> let the engine try
+        // A filename with no map name in it is NOT a reason to skip the check.
+        // `mapNameFromFilename` only understands the `map[df.vq3]...` convention,
+        // and a demo downloaded from the site arrives as
+        // `wamwig_mdf.vq3_00.34.488_player.Russia_2ed93b55.dm_68` - no brackets,
+        // so it came back null, nothing was checked, and the demo opened straight
+        // into "CM_LoadMap: couldn't load maps/wamwig.bsp". The backend reads the
+        // map out of the demo itself, so hand it the demo and let it decide.
+        // Those dedupe by path: there is no name yet to dedupe by.
+        const wanted: { map: string | null; path: string }[] = [];
+        const seen = new Set<string>();
+        for (const it of items) {
+            const key = it.map ? `map:${it.map.toLowerCase()}` : `demo:${it.path}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            wanted.push({ map: it.map, path: it.path });
+        }
+        if (wanted.length === 0) return true;
         try {
-            for (const [map, path] of byMap) {
-                preparingMap.value = map;
+            for (const { map, path } of wanted) {
+                // Nameless for now; the backend's first progress event carries
+                // the map it read from the demo and the overlay picks it up.
+                preparingMap.value = map ?? (path.split(/[\\/]/).pop() ?? '?');
                 mapProgress.value = { phase: 'checking', received: 0, total: null };
-                await tauri.ensureDemoMap(path, map);
+                await tauri.ensureDemoMap(path, map ?? '');
             }
             return true;
         } catch (e) {
+            // The one we were on when it threw - by then the progress event has
+            // replaced it with the name read from the demo, so it names the map
+            // that actually failed rather than every map in the batch.
             mapError.value = {
-                map: [...byMap.keys()].join(', '),
+                map: preparingMap.value ?? '',
                 detail: e instanceof Error ? e.message : String(e),
             };
             return false;
@@ -799,11 +817,23 @@
         return new Date(epochSec * 1000).toLocaleString();
     };
 
+    // Two naming conventions reach the demos folder. DeFRaG records
+    // `map[df.vq3]00.34.488(player.country).dm_68`; a demo downloaded from the
+    // site has had every bracket flattened to an underscore, so the same run is
+    // `map_df.vq3_00.34.488_player.Russia_2ed93b55.dm_68`. Only the first was
+    // understood, which left site demos with no map name anywhere in the UI.
+    // Both forms end the map name right before the gametype, so the underscore
+    // form is read up to the `_<gametype>.<physics>` group.
+    const FLAT_NAME = /^(.+?)_m?(?:df|fc|fs)\.(?:vq3|cpm)[._]/i;
     const mapNameFromFilename = (filename: string): string | null => {
         const idx = filename.indexOf('[');
-        if (idx <= 0) return null;
-        const name = filename.slice(0, idx).trim();
-        return name.length > 0 ? name : null;
+        if (idx > 0) {
+            const name = filename.slice(0, idx).trim();
+            return name.length > 0 ? name : null;
+        }
+        if (idx === 0) return null;
+        const name = FLAT_NAME.exec(filename)?.[1]?.trim();
+        return name ? name : null;
     };
     const openMapPage = (filename: string) => {
         const map = mapNameFromFilename(filename);

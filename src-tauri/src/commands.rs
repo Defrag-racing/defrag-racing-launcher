@@ -1506,8 +1506,12 @@ pub async fn ensure_demo_map(
         .filter(|m| !m.is_empty())
         .unwrap_or_else(|| map_name.trim().to_string());
 
+    // Neither the demo nor its name says what map this is. That is not an
+    // error the user can act on, and refusing to play would be worse than the
+    // old behaviour, so hand it back as "nothing to prepare" and let the engine
+    // try - it may well have the map already.
     if map_name.is_empty() {
-        return Err("Could not determine which map this demo needs.".to_string());
+        return Ok(DemoMapStatus { downloaded: false, map_name });
     }
 
     let emit = |phase: &str, received: u64, total: Option<u64>| {
