@@ -9,6 +9,7 @@
     import { useNotificationsStore } from './stores/notifications';
     import { useUpdaterStore } from './stores/updater';
     import UpdateBanner from './components/UpdateBanner.vue';
+    import DemoAssocPrompt from './components/DemoAssocPrompt.vue';
     import { openExternal } from './lib/open';
     import { loadSeen, notify, saveSeen, type NotifyCategory } from './lib/notify';
     import { resolveLocale, setLocale, t } from './lib/i18n';
@@ -789,6 +790,14 @@
              same screens as the nav, keeping it off the onboarding /
              version-mismatch full-screen flows. -->
         <UpdateBanner v-if="showNav && route.name !== 'settings'" />
+
+        <!-- The one-time "should double-click open here?" question. Same
+             placement rule as the update banner: it used to sit inside the
+             Demos list under the backup panel, where it was below the fold
+             on a short window and absent from every other tab - a question
+             asked once could be missed once and never return. Settings has
+             its own card for the same setting, so it is kept off that route. -->
+        <DemoAssocPrompt v-if="showNav && route.name !== 'settings'" />
 
         <!-- keep-alive: cached views survive tab switches so paginated
              lists + filters + scroll positions stay intact. Each view
