@@ -232,6 +232,19 @@ pub(crate) fn configured_layout() -> Option<(std::path::PathBuf, String)> {
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| "defrag".to_string());
 
+    // The mod has to be a folder that exists in the install, or the engine
+    // loads no mod at all and sits on stock Quake 3 asking for a CD key. The
+    // name comes from whatever folder holds the user's demos, which is only
+    // the mod when the demos live inside the install - point the launcher at
+    // `D:\demos` and it asked the engine for a mod called "demos".
+    let game = if base.join(&game).is_dir() {
+        game
+    } else if base.join("defrag").is_dir() {
+        "defrag".to_string()
+    } else {
+        game
+    };
+
     Some((base, game))
 }
 
