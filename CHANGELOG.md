@@ -4,6 +4,10 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.56
+
+- **Fixed: a demo downloaded from defrag.racing opened on an empty screen saying it could not load the map.** The launcher works out which map a demo needs so it can fetch it before playing, and it read that from the file name - which works for `wamwig[mdf.vq3]00.34.488(player).dm_68` and not at all for the same run downloaded from the site, where every bracket has been flattened to an underscore. With no name to go on it skipped the whole check, downloaded nothing, and handed the engine a map it did not have. The map name now comes out of the demo itself, so it no longer matters what the file is called. Demos from the site also show their map in the list, link to its map page, and group with the same map in Compare.
+
 ## 0.1.55
 
 - **Settings > Demos now lists every folder you have, and you tick what gets backed up.** The old page had a single "Include subfolders" switch and, with it off, no list at all - so there was nothing to tick and no way to see what the launcher would take. Every subfolder is listed now whether it is watched or not, with its own two switches and how many demos are in it, and **nothing below the top of a folder is backed up until you tick it**. Someone with an `old/` of eight thousand runs is not publishing them by accident, and a folder made next month starts off too. If you had "Include subfolders" on, everything stays exactly as it was.
