@@ -4,6 +4,10 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.62
+
+- **The launcher stops working while it sits in the tray.** Closing the window hides it rather than quitting, so the demo backup and the `defrag://` links keep working - but the screen behind it kept being redrawn as well, four times a second, for a window nobody could see. Server, record and map lists also went on asking the site for fresh data. All of it now stops when the launcher goes to the tray and starts again when you open it. The Windows process list still shows several WebView2 entries, because that is how the web view works, but they now sit idle.
+
 ## 0.1.61
 
 - **The "open .dm_68 demos here?" question is where you can see it.** It used to sit inside the demo list under the backup panel, so on a short window it was below the fold and on every other tab it was not there at all - a question asked once could be missed once and never come back. It now sits at the top of whatever tab you are on, next to the update notice. Settings still has its own card for the same thing.
