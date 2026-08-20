@@ -2168,7 +2168,6 @@ pub fn confirm_pending_deep_link(
     state: State<'_, AppState>,
     enrichment: Option<ConnectEnrichment>,
 ) -> Result<String, String> {
-    use tauri::Manager;
     let url = state
         .pending_deep_link
         .lock()
@@ -2197,9 +2196,7 @@ pub fn confirm_pending_deep_link(
     );
     // Engine has focus now - drop the launcher back to the tray so it
     // isn't pointlessly floating over Quake.
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.hide();
-    }
+    crate::hide_to_tray(&app);
     Ok(addr.to_string())
 }
 

@@ -149,10 +149,8 @@ pub fn run() {
             // user explicitly opted into autostart and expects a quiet
             // background process, not a pop-up.
             if started_hidden {
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.hide();
-                    log_startup("hid main window (started_hidden)");
-                }
+                hide_to_tray(app.handle());
+                log_startup("hid main window (started_hidden)");
             }
 
             // Tray icon - keeps the launcher alive after the user
@@ -251,7 +249,7 @@ pub fn run() {
                 // show (or a later real quit) restores what the user set.
                 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
                 let _ = window.app_handle().save_window_state(StateFlags::all());
-                let _ = window.hide();
+                hide_to_tray(window.app_handle());
                 api.prevent_close();
             }
         })
@@ -463,11 +461,37 @@ fn autostart_watcher_if_enabled(app: &tauri::AppHandle) {
 /// Used by tray clicks, single-instance forwarding, and the deep-link
 /// handler - anywhere we want the user to actually see the UI.
 fn show_main_window(app: &tauri::AppHandle) {
+    use tauri::Emitter;
+
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
     }
+
+    let _ = app.emit("launcher-visible", true);
+}
+
+/// Drop the main window into the tray, and tell the UI it is off screen.
+///
+/// Every hide goes through here. The window keeps running while hidden - that
+/// is the whole point, the demo watcher and the defrag:// handler have to go
+/// on working - but the UI also has timers that exist only to paint something,
+/// and those kept redrawing a dashboard nobody could see, four times a second,
+/// for as long as the launcher sat in the tray. A player read that off his
+/// process list as the launcher doing work behind his back.
+///
+/// An explicit event rather than leaving it to `document.hidden`: whether a
+/// hidden native window reports itself hidden to the page is up to the webview
+/// and is not a thing to build on. This is ours and it is exact.
+pub(crate) fn hide_to_tray(app: &tauri::AppHandle) {
+    use tauri::Emitter;
+
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.hide();
+    }
+
+    let _ = app.emit("launcher-visible", false);
 }
 
 /// A demo file arrived from the file manager while we were already running.

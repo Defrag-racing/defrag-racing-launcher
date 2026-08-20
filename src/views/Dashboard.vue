@@ -18,6 +18,7 @@
     import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
     import { useRouter } from 'vue-router';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+    import { useOnScreen } from '../lib/visibility';
     import { revealItemInDir } from '@tauri-apps/plugin-opener';
     import { openExternal } from '../lib/open';
     import { t } from '../lib/i18n';
@@ -351,8 +352,10 @@
     // session). Completed/none are left to the bulk index. Only runs while
     // the Demos tab is the active, visible view.
     let inProgressTimer: number | undefined;
+    const onScreen = useOnScreen();
+
     const pollInProgress = async () => {
-        if (!config.hasToken || document.hidden || !active) return;
+        if (!config.hasToken || !onScreen.value || !active) return;
         const hashes = Object.entries(renderState.value)
             .filter(([, s]) => s.status === 'pending' || s.status === 'rendering' || s.status === 'uploading')
             .map(([h]) => h);
@@ -653,8 +656,12 @@
         await hydrateRenderIndex();
         void syncRenderIndex(true);
 
-        rateLimitPollTimer = window.setInterval(pollRateLimit, 1000);
-        nowTickTimer = window.setInterval(() => { nowMs.value = Date.now(); }, 250);
+        // Both skip while the launcher is in the tray. The clock exists only
+        // to move labels on screen, and redrawing this view four times a
+        // second for a hidden window was most of what people saw the WebView2
+        // processes doing. The rate-limit poll is an IPC round trip a second.
+        rateLimitPollTimer = window.setInterval(() => { if (onScreen.value) void pollRateLimit(); }, 1000);
+        nowTickTimer = window.setInterval(() => { if (onScreen.value) nowMs.value = Date.now(); }, 250);
         inProgressTimer = window.setInterval(() => { void pollInProgress(); }, 10_000);
         document.addEventListener('visibilitychange', onDemosVisibility);
         measureViewport();

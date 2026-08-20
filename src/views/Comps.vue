@@ -13,6 +13,7 @@
 
     import { computed, onActivated, onMounted, onUnmounted, ref } from 'vue';
     import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+    import { useOnScreen } from '../lib/visibility';
     import { tauri, type CompsNotice, type CompsPayload, type PendingUpload, type UploadStateSnapshot } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
     import { openExternal } from '../lib/open';
@@ -340,13 +341,16 @@
 
     const openMap = (map: string) =>
         openExternal(`https://defrag.racing/maps/${encodeURIComponent(map)}`).catch(() => {});
+    const onScreen = useOnScreen();
+
     const openComps = () => openExternal('https://defrag.racing/comps').catch(() => {});
 
     onMounted(async () => {
         void load();
         void loadQueue();
+
         clockTimer = window.setInterval(() => { now.value = Date.now(); }, 1000);
-        pollTimer = window.setInterval(() => { if (!document.hidden) void load(); }, 60_000);
+        pollTimer = window.setInterval(() => { if (onScreen.value) void load(); }, 60_000);
         unlisten = await listen<UploadStateSnapshot>('upload_state_changed', (ev) => {
             queue.value = ev.payload;
         });

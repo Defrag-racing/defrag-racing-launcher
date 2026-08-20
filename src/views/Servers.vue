@@ -11,6 +11,7 @@
     // release.
 
     import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
+    import { useOnScreen } from '../lib/visibility';
     import { tauri, type DefragServer } from '../lib/tauri';
     import { q3ToHtml } from '../lib/q3color';
     import { useConfigStore } from '../stores/config';
@@ -63,6 +64,8 @@
         }));
     });
 
+    const onScreen = useOnScreen();
+
     const POLL_INTERVAL_MS = 60_000;
     let pollTimer: number | undefined;
 
@@ -88,7 +91,7 @@
         stopPolling();
         if (!config.hasToken) return;
         pollTimer = window.setInterval(() => {
-            if (!document.hidden) fetchServers();
+            if (onScreen.value) fetchServers();
         }, POLL_INTERVAL_MS);
     };
     const stopPolling = () => {

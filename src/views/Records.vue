@@ -7,6 +7,7 @@
     // the full rating UI click a map or nickname through to the web.
 
     import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
+    import { useOnScreen } from '../lib/visibility';
     import { tauri, type RecordRow, type Paginated } from '../lib/tauri';
     import { q3ToHtml } from '../lib/q3color';
     import { useConfigStore } from '../stores/config';
@@ -45,12 +46,14 @@
         void load('cpm', cpmPage.value);
     };
 
+    const onScreen = useOnScreen();
+
     const POLL_MS = 60_000;
     let pollTimer: number | undefined;
     const startPolling = () => {
         stopPolling();
         pollTimer = window.setInterval(() => {
-            if (!document.hidden) refreshBoth();
+            if (onScreen.value) refreshBoth();
         }, POLL_MS);
     };
     const stopPolling = () => {

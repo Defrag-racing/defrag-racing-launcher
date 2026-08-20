@@ -5,6 +5,7 @@
     // any thumbnail / name click jumps to with the full filter UI.
 
     import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
+    import { useOnScreen } from '../lib/visibility';
     import { tauri, type MapRow, type Paginated } from '../lib/tauri';
     import { useConfigStore } from '../stores/config';
     import { t } from '../lib/i18n';
@@ -60,12 +61,14 @@
     // a minute window but a longer interval avoids re-pulling 50 rows
     // for a user just clicking around. Visibility-aware so a tray-
     // hidden window doesn't keep hammering the endpoint.
+    const onScreen = useOnScreen();
+
     const POLL_MS = 120_000;
     let pollTimer: number | undefined;
     const startPolling = () => {
         stopPolling();
         pollTimer = window.setInterval(() => {
-            if (!document.hidden) void load();
+            if (onScreen.value) void load();
         }, POLL_MS);
     };
     const stopPolling = () => {
