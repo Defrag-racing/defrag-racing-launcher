@@ -4,6 +4,10 @@ All notable changes to the Defrag Racing Launcher.
 
 The format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.63
+
+- **Clips, triggers and slicks can be switched on while you watch a demo.** Three buttons under the speeds on the player's transport bar. They apply to the picture already on screen, so there is no reload and no restart, and they work while the demo is paused. Comparison mode gets them on both sides. Asked for on the wishlist by w00dy.th.
+
 ## 0.1.62
 
 - **The launcher stops working while it sits in the tray.** Closing the window hides it rather than quitting, so the demo backup and the `defrag://` links keep working - but the screen behind it kept being redrawn as well, four times a second, for a window nobody could see. Server, record and map lists also went on asking the site for fresh data. All of it now stops when the launcher goes to the tray and starts again when you open it. The Windows process list still shows several WebView2 entries, because that is how the web view works, but they now sit idle.
