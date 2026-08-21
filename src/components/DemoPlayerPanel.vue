@@ -288,6 +288,7 @@
             // Apply the single pane's volume/mute once the engine is up; the
             // control channel buffers it until the engine connects.
             applyAudio();
+            applyBrushVis();
         } catch (e: any) {
             playError.value = e?.toString?.() ?? t('Failed to start playback');
             playing.value = false;
@@ -318,6 +319,7 @@
             // Apply the default audio layout (only A audible) once the engines
             // are up; the control channel buffers these until each connects.
             applyAudio();
+            applyBrushVis();
         } catch (e: any) {
             playError.value = e?.toString?.() ?? t('Failed to start comparison');
             playing.value = false;
@@ -342,6 +344,57 @@
 
     const cmd = (line: string) => {
         tauri.demoPlayerCommand(line).catch(() => {});
+    };
+
+    // ---- clips / triggers / slicks -----------------------------------------
+    //
+    // oDFe can paint the map's clip brushes, triggers and slick surfaces over
+    // the world (the engine's own cl_tc_vis.c, not the mod). The three cvars
+    // are read every frame while drawing, so a toggle lands on the picture
+    // already on screen: no reload, no restart, and it works while paused.
+    //
+    // The brushes themselves are built once when the map loads, which is why
+    // this can be a plain cvar flip rather than anything heavier.
+    //
+    // The engine archives these cvars itself, but the launcher keeps its own
+    // copy and pushes all three on every start. Two reasons: the buttons have
+    // to show the right state before the engine has said anything, and the
+    // control channel is one-way - we can send a console line, we cannot ask
+    // what a cvar is currently set to.
+    const BRUSH_VIS = [
+        { key: 'clips', cvar: 'r_renderClipBrushes', label: 'Clips' },
+        { key: 'triggers', cvar: 'r_renderTriggerBrushes', label: 'Triggers' },
+        { key: 'slicks', cvar: 'r_renderSlickSurfaces', label: 'Slicks' },
+    ] as const;
+
+    const BRUSH_VIS_KEY = 'demoPlayer.brushVis';
+
+    /** All off. Somebody who wanted clips drawn over every demo would have
+     *  asked for a setting, not a button on the transport bar. */
+    const loadBrushVis = (): Record<string, boolean> => {
+        const off = { clips: false, triggers: false, slicks: false };
+        try {
+            const raw = window.localStorage.getItem(BRUSH_VIS_KEY);
+            return raw ? { ...off, ...JSON.parse(raw) } : off;
+        } catch {
+            return off;
+        }
+    };
+
+    const brushVis = ref<Record<string, boolean>>(loadBrushVis());
+
+    /** Push the current state to the engine. Called on start too - the control
+     *  channel buffers until the engine connects, same as applyAudio. */
+    const applyBrushVis = () => {
+        cmd(BRUSH_VIS.map(b => `${b.cvar} ${brushVis.value[b.key] ? 1 : 0}`).join('; '));
+    };
+
+    const toggleBrushVis = (key: string, cvar: string) => {
+        brushVis.value = { ...brushVis.value, [key]: !brushVis.value[key] };
+        cmd(`${cvar} ${brushVis.value[key] ? 1 : 0}`);
+        try {
+            window.localStorage.setItem(BRUSH_VIS_KEY, JSON.stringify(brushVis.value));
+        } catch { /* private mode: the toggle still works for this session */ }
     };
 
     const close = () => {
@@ -958,6 +1011,20 @@
                         @click="setSpeed(x)"
                     >{{ x + 'x' }}</button>
                 </template>
+            </div>
+
+            <!-- What the engine paints over the map. Its own row rather than
+                 sharing the speed row: these are a different kind of switch,
+                 and the speeds already wrap on a narrow window. -->
+            <div class="flex items-center justify-center gap-1.5 flex-wrap mb-1.5">
+                <span class="text-[11px] uppercase tracking-wide text-neutral-500 mr-1">{{ $t('Show') }}</span>
+                <button
+                    v-for="b in BRUSH_VIS"
+                    :key="b.key"
+                    class="px-2.5 py-1 rounded text-sm font-semibold"
+                    :class="brushVis[b.key] ? 'bg-brand-500/30 text-brand-200' : 'bg-white/5 hover:bg-white/10 text-neutral-300'"
+                    @click="toggleBrushVis(b.key, b.cvar)"
+                >{{ $t(b.label) }}</button>
             </div>
 
             <!-- Playback + scrub -->
